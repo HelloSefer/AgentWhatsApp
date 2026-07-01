@@ -1,5 +1,6 @@
 backend/node_modules/
 backend/dist/
 backend/.env
+backend/auth/
 backend/*.log
 .DS_Store
