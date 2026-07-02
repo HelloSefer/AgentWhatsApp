@@ -1,5 +1,9 @@
 import qrcode from "qrcode-terminal";
 import pino from "pino";
+import { generateAgentResult } from "../agent/agent.service";
+
+const SAFE_WHATSAPP_FALLBACK_REPLY =
+  "سمح ليا، وقع مشكل صغير. عاود صيفط ليا الرسالة من فضلك.";
 
 const logger = pino({
   transport: {
@@ -74,11 +78,33 @@ export async function startWhatsApp() {
       return;
     }
 
-    await sock.sendMessage(from, {
-      text: "سلام 👋انا  Agent تجريبي توصلت برسالتك بنجاح ،برعاية العزي sandouuula 😂😂",
-    });
+    try {
+      const result = await generateAgentResult(text);
 
-    console.log("✅ Test reply sent");
+      console.log(`🤖 Agent source: ${result.source}`);
+
+      for (const action of result.actions) {
+        console.log(`🧭 Agent action planned: ${action.type}`);
+
+        if (action.type === "send_product_images") {
+          console.log(
+            `🖼️ Image action planned: ${action.images.length} image(s)`,
+          );
+        }
+      }
+
+      await sock.sendMessage(from, {
+        text: result.reply,
+      });
+
+      console.log("✅ Agent reply sent");
+    } catch (error) {
+      console.error("❌ Agent reply failed", error);
+
+      await sock.sendMessage(from, {
+        text: SAFE_WHATSAPP_FALLBACK_REPLY,
+      });
+    }
   });
 
   return sock;

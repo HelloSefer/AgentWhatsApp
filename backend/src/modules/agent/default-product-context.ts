@@ -16,6 +16,10 @@ export const DEFAULT_PRODUCT_CONTEXT: ProductContext = {
   attributes: {},
   faqs: [],
   unavailableProducts: [],
+  recommendationNotes: [
+    "الوردي مطلوب بزاف وكيبان زوين",
+    "الأسود عملي وكيتناسب مع بزاف ديال اللبسات",
+  ],
   requiredOrderFields: [
     "الاسم الكامل",
     "رقم الهاتف",

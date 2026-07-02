@@ -10,6 +10,12 @@ const defaultGenerationOptions = {
   top_p: 0.8,
 };
 
+const structuredGenerationOptions = {
+  temperature: 0,
+  num_predict: 250,
+  top_p: 0.7,
+};
+
 export async function generateAIReply(message: string): Promise<string> {
   const prompt = message.trim();
 
@@ -35,6 +41,43 @@ export async function generateAIReply(message: string): Promise<string> {
     const errorBody = await response.text();
     throw new Error(
       `Ollama request failed with status ${response.status}: ${errorBody}`,
+    );
+  }
+
+  const data = (await response.json()) as OllamaGenerateResponse;
+
+  return (data.response || "").trim();
+}
+
+export async function generateStructuredAIReply(
+  prompt: string,
+  schema?: Record<string, unknown>,
+): Promise<string> {
+  const trimmedPrompt = prompt.trim();
+
+  if (!trimmedPrompt) {
+    throw new Error("Prompt is required");
+  }
+
+  const response = await fetch(`${env.ollamaBaseUrl}/api/generate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: env.ollamaModel,
+      prompt: trimmedPrompt,
+      stream: false,
+      format: schema || "json",
+      keep_alive: "30m",
+      options: structuredGenerationOptions,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `Structured Ollama request failed with status ${response.status}: ${errorBody}`,
     );
   }
 

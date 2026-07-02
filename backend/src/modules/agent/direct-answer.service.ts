@@ -175,14 +175,18 @@ function formatPriceText(productContext: ProductContext): string {
 function formatColorList(colors: string[]): string {
   return formatNaturalList(
     colors.map((color) => {
-      const normalized = normalizeComparable(color);
-      const knownColor = colorDefinitions.find((definition) =>
-        definition.values.some((value) => normalizeComparable(value) === normalized),
-      );
-
-      return knownColor?.replyName || color;
+      return formatColorName(color);
     }),
   );
+}
+
+function formatColorName(color: string): string {
+  const normalized = normalizeComparable(color);
+  const knownColor = colorDefinitions.find((definition) =>
+    definition.values.some((value) => normalizeComparable(value) === normalized),
+  );
+
+  return knownColor?.replyName || color;
 }
 
 function formatSizesSummary(sizes: string[]): string {
@@ -472,6 +476,63 @@ function isOrderIntent(message: string): boolean {
   ]);
 }
 
+function isGreeting(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const greetings = [
+    "سلام",
+    "السلام",
+    "السلام عليكم",
+    "salam",
+    "slm",
+    "salamo",
+    "hi",
+    "hello",
+    "cv",
+    "labas",
+    "labass",
+    "kifach",
+    "كيفاش",
+    "لباس",
+  ];
+
+  return greetings.includes(normalizedMessage);
+}
+
+function isRecommendationQuestion(message: string): boolean {
+  return includesAny(message, [
+    "شنو تنصحني",
+    "شنو تنصحيني",
+    "اش تنصحني",
+    "اش تنصحيني",
+    "آش تنصحني",
+    "آش تنصحيني",
+    "نصحني",
+    "نصحيني",
+    "شنو لون تنصحني",
+    "شنو اللون اللي تنصحني",
+    "شنو نختار",
+    "شنو ناخد",
+    "شنو احسن",
+    "شنو افضل",
+    "شنو الأحسن",
+    "شنو الأفضل",
+    "واش الوردي ولا الأسود",
+    "واش الوردي ولا الاسود",
+    "أي لون احسن",
+    "اي لون احسن",
+    "chno tnshni",
+    "xno tnshni",
+    "ach tnshni",
+    "chno nakhd",
+    "xno nakhd",
+    "chno nختار",
+    "chno n5tar",
+    "ach n5tar",
+    "wach rose wla noir",
+    "wach lwerdi wla lk7el",
+  ]);
+}
+
 function isProductIdentityQuestion(message: string): boolean {
   return includesAny(message, [
     "شنو كتبيعو",
@@ -510,6 +571,89 @@ function isProductIdentityQuestion(message: string): boolean {
     "shno lproduit",
     "chno produit",
   ]);
+}
+
+function buildGreetingReply(productContext: ProductContext): string {
+  const productName = productContext.productName?.trim();
+
+  if (!productName) {
+    return "وعليكم السلام، مرحبا بيك. نقدر نعاونك فمعلومات المنتج أو التوصيل.";
+  }
+
+  const price = formatPriceText(productContext);
+
+  if (price) {
+    return `وعليكم السلام، مرحبا بيك. كنبيعو ${productName} بثمن ${price}، واش بغيتي تعرف الثمن أو التوصيل؟`;
+  }
+
+  return `وعليكم السلام، مرحبا بيك. المتوفر دابا هو ${productName}. واش بغيتي تعرف الثمن أو التوصيل؟`;
+}
+
+function getRecommendationHints(productContext: ProductContext): string[] {
+  const recommendationKeywords = [
+    "مناسب",
+    "عملي",
+    "مطلوب",
+    "زوين",
+    "هدية",
+    "استعمال",
+    "يومي",
+    "اختيار",
+    "كيبان",
+    "popular",
+    "best",
+  ];
+  const possibleHints = [
+    ...(productContext.recommendationNotes || []),
+    ...(productContext.extraNotes || []),
+    ...(productContext.features || []),
+  ];
+
+  return possibleHints.filter((hint) =>
+    includesAny(hint, recommendationKeywords),
+  );
+}
+
+function buildRecommendationReply(productContext: ProductContext): string {
+  const colors = productContext.availableColors?.filter(Boolean) || [];
+  const recommendationHints = getRecommendationHints(productContext);
+
+  if (recommendationHints.length) {
+    const firstHint = recommendationHints[0];
+    const secondHint = recommendationHints[1];
+
+    return secondHint
+      ? `إلا بغيتي رأيي، ${firstHint}. ${secondHint}.`
+      : `إلا بغيتي رأيي، ${firstHint}.`;
+  }
+
+  if (colors.length) {
+    const firstColor = formatColorName(colors[0]);
+    const secondColor = colors[1] ? formatColorName(colors[1]) : "";
+
+    if (secondColor) {
+      return `إلا بغيتي حاجة زوينة وكتبان، ${firstColor} اختيار مزيان. وإذا بغيتي لون عملي، ${secondColor} مناسب.`;
+    }
+
+    return `إلا بغيتي رأيي، ${firstColor} اختيار مزيان.`;
+  }
+
+  const productName = productContext.productName?.trim();
+
+  if (!productName) {
+    return "نقدر نعاونك تختار حسب المعلومات المتوفرة على المنتج والتوصيل.";
+  }
+
+  const features = productContext.features?.filter(Boolean).slice(0, 2) || [];
+  const price = formatPriceText(productContext);
+  const details = features.length ? `، فيه ${formatNaturalList(features)}` : "";
+  const secondSentence = productContext.offer
+    ? `العرض: ${productContext.offer}.`
+    : price
+      ? `الثمن هو ${price}.`
+      : "نقدر نعطيك الثمن والتوصيل إذا بغيتي.";
+
+  return `إلا بغيتي رأيي، ${productName} اختيار مزيان${details}. ${secondSentence}`;
 }
 
 function buildProductIdentityReply(productContext: ProductContext): string {
@@ -659,6 +803,13 @@ export function getDirectAgentReply(
     return null;
   }
 
+  if (isGreeting(userMessage)) {
+    return {
+      reply: buildGreetingReply(productContext),
+      actions: [],
+    };
+  }
+
   if (isProductIdentityQuestion(userMessage)) {
     return {
       reply: buildProductIdentityReply(productContext),
@@ -675,6 +826,13 @@ export function getDirectAgentReply(
 
   if (isImageRequest(userMessage)) {
     return getImageReply(productContext);
+  }
+
+  if (isRecommendationQuestion(userMessage)) {
+    return {
+      reply: buildRecommendationReply(productContext),
+      actions: [],
+    };
   }
 
   if (isDeliveryPaymentQuestion(userMessage)) {

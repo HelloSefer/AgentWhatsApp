@@ -27,6 +27,7 @@ export interface ProductContext {
   attributes?: Record<string, string>;
   faqs?: Array<{ question: string; answer: string }>;
   unavailableProducts?: string[];
+  recommendationNotes?: string[];
   images?: ProductImage[];
   requiredOrderFields?: string[];
   extraNotes?: string[];
