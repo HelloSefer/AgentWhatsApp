@@ -1,0 +1,30 @@
+import type { ProductContext } from "./product-context.types";
+
+export const DEFAULT_PRODUCT_CONTEXT: ProductContext = {
+  businessName: "Elazri Wear",
+  productName: "صندالة نسائية",
+  category: "أحذية نسائية",
+  price: "179",
+  currency: "درهم",
+  availableColors: ["وردي", "أسود"],
+  availableSizes: ["36", "37", "38", "39", "40"],
+  deliveryInfo: "التوصيل متوفر لجميع المدن المغربية",
+  deliveryAreas: ["جميع المدن المغربية"],
+  deliveryTime: "من 24 حتى 72 ساعة حسب المدينة",
+  paymentMethods: ["الدفع عند الاستلام"],
+  offer: "الكمية محدودة",
+  attributes: {},
+  faqs: [],
+  unavailableProducts: [],
+  requiredOrderFields: [
+    "الاسم الكامل",
+    "رقم الهاتف",
+    "المدينة",
+    "العنوان",
+    "اللون",
+    "المقاس",
+    "الكمية",
+  ],
+  images: [],
+  extraNotes: [],
+};

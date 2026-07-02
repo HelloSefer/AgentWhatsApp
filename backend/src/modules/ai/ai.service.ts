@@ -4,6 +4,12 @@ type OllamaGenerateResponse = {
   response?: string;
 };
 
+const defaultGenerationOptions = {
+  temperature: 0.2,
+  num_predict: 90,
+  top_p: 0.8,
+};
+
 export async function generateAIReply(message: string): Promise<string> {
   const prompt = message.trim();
 
@@ -20,6 +26,8 @@ export async function generateAIReply(message: string): Promise<string> {
       model: env.ollamaModel,
       prompt,
       stream: false,
+      keep_alive: "30m",
+      options: defaultGenerationOptions,
     }),
   });
 
