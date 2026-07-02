@@ -80,6 +80,7 @@ export interface ConversationOrderState {
   collected: OrderEntities;
   missingFields: string[];
   isComplete: boolean;
+  awaitingConfirmation: boolean;
   lastUpdatedAt: string;
 }
 

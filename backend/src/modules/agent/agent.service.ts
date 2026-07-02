@@ -172,7 +172,7 @@ async function buildOrderResultIfHandled(
     }
 
     return {
-      reply: cleanAgentReply(orderResult.reply),
+      reply: orderResult.reply,
       actions: [],
       source: "direct",
     };

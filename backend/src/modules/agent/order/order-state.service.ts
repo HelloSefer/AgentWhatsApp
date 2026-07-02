@@ -366,6 +366,7 @@ export async function processOrderTurn(
   const collected = mergeEntities(session.orderState.collected, incomingEntities);
   const missingFields = computeMissingFields(collected, input.productContext);
   const isComplete = missingFields.length === 0;
+  const awaitingConfirmation = isComplete;
 
   await updateConversationOrderState({
     customerId: input.customerId,
@@ -374,6 +375,7 @@ export async function processOrderTurn(
     collected,
     missingFields,
     isComplete,
+    awaitingConfirmation,
   });
 
   return {

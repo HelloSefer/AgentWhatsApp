@@ -14,6 +14,32 @@ const fieldLabels: Record<keyof OrderEntities, string> = {
   notes: "ملاحظات",
 };
 
+const summaryFieldLabels: Record<keyof OrderEntities, string> = {
+  fullName: "الاسم",
+  phone: "الهاتف",
+  city: "المدينة",
+  address: "العنوان",
+  productName: "المنتوج",
+  variant: "النوع",
+  color: "اللون",
+  size: "المقاس",
+  quantity: "الكمية",
+  notes: "ملاحظات",
+};
+
+const summaryFieldOrder: Array<keyof OrderEntities> = [
+  "fullName",
+  "phone",
+  "city",
+  "address",
+  "size",
+  "color",
+  "quantity",
+  "productName",
+  "variant",
+  "notes",
+];
+
 function formatList(items: string[]): string {
   if (items.length <= 1) {
     return items.join("");
@@ -62,6 +88,47 @@ function buildCollectedSummary(collected: OrderEntities): string {
   return collectedParts.length ? formatList(collectedParts) : "";
 }
 
+function hasValue(value: unknown): boolean {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0;
+  }
+
+  return typeof value === "string" ? Boolean(value.trim()) : Boolean(value);
+}
+
+function formatOrderValue(value: OrderEntities[keyof OrderEntities]): string {
+  return typeof value === "number" ? String(value) : String(value).trim();
+}
+
+function buildOrderSummaryLines(collected: OrderEntities): string[] {
+  return summaryFieldOrder.flatMap((field) => {
+    const value = collected[field];
+
+    if (!hasValue(value)) {
+      return [];
+    }
+
+    return `${summaryFieldLabels[field]}: ${formatOrderValue(value)}`;
+  });
+}
+
+function buildOrderConfirmationPrompt(collected: OrderEntities): string {
+  const summaryLines = buildOrderSummaryLines(collected);
+
+  if (!summaryLines.length) {
+    return "تمام، توصلت بجميع معلومات الطلب.\n\nواش نأكد لك الطلب؟";
+  }
+
+  return [
+    "تمام، توصلت بجميع معلومات الطلب.",
+    "",
+    "هذا هو الطلب ديالك:",
+    ...summaryLines,
+    "",
+    "واش نأكد لك الطلب؟",
+  ].join("\n");
+}
+
 export function buildOrderProgressReply(input: {
   collected: OrderEntities;
   missingFields: string[];
@@ -69,7 +136,7 @@ export function buildOrderProgressReply(input: {
   productContext: ProductContext;
 }): string {
   if (input.isComplete) {
-    return "تمام، توصلت بجميع معلومات الطلب. غادي نأكد لك الطلب دابا.";
+    return buildOrderConfirmationPrompt(input.collected);
   }
 
   const missingFieldsText = formatMissingFields(input.missingFields);
