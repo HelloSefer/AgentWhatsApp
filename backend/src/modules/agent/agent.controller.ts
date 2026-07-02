@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { generateAgentResult } from "./agent.service";
+import { listConfirmedOrders } from "./order/confirmed-order-store.service";
 import type { ProductContext } from "./product-context.types";
 
 function getOptionalString(value: unknown): string | undefined {
@@ -39,4 +40,10 @@ export async function testAgentReply(req: Request, res: Response) {
       error: error instanceof Error ? error.message : "Unknown error",
     });
   }
+}
+
+export function listAgentOrders(_req: Request, res: Response) {
+  return res.status(200).json({
+    orders: listConfirmedOrders(),
+  });
 }

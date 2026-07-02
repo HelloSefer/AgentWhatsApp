@@ -22,6 +22,7 @@ type UpdateConversationOrderStateInput = SessionIdentity & {
   missingFields?: string[];
   isComplete?: boolean;
   awaitingConfirmation?: boolean;
+  confirmed?: boolean;
 };
 
 const MAX_SESSION_MESSAGES = 20;
@@ -59,6 +60,7 @@ export function createEmptySession(input: SessionIdentity): ConversationSession 
       missingFields: [],
       isComplete: false,
       awaitingConfirmation: false,
+      confirmed: false,
       lastUpdatedAt: now,
     },
     createdAt: now,
@@ -152,6 +154,7 @@ export async function updateConversationOrderState(
     isComplete: input.isComplete ?? session.orderState.isComplete,
     awaitingConfirmation:
       input.awaitingConfirmation ?? session.orderState.awaitingConfirmation ?? false,
+    confirmed: input.confirmed ?? session.orderState.confirmed ?? false,
     lastUpdatedAt: new Date().toISOString(),
   };
 

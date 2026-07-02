@@ -81,6 +81,7 @@ export interface ConversationOrderState {
   missingFields: string[];
   isComplete: boolean;
   awaitingConfirmation: boolean;
+  confirmed: boolean;
   lastUpdatedAt: string;
 }
 
