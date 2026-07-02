@@ -8,4 +8,6 @@ export const env = {
   appName: process.env.APP_NAME || "Moroccan Darija WhatsApp AI Sales Agent",
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
   ollamaModel: process.env.OLLAMA_MODEL || "qwen2.5:7b",
+  valkeyUrl: process.env.VALKEY_URL || "redis://localhost:6379",
+  sessionTtlSeconds: Number(process.env.SESSION_TTL_SECONDS) || 172800,
 };

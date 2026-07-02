@@ -1,0 +1,12 @@
+services:
+  valkey:
+    image: valkey/valkey:latest
+    container_name: agentwhatsapp-valkey
+    ports:
+      - "6379:6379"
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - valkey-data:/data
+
+volumes:
+  valkey-data:
