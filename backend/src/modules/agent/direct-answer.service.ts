@@ -131,9 +131,10 @@ const colorDefinitions = [
 function normalizeText(text: string): string {
   return text
     .toLowerCase()
+    .replace(/[؟?،,.;:!]/g, " ")
     .replace(/[أإآ]/g, "ا")
-    .replace(/ة/g, "ه")
     .replace(/ى/g, "ي")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -157,6 +158,14 @@ function formatNaturalList(items: string[]): string {
   return `${cleanItems.slice(0, -1).join("، ")} و${cleanItems[cleanItems.length - 1]}`;
 }
 
+function formatPriceText(productContext: ProductContext): string {
+  if (!productContext.price) {
+    return "";
+  }
+
+  return [productContext.price, productContext.currency].filter(Boolean).join(" ");
+}
+
 function formatColorList(colors: string[]): string {
   return formatNaturalList(
     colors.map((color) => {
@@ -168,6 +177,26 @@ function formatColorList(colors: string[]): string {
       return knownColor?.replyName || color;
     }),
   );
+}
+
+function formatSizesSummary(sizes: string[]): string {
+  const cleanSizes = sizes.map((size) => size.trim()).filter(Boolean);
+  const numericSizes = cleanSizes
+    .map((size) => Number(size))
+    .filter((size) => Number.isInteger(size));
+
+  if (numericSizes.length === cleanSizes.length && numericSizes.length >= 3) {
+    const sortedSizes = [...numericSizes].sort((a, b) => a - b);
+    const isConsecutive = sortedSizes.every(
+      (size, index) => index === 0 || size === sortedSizes[index - 1] + 1,
+    );
+
+    if (isConsecutive) {
+      return `من ${sortedSizes[0]} حتى ${sortedSizes[sortedSizes.length - 1]}`;
+    }
+  }
+
+  return formatNaturalList(cleanSizes);
 }
 
 function getPaymentText(productContext: ProductContext): string {
@@ -207,9 +236,7 @@ function getPriceReply(productContext: ProductContext): string | null {
     return "الثمن ما متوفرش عندي دابا، نقدر نأكدو لك من عند صاحب المتجر.";
   }
 
-  const price = [productContext.price, productContext.currency]
-    .filter(Boolean)
-    .join(" ");
+  const price = formatPriceText(productContext);
   const offer = productContext.offer ? ` والعرض: ${productContext.offer}.` : "";
 
   return `الثمن هو ${price}.${offer}`;
@@ -439,6 +466,100 @@ function isOrderIntent(message: string): boolean {
   ]);
 }
 
+function isProductIdentityQuestion(message: string): boolean {
+  return includesAny(message, [
+    "شنو كتبيعو",
+    "شنو كتبيع",
+    "اش كتبيعو",
+    "اش كتبيع",
+    "آش كتبيعو",
+    "آش كتبيع",
+    "شنو عندكم",
+    "شنو كاين عندكم",
+    "اش كاين",
+    "شنو المنتج",
+    "شنو السلعة",
+    "عندكم شنو",
+    "كاتبيعو شنو",
+    "كتبيعو شنو",
+    "شنو كتسوقو",
+    "شنو متوفر",
+    "xno katbi3o",
+    "xno katbi3",
+    "chno katbi3o",
+    "chno katbi3",
+    "shno katbi3o",
+    "ach katbi3o",
+    "ach katbi3",
+    "chno 3andkom",
+    "xno 3andkom",
+    "ach kayn",
+    "chno kayn",
+    "xno kayn",
+    "wach katbi3o",
+    "wach katbi3",
+    "katbi3o chno",
+    "katbi3 chno",
+    "katchriw chno",
+    "shno lproduit",
+    "chno produit",
+  ]);
+}
+
+function buildProductIdentityReply(productContext: ProductContext): string {
+  const productName = productContext.productName?.trim();
+
+  if (!productName) {
+    return "نقدر نعاونك فمعلومات المنتج المتوفر عند صاحب المتجر.";
+  }
+
+  const price = formatPriceText(productContext);
+  const colors = productContext.availableColors?.filter(Boolean) || [];
+  const sizes = productContext.availableSizes?.filter(Boolean) || [];
+  const variants = productContext.variants?.filter(Boolean) || [];
+  const features = productContext.features?.filter(Boolean) || [];
+
+  const details: string[] = [];
+
+  if (price) {
+    details.push(`بثمن ${price}`);
+  }
+
+  if (colors.length) {
+    details.push(`متوفر ب${formatColorList(colors)}`);
+  }
+
+  if (sizes.length) {
+    details.push(`بالمقاسات ${formatSizesSummary(sizes)}`);
+  }
+
+  if (variants.length) {
+    details.push(`الأنواع: ${formatNaturalList(variants)}`);
+  }
+
+  if (features.length) {
+    details.push(`فيه ${formatNaturalList(features.slice(0, 2))}`);
+  }
+
+  if (productContext.offer) {
+    details.push(`العرض: ${productContext.offer}`);
+  }
+
+  if (details.length) {
+    return `كنبيعو ${productName} ${details.join("، ")}.`;
+  }
+
+  if (productContext.category) {
+    return `المتوفر دابا هو ${productName} من قسم ${productContext.category}. نقدر نعطيك التفاصيل اللي متوفرة.`;
+  }
+
+  if (productContext.description) {
+    return `المتوفر دابا هو ${productName}: ${productContext.description}.`;
+  }
+
+  return `المتوفر دابا هو ${productName}. نقدر نعطيك التفاصيل اللي متوفرة.`;
+}
+
 function getDeliveryPaymentReply(productContext: ProductContext): string | null {
   const deliveryText = getDeliveryText(productContext);
   const paymentText = getPaymentText(productContext);
@@ -516,6 +637,10 @@ export function getDirectAgentReply(
 
   if (!userMessage) {
     return null;
+  }
+
+  if (isProductIdentityQuestion(userMessage)) {
+    return buildProductIdentityReply(productContext);
   }
 
   if (isOrderIntent(userMessage)) {
