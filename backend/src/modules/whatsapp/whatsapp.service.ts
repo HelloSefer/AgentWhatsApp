@@ -1,6 +1,7 @@
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import { generateAgentResult } from "../agent/agent.service";
+import { bufferIncomingWhatsappMessage } from "./whatsapp-message-buffer.service";
 
 const SAFE_WHATSAPP_FALLBACK_REPLY =
   "سمح ليا، وقع مشكل صغير. عاود صيفط ليا الرسالة من فضلك.";
@@ -78,33 +79,45 @@ export async function startWhatsApp() {
       return;
     }
 
-    try {
-      const result = await generateAgentResult(text);
+    bufferIncomingWhatsappMessage({
+      chatId: from,
+      text,
+      onFlush: async (combinedText) => {
+        console.log("🧵 WhatsApp message buffer flushed");
+        console.log("Combined text:", combinedText);
 
-      console.log(`🤖 Agent source: ${result.source}`);
+        try {
+          const result = await generateAgentResult(combinedText, undefined, {
+            customerId: from,
+            useMemory: true,
+          });
 
-      for (const action of result.actions) {
-        console.log(`🧭 Agent action planned: ${action.type}`);
+          console.log(`🤖 Agent source: ${result.source}`);
 
-        if (action.type === "send_product_images") {
-          console.log(
-            `🖼️ Image action planned: ${action.images.length} image(s)`,
-          );
+          for (const action of result.actions) {
+            console.log(`🧭 Agent action planned: ${action.type}`);
+
+            if (action.type === "send_product_images") {
+              console.log(
+                `🖼️ Image action planned: ${action.images.length} image(s)`,
+              );
+            }
+          }
+
+          await sock.sendMessage(from, {
+            text: result.reply,
+          });
+
+          console.log("✅ Agent reply sent");
+        } catch (error) {
+          console.error("❌ Agent reply failed", error);
+
+          await sock.sendMessage(from, {
+            text: SAFE_WHATSAPP_FALLBACK_REPLY,
+          });
         }
-      }
-
-      await sock.sendMessage(from, {
-        text: result.reply,
-      });
-
-      console.log("✅ Agent reply sent");
-    } catch (error) {
-      console.error("❌ Agent reply failed", error);
-
-      await sock.sendMessage(from, {
-        text: SAFE_WHATSAPP_FALLBACK_REPLY,
-      });
-    }
+      },
+    });
   });
 
   return sock;

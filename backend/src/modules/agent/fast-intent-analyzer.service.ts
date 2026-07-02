@@ -281,6 +281,7 @@ function isOrderVerb(message: string): boolean {
     "بغيت",
     "نطلب",
     "نكوموندي",
+    "نكومندي",
     "نكموندي",
     "خديت",
     "bghit",

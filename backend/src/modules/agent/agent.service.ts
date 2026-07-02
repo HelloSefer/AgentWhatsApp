@@ -2,8 +2,17 @@ import { generateAIReply } from "../ai/ai.service";
 import { buildMoroccanSalesPrompt } from "./prompt.builder";
 import { DEFAULT_PRODUCT_CONTEXT } from "./default-product-context";
 import { getDirectAgentReply } from "./direct-answer.service";
+import { processOrderTurn } from "./order/order-state.service";
+import { appendConversationMessage } from "./session/conversation-session.service";
 import type { AgentResult } from "./agent-action.types";
 import type { ProductContext } from "./product-context.types";
+
+type GenerateAgentOptions = {
+  customerId?: string;
+  sellerId?: string;
+  productId?: string;
+  useMemory?: boolean;
+};
 
 const MAX_REPLY_LENGTH = 280;
 const SAFE_FALLBACK_REPLY = "سمح ليا، نقدر نعاونك فمعلومات المنتج أو التوصيل.";
@@ -94,16 +103,32 @@ function cleanAgentReply(reply: string): string {
   return normalizeSpacing(shortReply.slice(0, MAX_REPLY_LENGTH));
 }
 
-export async function generateAgentResult(
-  message: string,
-  productContext: ProductContext = DEFAULT_PRODUCT_CONTEXT,
-): Promise<AgentResult> {
-  const userMessage = message.trim();
-
-  if (!userMessage) {
-    throw new Error("Message is required");
+async function appendMessageToMemory(
+  options: GenerateAgentOptions | undefined,
+  role: "customer" | "agent",
+  text: string,
+): Promise<void> {
+  if (!options?.useMemory || !options.customerId) {
+    return;
   }
 
+  try {
+    await appendConversationMessage({
+      customerId: options.customerId,
+      sellerId: options.sellerId,
+      productId: options.productId,
+      role,
+      text,
+    });
+  } catch (error) {
+    console.error("❌ Conversation memory append failed", error);
+  }
+}
+
+async function buildAgentResult(
+  userMessage: string,
+  productContext: ProductContext,
+): Promise<AgentResult> {
   const directReply = getDirectAgentReply(userMessage, productContext);
 
   if (directReply) {
@@ -124,11 +149,67 @@ export async function generateAgentResult(
   };
 }
 
+async function buildOrderResultIfHandled(
+  userMessage: string,
+  productContext: ProductContext,
+  options?: GenerateAgentOptions,
+): Promise<AgentResult | null> {
+  if (!options?.useMemory || !options.customerId) {
+    return null;
+  }
+
+  try {
+    const orderResult = await processOrderTurn({
+      customerId: options.customerId,
+      sellerId: options.sellerId,
+      productId: options.productId,
+      message: userMessage,
+      productContext,
+    });
+
+    if (!orderResult.handled || !orderResult.reply) {
+      return null;
+    }
+
+    return {
+      reply: cleanAgentReply(orderResult.reply),
+      actions: [],
+      source: "direct",
+    };
+  } catch (error) {
+    console.error("❌ Order state processing failed", error);
+    return null;
+  }
+}
+
+export async function generateAgentResult(
+  message: string,
+  productContext: ProductContext = DEFAULT_PRODUCT_CONTEXT,
+  options?: GenerateAgentOptions,
+): Promise<AgentResult> {
+  const userMessage = message.trim();
+
+  if (!userMessage) {
+    throw new Error("Message is required");
+  }
+
+  await appendMessageToMemory(options, "customer", userMessage);
+
+  const result =
+    (await buildOrderResultIfHandled(userMessage, productContext, options)) ||
+    (await buildAgentResult(userMessage, productContext));
+
+  await appendMessageToMemory(options, "agent", result.reply);
+
+  return result;
+}
+
 export async function generateAgentReply(
   message: string,
   productContext: ProductContext = DEFAULT_PRODUCT_CONTEXT,
+  options?: GenerateAgentOptions,
 ): Promise<string> {
-  const result = await generateAgentResult(message, productContext);
+  const result = await generateAgentResult(message, productContext, options);
 
   return result.reply;
 }
