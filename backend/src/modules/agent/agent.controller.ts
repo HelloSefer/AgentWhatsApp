@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { generateAgentReply } from "./agent.service";
+import { generateAgentResult } from "./agent.service";
 import type { ProductContext } from "./product-context.types";
 
 export async function testAgentReply(req: Request, res: Response) {
@@ -17,10 +17,12 @@ export async function testAgentReply(req: Request, res: Response) {
       req.body.productContext !== null
         ? (req.body.productContext as ProductContext)
         : undefined;
-    const reply = await generateAgentReply(message, productContext);
+    const result = await generateAgentResult(message, productContext);
 
     return res.status(200).json({
-      reply,
+      reply: result.reply,
+      actions: result.actions,
+      source: result.source,
     });
   } catch (error) {
     return res.status(500).json({
@@ -29,5 +31,4 @@ export async function testAgentReply(req: Request, res: Response) {
     });
   }
 }
-
 

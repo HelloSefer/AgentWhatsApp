@@ -1,4 +1,10 @@
 import type { ProductContext } from "./product-context.types";
+import type { AgentAction } from "./agent-action.types";
+
+interface DirectAgentResult {
+  reply: string;
+  actions?: AgentAction[];
+}
 
 type AttributeKind =
   | "battery"
@@ -579,10 +585,24 @@ function getDeliveryPaymentReply(productContext: ProductContext): string | null 
   return "معلومات التوصيل والدفع ما متوفراش عندي دابا، نقدر نأكدها لك من عند صاحب المتجر.";
 }
 
-function getImageReply(productContext: ProductContext): string {
-  return productContext.images?.length
-    ? "أكيد، نقدر نرسل لك صور المنتج."
-    : "الصور ما متوفراش عندي دابا، نقدر نأكدها لك من عند صاحب المتجر.";
+function getImageReply(productContext: ProductContext): DirectAgentResult {
+  if (!productContext.images?.length) {
+    return {
+      reply: "الصور ما متوفراش عندي دابا، نقدر نأكدها لك من عند صاحب المتجر.",
+      actions: [],
+    };
+  }
+
+  return {
+    reply: "أكيد، نقدر نرسل لك صور المنتج.",
+    actions: [
+      {
+        type: "send_product_images",
+        reason: "customer_requested_images",
+        images: productContext.images,
+      },
+    ],
+  };
 }
 
 function getSizeReply(message: string, productContext: ProductContext): string {
@@ -632,7 +652,7 @@ function getOrderReply(productContext: ProductContext): string {
 export function getDirectAgentReply(
   message: string,
   productContext: ProductContext,
-): string | null {
+): DirectAgentResult | null {
   const userMessage = message.trim();
 
   if (!userMessage) {
@@ -640,11 +660,17 @@ export function getDirectAgentReply(
   }
 
   if (isProductIdentityQuestion(userMessage)) {
-    return buildProductIdentityReply(productContext);
+    return {
+      reply: buildProductIdentityReply(productContext),
+      actions: [],
+    };
   }
 
   if (isOrderIntent(userMessage)) {
-    return getOrderReply(productContext);
+    return {
+      reply: getOrderReply(productContext),
+      actions: [],
+    };
   }
 
   if (isImageRequest(userMessage)) {
@@ -652,20 +678,32 @@ export function getDirectAgentReply(
   }
 
   if (isDeliveryPaymentQuestion(userMessage)) {
-    return getDeliveryPaymentReply(productContext);
+    const reply = getDeliveryPaymentReply(productContext);
+
+    return reply ? { reply, actions: [] } : null;
   }
 
   if (isPriceQuestion(userMessage)) {
-    return getPriceReply(productContext);
+    const reply = getPriceReply(productContext);
+
+    return reply ? { reply, actions: [] } : null;
   }
 
   if (isSizeQuestion(userMessage)) {
-    return getSizeReply(userMessage, productContext);
+    return {
+      reply: getSizeReply(userMessage, productContext),
+      actions: [],
+    };
   }
 
   if (isColorQuestion(userMessage)) {
-    return getColorReply(userMessage, productContext);
+    return {
+      reply: getColorReply(userMessage, productContext),
+      actions: [],
+    };
   }
 
-  return getAttributeReply(userMessage, productContext);
+  const attributeReply = getAttributeReply(userMessage, productContext);
+
+  return attributeReply ? { reply: attributeReply, actions: [] } : null;
 }

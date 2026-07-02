@@ -2,6 +2,7 @@ import { generateAIReply } from "../ai/ai.service";
 import { buildMoroccanSalesPrompt } from "./prompt.builder";
 import { DEFAULT_PRODUCT_CONTEXT } from "./default-product-context";
 import { getDirectAgentReply } from "./direct-answer.service";
+import type { AgentResult } from "./agent-action.types";
 import type { ProductContext } from "./product-context.types";
 
 const MAX_REPLY_LENGTH = 280;
@@ -93,10 +94,10 @@ function cleanAgentReply(reply: string): string {
   return normalizeSpacing(shortReply.slice(0, MAX_REPLY_LENGTH));
 }
 
-export async function generateAgentReply(
+export async function generateAgentResult(
   message: string,
   productContext: ProductContext = DEFAULT_PRODUCT_CONTEXT,
-): Promise<string> {
+): Promise<AgentResult> {
   const userMessage = message.trim();
 
   if (!userMessage) {
@@ -106,11 +107,28 @@ export async function generateAgentReply(
   const directReply = getDirectAgentReply(userMessage, productContext);
 
   if (directReply) {
-    return cleanAgentReply(directReply);
+    return {
+      reply: cleanAgentReply(directReply.reply),
+      actions: directReply.actions ?? [],
+      source: "direct",
+    };
   }
 
   const prompt = buildMoroccanSalesPrompt(userMessage, productContext);
   const reply = await generateAIReply(prompt);
 
-  return cleanAgentReply(reply);
+  return {
+    reply: cleanAgentReply(reply),
+    actions: [],
+    source: "ai_fallback",
+  };
+}
+
+export async function generateAgentReply(
+  message: string,
+  productContext: ProductContext = DEFAULT_PRODUCT_CONTEXT,
+): Promise<string> {
+  const result = await generateAgentResult(message, productContext);
+
+  return result.reply;
 }
