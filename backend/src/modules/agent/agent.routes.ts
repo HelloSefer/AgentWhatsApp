@@ -7,6 +7,7 @@ import {
   listAgentAdminNotifications,
   markAllAgentAdminNotificationsRead,
   markAgentAdminNotificationRead,
+  testAgentIntent,
   testAgentReply,
   updateAgentOrderStatus,
 } from "./agent.controller";
@@ -14,6 +15,7 @@ import {
 const router = Router();
 
 router.post("/test", testAgentReply);
+router.post("/intent-test", testAgentIntent);
 router.get("/admin/notifications", listAgentAdminNotifications);
 router.patch(
   "/admin/notifications/read-all",

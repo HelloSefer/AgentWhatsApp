@@ -4,6 +4,10 @@ type OllamaGenerateResponse = {
   response?: string;
 };
 
+type StructuredGenerationOptions = {
+  timeoutMs?: number;
+};
+
 const defaultGenerationOptions = {
   temperature: 0.2,
   num_predict: 90,
@@ -52,6 +56,7 @@ export async function generateAIReply(message: string): Promise<string> {
 export async function generateStructuredAIReply(
   prompt: string,
   schema?: Record<string, unknown>,
+  options: StructuredGenerationOptions = {},
 ): Promise<string> {
   const trimmedPrompt = prompt.trim();
 
@@ -59,20 +64,43 @@ export async function generateStructuredAIReply(
     throw new Error("Prompt is required");
   }
 
-  const response = await fetch(`${env.ollamaBaseUrl}/api/generate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: env.ollamaModel,
-      prompt: trimmedPrompt,
-      stream: false,
-      format: schema || "json",
-      keep_alive: "30m",
-      options: structuredGenerationOptions,
-    }),
-  });
+  const abortController = new AbortController();
+  const timeout =
+    options.timeoutMs && options.timeoutMs > 0
+      ? setTimeout(() => abortController.abort(), options.timeoutMs)
+      : undefined;
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${env.ollamaBaseUrl}/api/generate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      signal: abortController.signal,
+      body: JSON.stringify({
+        model: env.ollamaModel,
+        prompt: trimmedPrompt,
+        stream: false,
+        format: schema || "json",
+        keep_alive: "30m",
+        options: structuredGenerationOptions,
+      }),
+    });
+  } catch (error) {
+    if (abortController.signal.aborted) {
+      throw new Error(
+        `Structured Ollama request timed out after ${options.timeoutMs}ms`,
+      );
+    }
+
+    throw error;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 
   if (!response.ok) {
     const errorBody = await response.text();

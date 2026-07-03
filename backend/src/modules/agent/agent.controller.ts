@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { generateAgentResult } from "./agent.service";
+import { analyzeAIIntentWithMeta } from "./ai/ai-intent-router.service";
 import {
   adminNotificationTypes,
   deleteAdminNotification,
@@ -18,6 +19,8 @@ import {
   updateConfirmedOrderStatus,
   orderStatuses,
 } from "./order/confirmed-order-store.service";
+import { getConversationSession } from "./session/conversation-session.service";
+import type { ConversationOrderState } from "./agent-brain.types";
 import type { ProductContext } from "./product-context.types";
 
 function getOptionalString(value: unknown): string | undefined {
@@ -74,6 +77,48 @@ export async function testAgentReply(req: Request, res: Response) {
   } catch (error) {
     return res.status(500).json({
       message: "Agent generation failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function testAgentIntent(req: Request, res: Response) {
+  const message = typeof req.body?.message === "string" ? req.body.message : "";
+
+  if (!message.trim()) {
+    return res.status(400).json({
+      message: "Message is required",
+    });
+  }
+
+  try {
+    const productContext =
+      typeof req.body?.productContext === "object" &&
+      req.body.productContext !== null
+        ? (req.body.productContext as ProductContext)
+        : undefined;
+    const customerId = getOptionalString(req.body?.customerId);
+    const sellerId = getOptionalString(req.body?.sellerId);
+    const productId = getOptionalString(req.body?.productId);
+    const requestOrderState =
+      typeof req.body?.orderState === "object" && req.body.orderState !== null
+        ? (req.body.orderState as ConversationOrderState)
+        : undefined;
+    const sessionContext =
+      req.body?.useMemory === true && customerId
+        ? await getConversationSession(customerId, sellerId, productId)
+        : undefined;
+    const result = await analyzeAIIntentWithMeta({
+      message,
+      productContext,
+      sessionContext,
+      orderState: requestOrderState,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      message: "AI intent routing failed",
       error: error instanceof Error ? error.message : "Unknown error",
     });
   }
