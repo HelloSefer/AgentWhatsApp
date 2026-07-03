@@ -2,7 +2,16 @@ import { randomUUID } from "node:crypto";
 import type { OrderEntities } from "../agent-brain.types";
 import type { ProductContext } from "../product-context.types";
 
-export type ConfirmedOrderStatus = "CONFIRMED";
+export const orderStatuses = [
+  "CONFIRMED",
+  "PREPARING",
+  "SENT",
+  "DELIVERED",
+  "CANCELLED",
+  "RETURNED",
+] as const;
+
+export type OrderStatus = (typeof orderStatuses)[number];
 
 export interface ConfirmedOrder {
   id: string;
@@ -15,7 +24,7 @@ export interface ConfirmedOrder {
   size: string;
   color: string;
   quantity: number;
-  status: ConfirmedOrderStatus;
+  status: OrderStatus;
   createdAt: string;
 }
 
@@ -25,10 +34,36 @@ type SaveConfirmedOrderInput = {
   collected: OrderEntities;
 };
 
+type ListConfirmedOrdersFilters = {
+  status?: OrderStatus;
+  customerId?: string;
+  phone?: string;
+  city?: string;
+};
+
 const confirmedOrdersByCustomerId = new Map<string, ConfirmedOrder>();
 
 function getTextValue(value: string | undefined): string {
   return value?.trim() || "";
+}
+
+function matchesOptionalFilter(value: string, filter: string | undefined): boolean {
+  if (!filter) {
+    return true;
+  }
+
+  return value.trim().toLowerCase() === filter.trim().toLowerCase();
+}
+
+export function isOrderStatus(value: unknown): value is OrderStatus {
+  return (
+    typeof value === "string" &&
+    orderStatuses.includes(value.trim().toUpperCase() as OrderStatus)
+  );
+}
+
+export function normalizeOrderStatus(value: string): OrderStatus {
+  return value.trim().toUpperCase() as OrderStatus;
 }
 
 export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrder {
@@ -58,6 +93,39 @@ export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrd
   return order;
 }
 
-export function listConfirmedOrders(): ConfirmedOrder[] {
-  return Array.from(confirmedOrdersByCustomerId.values());
+export function listConfirmedOrders(
+  filters: ListConfirmedOrdersFilters = {},
+): ConfirmedOrder[] {
+  return Array.from(confirmedOrdersByCustomerId.values()).filter((order) => {
+    if (filters.status && order.status !== filters.status) {
+      return false;
+    }
+
+    return (
+      matchesOptionalFilter(order.customerId, filters.customerId) &&
+      matchesOptionalFilter(order.phone, filters.phone) &&
+      matchesOptionalFilter(order.city, filters.city)
+    );
+  });
+}
+
+export function getConfirmedOrderById(id: string): ConfirmedOrder | undefined {
+  return Array.from(confirmedOrdersByCustomerId.values()).find(
+    (order) => order.id === id,
+  );
+}
+
+export function updateConfirmedOrderStatus(
+  id: string,
+  status: OrderStatus,
+): ConfirmedOrder | undefined {
+  const order = getConfirmedOrderById(id);
+
+  if (!order) {
+    return undefined;
+  }
+
+  order.status = status;
+
+  return order;
 }

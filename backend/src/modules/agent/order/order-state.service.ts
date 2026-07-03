@@ -1,4 +1,5 @@
 import type { ConversationSession, OrderEntities } from "../agent-brain.types";
+import { createNewConfirmedOrderNotification } from "../admin/admin-notification.service";
 import { fastAnalyzeCustomerMessage } from "../fast-intent-analyzer.service";
 import type { ProductContext } from "../product-context.types";
 import {
@@ -587,11 +588,12 @@ async function processConfirmationTurn(input: {
   productContext: ProductContext;
 }): Promise<ProcessOrderTurnResult> {
   if (isConfirmationMessage(input.message)) {
-    saveConfirmedOrder({
+    const confirmedOrder = saveConfirmedOrder({
       customerId: input.customerId,
       productContext: input.productContext,
       collected: input.session.orderState.collected,
     });
+    createNewConfirmedOrderNotification(confirmedOrder);
 
     await updateConversationOrderState({
       customerId: input.customerId,
