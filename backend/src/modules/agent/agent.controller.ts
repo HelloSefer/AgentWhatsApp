@@ -1,6 +1,24 @@
 import type { Request, Response } from "express";
 import { generateAgentResult } from "./agent.service";
 import { analyzeAIIntentWithMeta } from "./ai/ai-intent-router.service";
+import { evaluateIntentRouter } from "./ai/ai-intent-router-eval.service";
+import type { IntentEvalCase } from "./ai/ai-intent-router-eval.service";
+import { aiIntentRouterIntentValues } from "./ai/ai-intent-router.schema";
+import { evaluateSalesReplies } from "./sales/sales-response-eval.service";
+import type { SalesReplyEvalCase } from "./sales/sales-response-eval.service";
+import {
+  benchmarkNaturalReplies,
+  evaluateNaturalReplies,
+} from "./natural-reply/natural-reply-eval.service";
+import type { NaturalReplyEvalCase } from "./natural-reply/natural-reply-eval.service";
+import {
+  getNaturalReplyStatus,
+  resetNaturalReplyState,
+  smokeTestNaturalReply,
+} from "./natural-reply/natural-reply-generator.service";
+import { evaluateSellerBrain } from "./seller-brain/seller-brain-eval.service";
+import type { SellerBrainEvalCase } from "./seller-brain/seller-brain.types";
+import { evaluateConversationScenarios } from "./conversation-scenario-eval.service";
 import {
   adminNotificationTypes,
   deleteAdminNotification,
@@ -22,6 +40,15 @@ import {
 import { getConversationSession } from "./session/conversation-session.service";
 import type { ConversationOrderState } from "./agent-brain.types";
 import type { ProductContext } from "./product-context.types";
+
+function isAIIntentRouterIntent(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    aiIntentRouterIntentValues.includes(
+      value as (typeof aiIntentRouterIntentValues)[number],
+    )
+  );
+}
 
 function getOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -73,6 +100,7 @@ export async function testAgentReply(req: Request, res: Response) {
       reply: result.reply,
       actions: result.actions,
       source: result.source,
+      meta: result.meta,
     });
   } catch (error) {
     return res.status(500).json({
@@ -119,6 +147,306 @@ export async function testAgentIntent(req: Request, res: Response) {
   } catch (error) {
     return res.status(500).json({
       message: "AI intent routing failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function evalAgentIntents(req: Request, res: Response) {
+  try {
+    const productContext =
+      typeof req.body?.productContext === "object" &&
+      req.body.productContext !== null
+        ? (req.body.productContext as ProductContext)
+        : undefined;
+    const cases: unknown[] | undefined =
+      Array.isArray(req.body?.cases) && req.body.cases.length
+        ? req.body.cases
+        : undefined;
+
+    if (cases) {
+      const invalidCase = cases.find((testCase) => {
+        if (
+          typeof testCase !== "object" ||
+          testCase === null ||
+          Array.isArray(testCase)
+        ) {
+          return true;
+        }
+
+        const candidate = testCase as Record<string, unknown>;
+
+        return (
+          typeof candidate.message !== "string" ||
+          !candidate.message.trim() ||
+          !isAIIntentRouterIntent(candidate.expectedIntent)
+        );
+      });
+
+      if (invalidCase) {
+        return res.status(400).json({
+          message:
+            "Each case requires message and a supported expectedIntent",
+          allowedIntents: aiIntentRouterIntentValues,
+        });
+      }
+    }
+
+    const report = await evaluateIntentRouter({
+      productContext,
+      cases: cases as IntentEvalCase[] | undefined,
+    });
+
+    return res.status(200).json(report);
+  } catch (error) {
+    return res.status(500).json({
+      message: "Intent evaluation failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function evalAgentReplies(req: Request, res: Response) {
+  try {
+    const productContext =
+      typeof req.body?.productContext === "object" &&
+      req.body.productContext !== null
+        ? (req.body.productContext as ProductContext)
+        : undefined;
+    const cases: unknown[] | undefined =
+      Array.isArray(req.body?.cases) && req.body.cases.length
+        ? req.body.cases
+        : undefined;
+
+    if (cases) {
+      const invalidCase = cases.find((testCase) => {
+        if (typeof testCase === "string") {
+          return !testCase.trim();
+        }
+
+        if (
+          typeof testCase !== "object" ||
+          testCase === null ||
+          Array.isArray(testCase)
+        ) {
+          return true;
+        }
+
+        const candidate = testCase as Record<string, unknown>;
+
+        return typeof candidate.message !== "string" || !candidate.message.trim();
+      });
+
+      if (invalidCase) {
+        return res.status(400).json({
+          message: "Each reply eval case must be a message string or an object with message",
+        });
+      }
+    }
+
+    const normalizedCases = cases?.map((testCase) =>
+      typeof testCase === "string"
+        ? { message: testCase }
+        : (testCase as SalesReplyEvalCase),
+    );
+    const report = await evaluateSalesReplies({
+      productContext,
+      cases: normalizedCases,
+    });
+
+    return res.status(200).json(report);
+  } catch (error) {
+    return res.status(500).json({
+      message: "Reply evaluation failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function evalAgentNaturalReplies(req: Request, res: Response) {
+  try {
+    const productContext =
+      typeof req.body?.productContext === "object" &&
+      req.body.productContext !== null
+        ? (req.body.productContext as ProductContext)
+        : undefined;
+    const cases: unknown[] | undefined =
+      Array.isArray(req.body?.cases) && req.body.cases.length
+        ? req.body.cases
+        : undefined;
+
+    if (cases) {
+      const invalidCase = cases.find((testCase) => {
+        if (typeof testCase === "string") {
+          return !testCase.trim();
+        }
+
+        if (
+          typeof testCase !== "object" ||
+          testCase === null ||
+          Array.isArray(testCase)
+        ) {
+          return true;
+        }
+
+        const candidate = testCase as Record<string, unknown>;
+
+        return typeof candidate.message !== "string" || !candidate.message.trim();
+      });
+
+      if (invalidCase) {
+        return res.status(400).json({
+          message:
+            "Each natural reply eval case must be a message string or an object with message",
+        });
+      }
+    }
+
+    const normalizedCases = cases?.map((testCase) =>
+      typeof testCase === "string"
+        ? { message: testCase }
+        : (testCase as NaturalReplyEvalCase),
+    );
+    const report = await evaluateNaturalReplies({
+      productContext,
+      cases: normalizedCases,
+    });
+
+    return res.status(200).json(report);
+  } catch (error) {
+    return res.status(500).json({
+      message: "Natural reply evaluation failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export function getAgentNaturalReplyStatus(_req: Request, res: Response) {
+  return res.status(200).json(getNaturalReplyStatus());
+}
+
+export function resetAgentNaturalReplyState(_req: Request, res: Response) {
+  resetNaturalReplyState();
+
+  return res.status(200).json({
+    ok: true,
+    message: "Natural reply state reset.",
+  });
+}
+
+export async function smokeAgentNaturalReply(req: Request, res: Response) {
+  const message =
+    typeof req.body?.message === "string"
+      ? req.body.message
+      : "صراحة غالية عليا";
+
+  if (!message.trim()) {
+    return res.status(400).json({
+      message: "Message is required",
+    });
+  }
+
+  try {
+    const result = await smokeTestNaturalReply(message);
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      message: "Natural reply smoke test failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function benchmarkAgentNaturalReply(req: Request, res: Response) {
+  try {
+    const productContext =
+      typeof req.body?.productContext === "object" &&
+      req.body.productContext !== null
+        ? (req.body.productContext as ProductContext)
+        : undefined;
+    const result = await benchmarkNaturalReplies({ productContext });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      message: "Natural reply benchmark failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function evalAgentSellerBrain(req: Request, res: Response) {
+  try {
+    const productContext =
+      typeof req.body?.productContext === "object" &&
+      req.body.productContext !== null
+        ? (req.body.productContext as ProductContext)
+        : undefined;
+    const cases: unknown[] | undefined =
+      Array.isArray(req.body?.cases) && req.body.cases.length
+        ? req.body.cases
+        : undefined;
+
+    if (cases) {
+      const invalidCase = cases.find((testCase) => {
+        if (typeof testCase === "string") {
+          return !testCase.trim();
+        }
+
+        if (
+          typeof testCase !== "object" ||
+          testCase === null ||
+          Array.isArray(testCase)
+        ) {
+          return true;
+        }
+
+        const candidate = testCase as Record<string, unknown>;
+
+        return typeof candidate.message !== "string" || !candidate.message.trim();
+      });
+
+      if (invalidCase) {
+        return res.status(400).json({
+          message:
+            "Each seller brain eval case must be a message string or an object with message",
+        });
+      }
+    }
+
+    const normalizedCases = cases?.map((testCase) =>
+      typeof testCase === "string"
+        ? { message: testCase }
+        : (testCase as SellerBrainEvalCase),
+    );
+    const report = await evaluateSellerBrain({
+      productContext,
+      cases: normalizedCases,
+    });
+
+    return res.status(200).json(report);
+  } catch (error) {
+    return res.status(500).json({
+      message: "Seller brain evaluation failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function evalAgentConversationScenarios(req: Request, res: Response) {
+  try {
+    const productContext =
+      typeof req.body?.productContext === "object" &&
+      req.body.productContext !== null
+        ? (req.body.productContext as ProductContext)
+        : undefined;
+    const report = await evaluateConversationScenarios({ productContext });
+
+    return res.status(200).json(report);
+  } catch (error) {
+    return res.status(500).json({
+      message: "Conversation scenario evaluation failed",
       error: error instanceof Error ? error.message : "Unknown error",
     });
   }

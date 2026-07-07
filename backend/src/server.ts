@@ -1,6 +1,7 @@
 import pino from "pino";
 import app from "./app";
 import { env } from "./config/env";
+import { warmNaturalReplyModel } from "./modules/agent/natural-reply/natural-reply-generator.service";
 import { startWhatsApp } from "./modules/whatsapp/whatsapp.service";
 
 const logger = pino({
@@ -18,7 +19,15 @@ const logger = pino({
 app.listen(env.port, () => {
   logger.info(`${env.appName} is running on port ${env.port}`);
 
-  startWhatsApp().catch((error) => {
-    logger.error({ error }, "Failed to start WhatsApp");
+  warmNaturalReplyModel().catch((error) => {
+    logger.error({ error }, "Failed to warm natural reply model");
   });
+
+  if (env.whatsappProvider === "cloud_api") {
+    logger.info("WhatsApp provider is Cloud API; Baileys socket startup skipped");
+  } else {
+    startWhatsApp().catch((error) => {
+      logger.error({ error }, "Failed to start WhatsApp");
+    });
+  }
 });

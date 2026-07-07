@@ -36,6 +36,10 @@ const colorAliases: Array<{ color: string; aliases: string[] }> = [
     color: "أحمر",
     aliases: ["7mra", "hamra", "red", "rouge", "حمراء", "حمر", "احمر", "أحمر"],
   },
+  {
+    color: "أصفر",
+    aliases: ["sfar", "yellow", "jaune", "صفر", "اصفر", "أصفر", "الأصفر", "الاصفر"],
+  },
 ];
 
 function normalizeText(text: string): string {
@@ -140,25 +144,46 @@ function findColor(message: string): string | undefined {
 }
 
 function findSize(message: string): string | undefined {
-  const sizeMatch = message.match(
-    /(?:size|taille|مقاس|قياس)\s*(3[6-9]|4[0-5]|xxl|xl|xs|s|m|l)\b/i,
+  const labeledLetterSizeMatch = message.match(
+    /(?:size|taille|مقاس|قياس)\s*(xxl|xl|xs|s|m|l)\b/i,
   );
+
+  if (labeledLetterSizeMatch?.[1]) {
+    return labeledLetterSizeMatch[1].toUpperCase();
+  }
+
+  const sizeMatch = message.match(/(?:size|taille|مقاس|قياس)\s*(3[6-9]|4[0-5])\b/i);
 
   if (sizeMatch?.[1]) {
     return sizeMatch[1].toUpperCase();
   }
 
-  const standaloneSizeMatch = message.match(/\b(3[6-9]|4[0-5]|xxl|xl|xs|s|m|l)\b/i);
+  const standaloneSizeMatch = message.match(/\b(3[6-9]|4[0-5])\b/i);
 
   return standaloneSizeMatch?.[1]?.toUpperCase();
 }
 
 function findQuantity(message: string): number | undefined {
-  if (includesAny(message, ["wa7da", "واحدة"]) || /(?:^|\s)1(?:\s|$)/.test(message)) {
+  if (
+    includesAny(message, [
+      "wa7da",
+      "wahda",
+      "w7da",
+      "wahed",
+      "wahd",
+      "واحدة",
+      "وحدة",
+      "واحد",
+    ]) ||
+    /(?:^|\s)1(?:\s|$)/.test(message)
+  ) {
     return 1;
   }
 
-  if (includesAny(message, ["جوج", "زوج"]) || /(?:^|\s)2(?:\s|$)/.test(message)) {
+  if (
+    includesAny(message, ["jouj", "jooj", "jوج", "جوج", "زوج"]) ||
+    /(?:^|\s)2(?:\s|$)/.test(message)
+  ) {
     return 2;
   }
 
@@ -276,6 +301,29 @@ function isDeliveryPaymentQuestion(message: string): boolean {
   ]);
 }
 
+function isPriceQuestion(message: string): boolean {
+  return includesAny(message, [
+    "bach7l",
+    "bachhal",
+    "bach7al",
+    "bch7al",
+    "bchhal",
+    "bch7l",
+    "ch7al",
+    "chhal",
+    "bch7alhadi",
+    "شحال",
+    "شحال هادي",
+    "بشحال",
+    "شحال الثمن",
+    "taman",
+    "prix",
+    "price",
+    "الثمن",
+    "التمن",
+  ]);
+}
+
 function isOrderVerb(message: string): boolean {
   return includesAny(message, [
     "بغيت",
@@ -288,7 +336,81 @@ function isOrderVerb(message: string): boolean {
     "ncommandi",
     "ncommander",
     "nkomandi",
+    "bghit commande",
+    "bghit order",
+    "dir lia commande",
+    "dir lia order",
+    "t9dr tsawb lia commande",
+    "tsawb lia commande dyali",
+    "commande",
+    "order",
+    "الطلب",
+    "بغيت الطلب",
+    "دير ليا الطلب",
+    "وجد ليا الطلب",
+    "صوب ليا الطلب",
+    "صايب ليا الطلب",
+    "تصوب لي كومند",
+    "تصوب لي كوموند",
+    "تقدر تصوب لي كومند ديالي",
+    "واش تقدر تصوب لي كومند ديالي",
+    "اك تقد تصوب لي كومند ديالي",
+    "اقدر تصوب لي كومند ديالي",
+    "كومند",
+    "كوموند",
+    "كوموندي",
   ]);
+}
+
+function isDomainOrderStartRequest(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+
+  return (
+    ["الطلب", "طلب", "commande", "order", "كومند", "كوموند"].includes(
+      normalizedMessage,
+    ) ||
+    includesAny(message, [
+      "بغيت نكوموندي",
+      "بغيت نكومندي",
+      "بغيت نكوموند",
+      "بغيت كوموند",
+      "بغيت الطلب",
+      "دير ليا الطلب",
+      "وجد ليا الطلب",
+      "صوب ليا الطلب",
+      "صايب ليا الطلب",
+      "تصوب لي كومند",
+      "تصوب لي كوموند",
+      "تقدر تصوب لي كومند ديالي",
+      "واش تقدر تصوب لي كومند ديالي",
+      "اك تقد تصوب لي كومند ديالي",
+      "اقدر تصوب لي كومند ديالي",
+      "bghit ncommandi",
+      "bghit ncommander",
+      "bghit commande",
+      "bghit order",
+      "dir lia commande",
+      "dir lia order",
+      "t9dr tsawb lia commande",
+      "tsawb lia commande dyali",
+    ])
+  );
+}
+
+function isColorChoiceQuestion(message: string): boolean {
+  return Boolean(
+    findColor(message) &&
+      includesAny(message, [
+        "لون",
+        "اللون",
+        "color",
+        "couleur",
+        "lon",
+        "brayt lon",
+        "bghit yellow",
+        "bghit jaune",
+      ]),
+  );
 }
 
 function hasOrderChoice(message: string): boolean {
@@ -297,7 +419,7 @@ function hasOrderChoice(message: string): boolean {
       findSize(message) ||
       findCity(message) ||
       findQuantity(message) ||
-      includesAny(message, ["wa7da", "واحدة"]),
+      includesAny(message, ["wa7da", "wahda", "w7da", "wahed", "واحدة", "وحدة", "واحد"]),
   );
 }
 
@@ -329,6 +451,32 @@ export function fastAnalyzeCustomerMessage(
       mood: "interested",
       entities: extractOrderInfoEntities(userMessage),
       reasoningNote: "Customer provided order contact details.",
+    });
+  }
+
+  if (isPriceQuestion(userMessage)) {
+    return createAnalysis(userMessage, "price_question", {
+      confidence: 0.97,
+      mood: "interested",
+      reasoningNote: "Customer asked about price.",
+    });
+  }
+
+  if (isColorChoiceQuestion(userMessage)) {
+    return createAnalysis(userMessage, "color_question", {
+      confidence: 0.96,
+      mood: "interested",
+      entities: { color: findColor(userMessage) },
+      reasoningNote: "Customer asked about a specific color.",
+    });
+  }
+
+  if (isDomainOrderStartRequest(userMessage)) {
+    return createAnalysis(userMessage, "order_intent", {
+      confidence: 0.97,
+      mood: "interested",
+      entities: extractOrderEntities(userMessage),
+      reasoningNote: "Customer wants to start an order.",
     });
   }
 

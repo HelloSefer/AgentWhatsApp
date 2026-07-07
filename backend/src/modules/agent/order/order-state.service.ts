@@ -4,6 +4,7 @@ import { fastAnalyzeCustomerMessage } from "../fast-intent-analyzer.service";
 import type { ProductContext } from "../product-context.types";
 import {
   getConversationSession,
+  saveConversationSession,
   updateConversationOrderState,
 } from "../session/conversation-session.service";
 import { saveConfirmedOrder } from "./confirmed-order-store.service";
@@ -17,6 +18,10 @@ type ProcessOrderTurnInput = {
   productId?: string;
   message: string;
   productContext: ProductContext;
+  analysis?: {
+    intent?: string;
+    entities?: OrderEntities;
+  };
 };
 
 type ProcessOrderTurnResult = {
@@ -50,7 +55,18 @@ const fieldLabelMap = new Map<string, OrderField>([
 
 const cityAliases: Array<{ city: string; aliases: string[] }> = [
   { city: "مراكش", aliases: ["مراكش", "marrakech", "marrakesh"] },
-  { city: "كازا", aliases: ["كازا", "casa", "casablanca", "الدار البيضاء"] },
+  {
+    city: "الدار البيضاء",
+    aliases: [
+      "كازا",
+      "casa",
+      "casablanca",
+      "الدار البيضاء",
+      "الدارالبيضاء",
+      "دار البيضاء",
+      "دارالبيضاء",
+    ],
+  },
   { city: "الرباط", aliases: ["الرباط", "rabat"] },
   { city: "فاس", aliases: ["فاس", "fes", "fès"] },
   { city: "طنجة", aliases: ["طنجة", "tanger", "tangier", "tanja"] },
@@ -72,6 +88,10 @@ const colorAliases: Array<{ color: string; aliases: string[] }> = [
   {
     color: "أحمر",
     aliases: ["أحمر", "احمر", "حمر", "حمرة", "7mra", "hamra", "red", "rouge"],
+  },
+  {
+    color: "أصفر",
+    aliases: ["أصفر", "اصفر", "صفر", "sfar", "yellow", "jaune"],
   },
 ];
 
@@ -96,6 +116,16 @@ const negativeCorrectionMessages = [
   "no",
   "non",
 ];
+const cancellationMessages = [
+  "الغاء الطلب",
+  "الغاء",
+  "إلغاء الطلب",
+  "إلغاء",
+  "لا شكرا الغي الطلب",
+  "لا شكراً الغي الطلب",
+  "cancel order",
+  "cancel",
+];
 
 const correctionKeywords = [
   "بغيت نبدل",
@@ -112,6 +142,8 @@ const correctionClarificationReply =
   "شنو المعلومة اللي بغيتي تبدل؟ المقاس، اللون، الكمية، الاسم، الهاتف، المدينة ولا العنوان؟";
 const alreadyConfirmedReply =
   "الطلب ديالك راه تأكد من قبل. غادي نتواصلو معاك قريباً.";
+const orderCancelledReply =
+  "تمام، ما غاديش نأكد الطلب. إلى بغيتي تبدل شي حاجة ولا ترجع تطلب، أنا هنا.";
 
 function normalizeText(text: string): string {
   return text
@@ -125,6 +157,22 @@ function normalizeText(text: string): string {
 
 function includesAny(normalizedText: string, terms: string[]): boolean {
   return terms.some((term) => normalizedText.includes(normalizeText(term)));
+}
+
+function normalizeComparable(text: string): string {
+  return normalizeText(text).replace(/^ال/, "");
+}
+
+function formatNaturalList(items: string[]): string {
+  const cleanItems = items.map((item) => item.trim()).filter(Boolean);
+
+  if (cleanItems.length <= 1) {
+    return cleanItems.join("");
+  }
+
+  return `${cleanItems.slice(0, -1).join("، ")} و${
+    cleanItems[cleanItems.length - 1]
+  }`;
 }
 
 function isExactMessage(normalizedText: string, messages: string[]): boolean {
@@ -145,6 +193,112 @@ function cleanEntities(entities: OrderEntities): Partial<OrderEntities> {
   ) as Partial<OrderEntities>;
 }
 
+function getAvailableColors(productContext: ProductContext): string[] {
+  return productContext.availableColors?.map((color) => color.trim()).filter(Boolean) || [];
+}
+
+function getAvailableSizes(productContext: ProductContext): string[] {
+  return productContext.availableSizes?.map((size) => size.trim()).filter(Boolean) || [];
+}
+
+function isAvailableColorValue(
+  color: string,
+  productContext: ProductContext,
+): boolean {
+  const availableColors = getAvailableColors(productContext);
+
+  if (!availableColors.length) {
+    return true;
+  }
+
+  return availableColors.some(
+    (availableColor) =>
+      normalizeComparable(availableColor) === normalizeComparable(color),
+  );
+}
+
+function isAvailableSizeValue(
+  size: string,
+  productContext: ProductContext,
+): boolean {
+  const availableSizes = getAvailableSizes(productContext);
+
+  if (!availableSizes.length) {
+    return true;
+  }
+
+  return availableSizes.some(
+    (availableSize) =>
+      normalizeComparable(availableSize) === normalizeComparable(size),
+  );
+}
+
+function buildUnavailableColorReply(
+  color: string,
+  productContext: ProductContext,
+): string {
+  const availableColors = getAvailableColors(productContext);
+  const colorText = color.startsWith("ال") ? color : `ال${color}`;
+
+  if (!availableColors.length) {
+    return `اللون ${colorText} ما نقدرش نأكدو دابا. نقدر نراجع الألوان المتوفرة من عند صاحب المتجر.`;
+  }
+
+  return `اللون ${colorText} ما متوفرش حالياً. الألوان المتوفرة هي: ${formatNaturalList(
+    availableColors,
+  )}. شنو اللون اللي بغيتي؟`;
+}
+
+function buildUnavailableSizeReply(
+  size: string,
+  productContext: ProductContext,
+): string {
+  const availableSizes = getAvailableSizes(productContext);
+
+  if (!availableSizes.length) {
+    return `مقاس ${size} ما نقدرش نأكدو دابا. نقدر نراجع المقاسات المتوفرة من عند صاحب المتجر.`;
+  }
+
+  return `مقاس ${size} ما متوفرش حالياً. المقاسات المتوفرة هي: ${formatNaturalList(
+    availableSizes,
+  )}.`;
+}
+
+function validateIncomingOrderEntities(
+  entities: Partial<OrderEntities>,
+  productContext: ProductContext,
+): { entities: Partial<OrderEntities>; reply?: string } {
+  if (
+    typeof entities.color === "string" &&
+    entities.color.trim() &&
+    !isAvailableColorValue(entities.color, productContext)
+  ) {
+    return {
+      entities: {
+        ...entities,
+        color: undefined,
+      },
+      reply: buildUnavailableColorReply(entities.color, productContext),
+    };
+  }
+
+  if (
+    typeof entities.size === "string" &&
+    entities.size.trim() &&
+    !isAvailableSizeValue(entities.size, productContext)
+  ) {
+    return {
+      entities: {
+        ...entities,
+        size: undefined,
+      },
+      reply: buildUnavailableSizeReply(entities.size, productContext),
+    };
+  }
+
+  return { entities };
+}
+
 function getRequiredOrderFields(productContext: ProductContext): OrderField[] {
   const mappedFields = (productContext.requiredOrderFields || [])
     .map((field) => fieldLabelMap.get(field))
@@ -160,6 +314,40 @@ function computeMissingFields(
   return getRequiredOrderFields(productContext).filter(
     (field) => !hasValue(collected[field]),
   );
+}
+
+async function sanitizeStoredOrderState(
+  session: ConversationSession,
+  productContext: ProductContext,
+): Promise<ConversationSession> {
+  const color = session.orderState.collected.color;
+
+  if (
+    session.orderState.confirmed ||
+    typeof color !== "string" ||
+    !color.trim() ||
+    isAvailableColorValue(color, productContext)
+  ) {
+    return session;
+  }
+
+  const collected: OrderEntities = { ...session.orderState.collected };
+
+  delete collected.color;
+
+  session.orderState = {
+    ...session.orderState,
+    collected,
+    missingFields: computeMissingFields(collected, productContext),
+    isComplete: false,
+    awaitingConfirmation: false,
+    confirmed: false,
+    lastUpdatedAt: new Date().toISOString(),
+  };
+
+  await saveConversationSession(session);
+
+  return session;
 }
 
 function findPhone(message: string): string | undefined {
@@ -178,18 +366,33 @@ function findCity(message: string): string | undefined {
 
   return cityAliases.find((cityAlias) =>
     cityAlias.aliases.some((alias) =>
-      normalizedMessage.includes(normalizeText(alias)),
+      normalizedMessage.includes(normalizeText(alias)) ||
+      normalizedMessage.replace(/\s+/g, "").includes(
+        normalizeText(alias).replace(/\s+/g, ""),
+      ),
     ),
   )?.city;
 }
 
 function findColor(message: string): string | undefined {
   const normalizedMessage = normalizeText(message);
+  const normalizedCompactMessage = normalizedMessage.replace(/\s+/g, "");
+  const mentionsCasablanca =
+    normalizedMessage.includes("الدار البيضاء") ||
+    normalizedCompactMessage.includes("الدارالبيضاء") ||
+    normalizedMessage.includes("دار البيضاء") ||
+    normalizedCompactMessage.includes("دارالبيضاء") ||
+    normalizedMessage.includes("كازا") ||
+    /\bcasa\b|\bcasablanca\b/i.test(normalizedMessage);
 
   return colorAliases.find((colorAlias) =>
-    colorAlias.aliases.some((alias) =>
-      normalizedMessage.includes(normalizeText(alias)),
-    ),
+    colorAlias.aliases.some((alias) => {
+      if (colorAlias.color === "أبيض" && mentionsCasablanca) {
+        return false;
+      }
+
+      return normalizedMessage.includes(normalizeText(alias));
+    }),
   )?.color;
 }
 
@@ -210,30 +413,81 @@ function isKnownColorOnly(message: string): boolean {
 }
 
 function findSize(message: string): string | undefined {
-  const sizeMatch = message.match(
-    /(?:size|taille|مقاس|قياس)?\s*(3[6-9]|4[0-5]|xxl|xl|xs|s|m|l)\b/i,
+  const selectedSizeMatch = message.trim().match(/^size:(3[6-9]|4[0-5])$/i);
+
+  if (selectedSizeMatch?.[1]) {
+    return selectedSizeMatch[1];
+  }
+
+  const labeledLetterSizeMatch = message.match(
+    /(?:size|taille|مقاس|قياس)\s*(xxl|xl|xs|s|m|l)\b/i,
   );
+
+  if (labeledLetterSizeMatch?.[1]) {
+    return labeledLetterSizeMatch[1].toUpperCase();
+  }
+
+  const sizeMatch = message.match(/\b(3[6-9]|4[0-5])\b/i);
 
   return sizeMatch?.[1]?.toUpperCase();
 }
 
 function findQuantity(message: string): number | undefined {
-  if (/(^|\s)1(\s|$)/.test(message) || /wa7da/i.test(message) || message.includes("واحدة")) {
+  if (
+    /(^|\s)1(\s|$)/.test(message) ||
+    includesAny(normalizeText(message), [
+      "wa7da",
+      "wahda",
+      "w7da",
+      "wahed",
+      "wahd",
+      "واحدة",
+      "وحدة",
+      "واحد",
+    ])
+  ) {
     return 1;
   }
 
-  if (/(^|\s)2(\s|$)/.test(message) || message.includes("جوج") || message.includes("زوج")) {
+  if (
+    /(^|\s)2(\s|$)/.test(message) ||
+    includesAny(normalizeText(message), ["jouj", "jooj", "jوج", "جوج", "زوج"])
+  ) {
     return 2;
   }
 
   return undefined;
 }
 
+function stripAfterQuantityMarker(text: string): string {
+  return text
+    .replace(/(الكمية|كمية|quantity|qte|qty|عدد).*$/i, "")
+    .trim();
+}
+
 function findAddress(message: string): string | undefined {
   const normalizedMessage = normalizeText(message);
-  const addressMatch = normalizedMessage.match(/\b(حي|شارع|زنقة|رقم)\s+(.+)/);
+  const labeledAddressMatch = normalizedMessage.match(
+    /(العنوان|address|adresse)\s+(.+)/i,
+  );
 
-  return addressMatch ? `${addressMatch[1]} ${addressMatch[2]}`.trim() : undefined;
+  if (labeledAddressMatch?.[2]) {
+    const address = stripAfterQuantityMarker(labeledAddressMatch[2]);
+
+    return looksLikeAddressText(address) ? address : undefined;
+  }
+
+  const addressMatch = normalizedMessage.match(/(حي|شارع|زنقة|رقم)\s+(.+)/);
+
+  if (!addressMatch) {
+    return undefined;
+  }
+
+  const address = stripAfterQuantityMarker(
+    `${addressMatch[1]} ${addressMatch[2]}`,
+  );
+
+  return looksLikeAddressText(address) ? address : undefined;
 }
 
 function getPhoneTextFromMessage(message: string, phone: string): string | undefined {
@@ -272,10 +526,9 @@ function findAddressAfterPhone(message: string, phone: string): string | undefin
   }
 
   const addressCandidate = message.slice(phoneIndex + phoneText.length).trim();
+  const address = stripAfterQuantityMarker(addressCandidate);
 
-  return looksLikeAddressText(addressCandidate)
-    ? normalizeText(addressCandidate)
-    : undefined;
+  return looksLikeAddressText(address) ? normalizeText(address) : undefined;
 }
 
 function cleanLabeledValue(value: string): string {
@@ -329,9 +582,39 @@ function findNameBeforePhone(message: string, phone: string): string | undefined
 
 function isSimpleArabicName(message: string): boolean {
   const normalizedMessage = normalizeText(message);
+  const looksLikeOrderCommand = includesAny(normalizedMessage, [
+    "بغيت",
+    "نكوموندي",
+    "نكومندي",
+    "نكوموند",
+    "نطلب",
+    "الطلب",
+    "كومند",
+    "كوموند",
+    "كوموندي",
+    "صوب",
+    "صايب",
+    "دير ليا",
+  ]);
+  const looksLikeQuestionOrSmallTalk =
+    normalizedMessage.includes("؟") ||
+    includesAny(normalizedMessage, [
+      "شنو",
+      "واش",
+      "اش",
+      "رأيك",
+      "رايك",
+      "الماتش",
+      "ماتش",
+      "كيفاش",
+      "فين",
+      "علاش",
+    ]);
 
   return (
     /^[\u0600-\u06ff\s]{2,30}$/.test(normalizedMessage) &&
+    !looksLikeOrderCommand &&
+    !looksLikeQuestionOrSmallTalk &&
     normalizedMessage.split(/\s+/).length <= 3 &&
     !findCity(message) &&
     !findColor(message) &&
@@ -421,6 +704,14 @@ function mergeCorrectedEntities(
   return merged;
 }
 
+function isStandaloneSizeSelection(message: string, size?: string): boolean {
+  if (!size) {
+    return false;
+  }
+
+  return normalizeText(message) === normalizeText(size);
+}
+
 function hasCollectedOrderData(collected: OrderEntities): boolean {
   return Object.values(collected).some((value) => hasValue(value));
 }
@@ -452,6 +743,10 @@ function hasRejectionIntent(normalizedMessage: string): boolean {
     isExactMessage(normalizedMessage, negativeCorrectionMessages) ||
     normalizedMessage.startsWith("لا ")
   );
+}
+
+function isCancellationMessage(message: string): boolean {
+  return isExactMessage(normalizeText(message), cancellationMessages);
 }
 
 function hasCorrectionOrRejectionIntent(message: string): boolean {
@@ -614,12 +909,46 @@ async function processConfirmationTurn(input: {
     };
   }
 
+  if (isCancellationMessage(input.message)) {
+    await updateConversationOrderState({
+      customerId: input.customerId,
+      sellerId: input.sellerId,
+      productId: input.productId,
+      collected: input.session.orderState.collected,
+      missingFields: [],
+      isComplete: false,
+      awaitingConfirmation: false,
+      confirmed: false,
+    });
+
+    return {
+      handled: true,
+      reply: orderCancelledReply,
+      isComplete: false,
+      missingFields: [],
+    };
+  }
+
   const corrections = extractCorrectionEntities(input.message);
 
   if (Object.keys(corrections).length > 0) {
+    const validatedCorrections = validateIncomingOrderEntities(
+      corrections,
+      input.productContext,
+    );
+
+    if (validatedCorrections.reply) {
+      return {
+        handled: true,
+        reply: validatedCorrections.reply,
+        isComplete: input.session.orderState.isComplete,
+        missingFields: input.session.orderState.missingFields,
+      };
+    }
+
     const collected = mergeCorrectedEntities(
       input.session.orderState.collected,
-      corrections,
+      validatedCorrections.entities,
     );
     const missingFields = computeMissingFields(collected, input.productContext);
     const isComplete = missingFields.length === 0;
@@ -690,13 +1019,23 @@ function shouldTreatAsOrderFlow(input: {
   existingCollected: OrderEntities;
   currentMissingFields: string[];
   standaloneEntities: Partial<OrderEntities>;
+  hasActiveOrderFlow: boolean;
 }): boolean {
-  if (input.intent === "order_intent" || input.intent === "order_info_provided") {
+  if (
+    input.intent === "order_intent" ||
+    input.intent === "order_info_provided" ||
+    input.intent === "order_start" ||
+    input.intent === "order_followup"
+  ) {
     return true;
   }
 
   if (!hasCollectedOrderData(input.existingCollected)) {
-    return false;
+    return (
+      input.hasActiveOrderFlow &&
+      input.currentMissingFields.length > 0 &&
+      hasCollectedOrderData(input.standaloneEntities)
+    );
   }
 
   return input.currentMissingFields.length > 0;
@@ -705,10 +1044,13 @@ function shouldTreatAsOrderFlow(input: {
 export async function processOrderTurn(
   input: ProcessOrderTurnInput,
 ): Promise<ProcessOrderTurnResult> {
-  const session = await getConversationSession(
-    input.customerId,
-    input.sellerId,
-    input.productId,
+  const session = await sanitizeStoredOrderState(
+    await getConversationSession(
+      input.customerId,
+      input.sellerId,
+      input.productId,
+    ),
+    input.productContext,
   );
 
   if (session.orderState.confirmed) {
@@ -735,7 +1077,8 @@ export async function processOrderTurn(
     });
   }
 
-  const analysis = fastAnalyzeCustomerMessage(input.message);
+  const fastAnalysis = fastAnalyzeCustomerMessage(input.message);
+  const analysis = input.analysis || fastAnalysis;
   const currentMissingFields =
     session.orderState.missingFields.length > 0
       ? session.orderState.missingFields
@@ -749,6 +1092,7 @@ export async function processOrderTurn(
     existingCollected: session.orderState.collected,
     currentMissingFields,
     standaloneEntities,
+    hasActiveOrderFlow: session.orderState.missingFields.length > 0,
   });
 
   if (!shouldHandle) {
@@ -763,7 +1107,37 @@ export async function processOrderTurn(
     ...cleanEntities(analysis?.entities || {}),
     ...standaloneEntities,
   };
-  const collected = mergeEntities(session.orderState.collected, incomingEntities);
+  const validatedIncomingEntities = validateIncomingOrderEntities(
+    incomingEntities,
+    input.productContext,
+  );
+
+  if (validatedIncomingEntities.reply) {
+    return {
+      handled: true,
+      reply: validatedIncomingEntities.reply,
+      isComplete: session.orderState.isComplete,
+      missingFields: currentMissingFields,
+    };
+  }
+
+  const shouldUpdateSelectedSize =
+    session.orderState.missingFields.length > 0 &&
+    isStandaloneSizeSelection(input.message, validatedIncomingEntities.entities.size);
+  const collected = shouldUpdateSelectedSize
+    ? mergeEntities(
+        mergeCorrectedEntities(session.orderState.collected, {
+          size: validatedIncomingEntities.entities.size,
+        }),
+        {
+          ...validatedIncomingEntities.entities,
+          size: undefined,
+        },
+      )
+    : mergeEntities(
+        session.orderState.collected,
+        validatedIncomingEntities.entities,
+      );
   const missingFields = computeMissingFields(collected, input.productContext);
   const isComplete = missingFields.length === 0;
   const awaitingConfirmation = isComplete;

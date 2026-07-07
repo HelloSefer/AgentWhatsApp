@@ -12,6 +12,7 @@ export const orderStatuses = [
 ] as const;
 
 export type OrderStatus = (typeof orderStatuses)[number];
+export type OrderReceiptSendStatus = "SENT" | "FAILED" | "SKIPPED";
 
 export interface ConfirmedOrder {
   id: string;
@@ -26,6 +27,10 @@ export interface ConfirmedOrder {
   quantity: number;
   status: OrderStatus;
   createdAt: string;
+  receiptPdfPath?: string;
+  receiptSentAt?: string;
+  receiptMediaId?: string;
+  receiptSendStatus?: OrderReceiptSendStatus;
 }
 
 type SaveConfirmedOrderInput = {
@@ -126,6 +131,26 @@ export function updateConfirmedOrderStatus(
   }
 
   order.status = status;
+
+  return order;
+}
+
+export function updateConfirmedOrderReceipt(
+  id: string,
+  receipt: {
+    receiptPdfPath?: string;
+    receiptSentAt?: string;
+    receiptMediaId?: string;
+    receiptSendStatus?: OrderReceiptSendStatus;
+  },
+): ConfirmedOrder | undefined {
+  const order = getConfirmedOrderById(id);
+
+  if (!order) {
+    return undefined;
+  }
+
+  Object.assign(order, receipt);
 
   return order;
 }

@@ -10,7 +10,15 @@ import {
 } from "./text-normalization";
 
 export function detectSpecificSize(message: string): string | null {
-  const sizeMatch = message.match(/\b(3[6-9]|4[0-5]|xxl|xl|xs|s|m|l)\b/i);
+  const labeledLetterSizeMatch = message.match(
+    /(?:size|taille|مقاس|قياس)\s*(xxl|xl|xs|s|m|l)\b/i,
+  );
+
+  if (labeledLetterSizeMatch?.[1]) {
+    return labeledLetterSizeMatch[1].toUpperCase();
+  }
+
+  const sizeMatch = message.match(/\b(3[6-9]|4[0-5])\b/i);
 
   return sizeMatch?.[1]?.toUpperCase() || null;
 }
@@ -71,7 +79,16 @@ export function isPriceQuestion(message: string): boolean {
     "تمن",
     "prix",
     "price",
+    "bach7l",
+    "bachhal",
+    "bach7al",
+    "bch7al",
+    "bchhal",
+    "bch7l",
+    "ch7al",
+    "chhal",
     "بكم",
+    "بشحال",
     "شحال داير",
   ]);
 }
@@ -93,9 +110,17 @@ export function isImageRequest(message: string): boolean {
 export function isSizeQuestion(message: string): boolean {
   return includesAny(message, [
     "مقاس",
+    "المقاسات",
+    "قياس",
+    "القياسات",
+    "سايز",
+    "السايزات",
     "قياس",
     "size",
+    "sizes",
     "taille",
+    "pointure",
+    "pointures",
     "xl",
     "xxl",
     "36",

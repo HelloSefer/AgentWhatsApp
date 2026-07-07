@@ -163,6 +163,35 @@ export async function updateConversationOrderState(
   return session;
 }
 
+export async function appendSellerBrainReplyKey(
+  input: SessionIdentity & {
+    replyKey: string;
+    intent?: string;
+  },
+): Promise<ConversationSession> {
+  const session = await getConversationSession(
+    input.customerId,
+    input.sellerId,
+    input.productId,
+  );
+  const recentReplyKeys = [
+    ...(session.sellerBrain?.recentReplyKeys || []).filter(
+      (replyKey) => replyKey !== input.replyKey,
+    ),
+    input.replyKey,
+  ].slice(-5);
+
+  session.sellerBrain = {
+    recentReplyKeys,
+    lastIntent: input.intent ?? session.sellerBrain?.lastIntent,
+    lastReplyAt: new Date().toISOString(),
+  };
+
+  await saveConversationSession(session);
+
+  return session;
+}
+
 export async function clearConversationSession(
   customerId: string,
   sellerId?: string,

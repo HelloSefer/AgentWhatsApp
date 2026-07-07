@@ -222,7 +222,7 @@ export function getSizeReply(
 
   if (requestedSize) {
     return isAvailableSize(requestedSize, productContext)
-      ? `نعم، مقاس ${requestedSize} متوفر.`
+      ? `نعم، مقاس ${requestedSize} متوفر. بغيتي نكمل لك الطلب؟`
       : `حالياً مقاس ${requestedSize} ما متوفرش، المقاسات المتوفرة هي: ${formatNaturalList(
           availableSizes,
         )}.`;
@@ -245,10 +245,7 @@ export function getColorReply(
   if (requestedColor) {
     return isAvailableColor(requestedColor, productContext)
       ? `نعم، اللون ${requestedColor.replyName.replace(/^ال/, "")} متوفر.`
-      : `حالياً اللون ${requestedColor.replyName.replace(
-          /^ال/,
-          "",
-        )} ما متوفرش، الألوان المتوفرة هي: ${formatColorList(
+      : `اللون ${requestedColor.replyName} ما متوفرش حالياً. المتوفر هو ${formatColorList(
           availableColors,
         )}.`;
   }
@@ -260,10 +257,10 @@ export function getOrderReply(productContext: ProductContext): string {
   const orderFields = productContext.requiredOrderFields?.filter(Boolean);
 
   if (!orderFields?.length) {
-    return "مرحبا، عافاك صيفط ليا الاسم الكامل، رقم الهاتف، المدينة والعنوان باش نأكد لك الطلب.";
+    return "أكيد، صيفط ليا الاسم الكامل، رقم الهاتف، المدينة والعنوان باش نوجد لك الطلب.";
   }
 
-  return `مرحبا، عافاك صيفط ليا ${formatNaturalList(
+  return `أكيد، صيفط ليا ${formatNaturalList(
     orderFields,
-  )} باش نأكد لك الطلب.`;
+  )} باش نوجد لك الطلب.`;
 }

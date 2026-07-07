@@ -1,6 +1,9 @@
 backend/node_modules/
 backend/dist/
 backend/.env
+backend/.env.local
+.env
+.env.local
 backend/auth/
 backend/*.log
 .DS_Store

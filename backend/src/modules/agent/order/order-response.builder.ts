@@ -146,5 +146,5 @@ export function buildOrderProgressReply(input: {
     return `مزيان، توصلت ب${collectedSummary}. باقي عافاك صيفط ليا ${missingFieldsText} باش نأكد لك الطلب.`;
   }
 
-  return `مرحبا، عافاك صيفط ليا ${missingFieldsText} باش نأكد لك الطلب.`;
+  return `أكيد، صيفط ليا ${missingFieldsText} باش نوجد لك الطلب.`;
 }

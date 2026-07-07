@@ -94,6 +94,11 @@ export interface ConversationSession {
   orderState: ConversationOrderState;
   lastIntent?: AgentIntent;
   lastMood?: CustomerMood;
+  sellerBrain?: {
+    recentReplyKeys: string[];
+    lastIntent?: string;
+    lastReplyAt?: string;
+  };
   createdAt: string;
   updatedAt: string;
   expiresAt?: string;

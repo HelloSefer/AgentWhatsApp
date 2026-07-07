@@ -4,6 +4,10 @@ import type {
   ConversationOrderState,
   ConversationSession,
 } from "../agent-brain.types";
+import {
+  safeFallbackIntentAnalysis,
+  validateAIIntentRouterAnalysis,
+} from "./ai-intent-router.schema";
 import { DEFAULT_PRODUCT_CONTEXT } from "../default-product-context";
 import type { ProductContext } from "../product-context.types";
 
@@ -97,6 +101,7 @@ export interface AIIntentRouterMeta {
   parseDurationMs: number;
   usedAI: boolean;
   timedOut: boolean;
+  validationFailed: boolean;
   model: string;
 }
 
@@ -136,26 +141,7 @@ const orderFlowIntents: AIIntentRouterIntent[] = [
   "order_correction",
 ];
 
-const fallbackAnalysis: AIIntentRouterAnalysis = {
-  intent: "unknown",
-  subIntent: null,
-  entities: {
-    size: null,
-    color: null,
-    city: null,
-    quantity: null,
-    phone: null,
-    fullName: null,
-    address: null,
-  },
-  language: "unknown",
-  customerMood: "neutral",
-  salesStage: "not_relevant",
-  salesOpportunity: false,
-  shouldUseDirectAnswer: false,
-  shouldContinueOrderFlow: false,
-  confidence: 0,
-};
+const fallbackAnalysis: AIIntentRouterAnalysis = safeFallbackIntentAnalysis;
 
 const aiIntentRouterSchema = {
   type: "object",
@@ -581,6 +567,8 @@ function hasQuestionCue(message: string): boolean {
       "what",
       "how",
       "where",
+      "ina",
+      "ach men",
     ])
   );
 }
@@ -611,7 +599,17 @@ function findQuantity(message: string, explicitSize?: string | null): number | n
   }
 
   if (
-    includesAny(message, ["wa7da", "wahda", "waheda", "واحدة", "وحدة"])
+    includesAny(message, [
+      "wa7da",
+      "wahda",
+      "w7da",
+      "wahed",
+      "wahd",
+      "waheda",
+      "واحدة",
+      "وحدة",
+      "واحد",
+    ])
   ) {
     return 1;
   }
@@ -724,6 +722,10 @@ function findColor(message: string): string | null {
 
   if (hasColor(["وردي", "الوردي", "rose", "pink"])) {
     return "وردي";
+  }
+
+  if (hasColor(["اصفر", "صفر", "الاصفر", "sfar", "yellow", "jaune"])) {
+    return "أصفر";
   }
 
   return null;
@@ -843,12 +845,75 @@ function hasOrderStartCue(message: string): boolean {
     "نكومندي",
     "نطلب",
     "طلب",
+    "الطلب",
+    "بغيت الطلب",
+    "دير ليا الطلب",
+    "وجد ليا الطلب",
+    "صوب ليا الطلب",
+    "صايب ليا الطلب",
+    "كومند",
+    "كوموند",
+    "كوموندي",
+    "بغيت كوموند",
+    "بغيت نكوموند",
+    "تصوب لي كومند",
+    "تصوب لي كوموند",
+    "تقدر تصوب لي كومند ديالي",
+    "واش تقدر تصوب لي كومند ديالي",
+    "اك تقد تصوب لي كومند ديالي",
+    "اقدر تصوب لي كومند ديالي",
+    "commande",
+    "order",
+    "bghit commande",
+    "bghit order",
+    "dir lia commande",
+    "dir lia order",
+    "t9dr tsawb lia commande",
+    "tsawb lia commande dyali",
     "khoud lia",
     "khod lia",
     "khoud liya",
     "خود ليا",
     "خذ ليا",
     "عافاك بغيت",
+  ]);
+}
+
+function isDomainOrderStartRequest(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+
+  if (
+    ["الطلب", "طلب", "commande", "order", "كومند", "كوموند"].includes(
+      normalizedMessage,
+    )
+  ) {
+    return true;
+  }
+
+  return includesAny(message, [
+    "بغيت نكوموندي",
+    "بغيت نكومندي",
+    "بغيت نكوموند",
+    "بغيت كوموند",
+    "بغيت الطلب",
+    "دير ليا الطلب",
+    "وجد ليا الطلب",
+    "صوب ليا الطلب",
+    "صايب ليا الطلب",
+    "تصوب لي كومند",
+    "تصوب لي كوموند",
+    "تقدر تصوب لي كومند ديالي",
+    "واش تقدر تصوب لي كومند ديالي",
+    "اك تقد تصوب لي كومند ديالي",
+    "اقدر تصوب لي كومند ديالي",
+    "bghit ncommandi",
+    "bghit ncommander",
+    "bghit commande",
+    "bghit order",
+    "dir lia commande",
+    "dir lia order",
+    "t9dr tsawb lia commande",
+    "tsawb lia commande dyali",
   ]);
 }
 
@@ -904,6 +969,136 @@ function isNeutralAcknowledgement(message: string): boolean {
   ].some((value) => normalizeText(message) === normalizeText(value));
 }
 
+function isLowSignalUnknown(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+
+  return (
+    /^[؟?!.،,\s]+$/.test(message) ||
+    normalizedMessage.length <= 2 ||
+    ["???", "??", "...", ".."].includes(normalizedMessage)
+  );
+}
+
+function isPersonaQuestion(message: string): boolean {
+  return includesAny(message, [
+    "شنو سميتك",
+    "شنو سميتك؟",
+    "اش سميتك",
+    "اشنو سميتك",
+    "سميتك",
+    "smitk",
+    "smitik",
+    "smiya",
+    "who are you",
+    "who r u",
+    "nta bot",
+    "nti bot",
+    "wach bot",
+    "واش بوت",
+    "واش روبو",
+    "واش إنسان",
+    "واش انسان",
+    "are you human",
+    "human",
+    "bot",
+  ]);
+}
+
+function getPersonaSubIntent(message: string): string {
+  return includesAny(message, [
+    "واش إنسان",
+    "واش انسان",
+    "are you human",
+    "human",
+    "bot",
+    "nta bot",
+    "nti bot",
+    "wach bot",
+    "واش بوت",
+    "واش روبو",
+  ])
+    ? "human_check"
+    : "assistant_identity";
+}
+
+function isProductOverviewQuestion(message: string): boolean {
+  return includesAny(message, [
+    "شنو هو المنتوج",
+    "شنو المنتوج",
+    "شنو المنتج",
+    "شنو السلعة",
+    "شنو كتبيعو",
+    "شنو كتبيع",
+    "اش كتبيعو",
+    "شنو عندكم",
+    "شنو كاين عندكم",
+    "what do you sell",
+    "what are you selling",
+    "what product",
+    "chno katbi3o",
+    "xno katbi3o",
+    "ach katbi3o",
+    "chno 3andkom",
+    "xno 3andkom",
+  ]);
+}
+
+function isColorQuestionLike(
+  message: string,
+  entities: Partial<AIIntentRouterEntities>,
+  hasQuestion: boolean,
+): boolean {
+  return (
+    !hasOrderCorrectionCue(message) &&
+    (Boolean(entities.color) &&
+      (hasQuestion ||
+        includesAny(message, [
+          "kayn",
+          "كاين",
+          "available",
+          "متوفر",
+          "متوفرة",
+          "لون",
+          "lon",
+          "color",
+          "couleur",
+          "brayt",
+          "bghit",
+          "بغيت",
+        ]))) ||
+    (includesAny(message, [
+      "الوان",
+      "الألوان",
+      "الالوان",
+      "alwan",
+      "alwan kaynin",
+      "لون",
+      "lon",
+      "color",
+      "colors",
+      "couleur",
+      "couleurs",
+      "ach men color",
+      "chno alwan",
+      "ina alwan",
+    ]) &&
+      (hasQuestion || includesAny(message, ["kaynin", "kayn", "كاينين", "كاين"])))
+  );
+}
+
+function isOffTopicSmallTalk(message: string): boolean {
+  return includesAny(message, [
+    "الماتش",
+    "ماتش",
+    "match",
+    "football",
+    "الطقس",
+    "weather",
+    "سياسة",
+    "politics",
+  ]);
+}
+
 function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysis> {
   const language = detectLanguage(message);
   const preExtracted = preExtractDeterministicEntities(message);
@@ -911,6 +1106,20 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
     ...preExtracted.entities,
   };
   const hasQuestion = hasQuestionCue(message);
+
+  if (isLowSignalUnknown(message)) {
+    return {
+      intent: "unknown",
+      subIntent: "low_signal",
+      language,
+      customerMood: "neutral",
+      salesStage: "not_relevant",
+      salesOpportunity: false,
+      shouldUseDirectAnswer: false,
+      shouldContinueOrderFlow: false,
+      confidence: 0.9,
+    };
+  }
 
   if (isNeutralAcknowledgement(message)) {
     return {
@@ -925,6 +1134,101 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
       shouldUseDirectAnswer: false,
       shouldContinueOrderFlow: false,
       confidence: 0.9,
+    };
+  }
+
+  if (isOffTopicSmallTalk(message)) {
+    return {
+      intent: "unknown",
+      subIntent: "off_topic",
+      language,
+      customerMood: "neutral",
+      salesStage: "not_relevant",
+      salesOpportunity: false,
+      shouldUseDirectAnswer: false,
+      shouldContinueOrderFlow: false,
+      confidence: 0.9,
+    };
+  }
+
+  if (isPersonaQuestion(message)) {
+    return {
+      intent: "product_info_question",
+      subIntent: getPersonaSubIntent(message),
+      language,
+      customerMood: "neutral",
+      salesStage: "asking_info",
+      salesOpportunity: true,
+      shouldUseDirectAnswer: false,
+      shouldContinueOrderFlow: false,
+      confidence: 0.93,
+    };
+  }
+
+  if (isProductOverviewQuestion(message)) {
+    return {
+      intent: "product_info_question",
+      subIntent: "product_overview",
+      language,
+      customerMood: "interested",
+      salesStage: "asking_info",
+      salesOpportunity: true,
+      shouldUseDirectAnswer: false,
+      shouldContinueOrderFlow: false,
+      confidence: 0.93,
+      entities: {
+        ...fallbackAnalysis.entities,
+        ...entities,
+      },
+    };
+  }
+
+  if (
+    includesAny(message, [
+      "اللون لي خارج",
+      "لون خارج",
+      "خارج اكثر",
+      "خارج كثر",
+      "الأكثر طلبا",
+      "الاكثر طلبا",
+      "اكثر طلب",
+      "popular color",
+      "best color",
+      "top color",
+    ])
+  ) {
+    return {
+      intent: "product_info_question",
+      subIntent: "popular_color",
+      language,
+      customerMood: "interested",
+      salesStage: "asking_info",
+      salesOpportunity: true,
+      shouldUseDirectAnswer: false,
+      shouldContinueOrderFlow: false,
+      confidence: 0.93,
+      entities: {
+        ...fallbackAnalysis.entities,
+        ...entities,
+      },
+    };
+  }
+
+  if (isColorQuestionLike(message, entities, hasQuestion)) {
+    return {
+      intent: "color_question",
+      subIntent: entities.color ? "specific_color" : "available_colors",
+      language,
+      customerMood: "interested",
+      salesStage: "asking_info",
+      salesOpportunity: true,
+      shouldUseDirectAnswer: true,
+      shouldContinueOrderFlow: false,
+      confidence: 0.92,
+      entities: {
+        ...fallbackAnalysis.entities,
+        ...entities,
+      },
     };
   }
 
@@ -966,6 +1270,24 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
       shouldUseDirectAnswer: false,
       shouldContinueOrderFlow: true,
       confidence: 0.92,
+      entities: {
+        ...fallbackAnalysis.entities,
+        ...entities,
+      },
+    };
+  }
+
+  if (isDomainOrderStartRequest(message)) {
+    return {
+      intent: "order_start",
+      subIntent: "start_order",
+      language,
+      customerMood: "ready_to_order",
+      salesStage: "ready_to_order",
+      salesOpportunity: true,
+      shouldUseDirectAnswer: false,
+      shouldContinueOrderFlow: true,
+      confidence: 0.93,
       entities: {
         ...fallbackAnalysis.entities,
         ...entities,
@@ -1031,8 +1353,11 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
       "ghali",
       "غالي",
       "taman akhor",
+      "akher taman",
       "ثمن اخر",
       "تمن اخر",
+      "اخر ثمن",
+      "آخر ثمن",
       "نقص",
       "rkhssa",
       "rkhis",
@@ -1066,8 +1391,11 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
     return {
       intent: includesAny(message, [
         "taman akhor",
+        "akher taman",
         "ثمن اخر",
         "تمن اخر",
+        "اخر ثمن",
+        "آخر ثمن",
         "نقص",
         "ناقصة",
         "ناقص",
@@ -1098,10 +1426,17 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
       "اش تنصحني",
       "كتنصحني",
       "تنصحني",
+      "محتارة",
+      "محتار",
       "شنو ناخد",
       "شنو نختار",
       "مناسبة",
       "للخروج",
+      "الخروج",
+      "l khroj",
+      "lkhroj",
+      "khroj",
+      "lkhrij",
       "رجل شوية عريضة",
       "رجل عريضة",
       "wide foot",
@@ -1120,7 +1455,17 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
       "wide foot",
     ])
       ? "size_recommendation"
-      : includesAny(message, ["مناسبة", "للخروج", "usage", "use"])
+      : includesAny(message, [
+            "مناسبة",
+            "للخروج",
+            "الخروج",
+            "l khroj",
+            "lkhroj",
+            "khroj",
+            "lkhrij",
+            "usage",
+            "use",
+          ])
         ? "usage_question"
         : includesAny(message, [
               "مريحة",
@@ -1240,12 +1585,25 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
   }
 
   if (
-    (includesAny(message, ["مقاس", "قياس", "size", "taille"]) && hasQuestion) ||
+    (includesAny(message, [
+      "مقاس",
+      "المقاسات",
+      "قياس",
+      "القياسات",
+      "سايز",
+      "السايزات",
+      "size",
+      "sizes",
+      "taille",
+      "pointure",
+      "pointures",
+    ]) &&
+      hasQuestion) ||
     (entities.size && includesAny(message, ["واش كاين", "kayn", "available"]))
   ) {
     return {
       intent: "size_question",
-      subIntent: "specific_size",
+      subIntent: entities.size ? "specific_size" : "available_sizes",
       language,
       customerMood: "interested",
       salesStage: "asking_info",
@@ -1270,10 +1628,22 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
       "price",
       "prix",
       "taman",
+      "bach7l",
+      "bachhal",
+      "bach7al",
+      "bach7l hadi",
+      "bachhal hadi",
+      "bch7l",
+      "bch7l hadi",
       "chhal",
+      "ch7al",
+      "ch7al hadi",
       "bch7al",
       "b ch7al",
       "bchhal",
+      "bch7alhadi",
+      "بشحال",
+      "شحال هادي",
     ])
     && !includesAny(message, [
       "التوصيل",
@@ -1498,6 +1868,7 @@ function buildMeta(input: {
   parseDurationMs: number;
   usedAI: boolean;
   timedOut: boolean;
+  validationFailed: boolean;
 }): AIIntentRouterMeta {
   return {
     durationMs: Date.now() - input.totalStartedAt,
@@ -1506,13 +1877,14 @@ function buildMeta(input: {
     parseDurationMs: input.parseDurationMs,
     usedAI: input.usedAI,
     timedOut: input.timedOut,
+    validationFailed: input.validationFailed,
     model: env.ollamaModel,
   };
 }
 
 function logTiming(meta: AIIntentRouterMeta): void {
   console.log(
-    `🧭 AI intent router timing total=${meta.durationMs}ms pre=${meta.preExtractDurationMs}ms ai=${meta.aiDurationMs}ms parse=${meta.parseDurationMs}ms usedAI=${meta.usedAI} timedOut=${meta.timedOut} model=${meta.model}`,
+    `🧭 AI intent router timing total=${meta.durationMs}ms pre=${meta.preExtractDurationMs}ms ai=${meta.aiDurationMs}ms parse=${meta.parseDurationMs}ms usedAI=${meta.usedAI} timedOut=${meta.timedOut} validationFailed=${meta.validationFailed} model=${meta.model}`,
   );
 }
 
@@ -1543,6 +1915,7 @@ export async function analyzeAIIntentWithMeta(
   let parseDurationMs = 0;
   let usedAI = false;
   let timedOut = false;
+  let validationFailed = false;
   let intentAnalysis: AIIntentRouterAnalysis;
   let aiStartedAt = 0;
 
@@ -1554,7 +1927,9 @@ export async function analyzeAIIntentWithMeta(
     );
 
     if (deterministicAnalysis) {
-      intentAnalysis = deterministicAnalysis;
+      const validated = validateAIIntentRouterAnalysis(deterministicAnalysis);
+      intentAnalysis = validated.analysis;
+      validationFailed = validated.validationFailed;
 
       const meta = buildMeta({
         totalStartedAt,
@@ -1563,6 +1938,7 @@ export async function analyzeAIIntentWithMeta(
         parseDurationMs,
         usedAI,
         timedOut,
+        validationFailed,
       });
       logTiming(meta);
 
@@ -1589,12 +1965,15 @@ export async function analyzeAIIntentWithMeta(
     const parseStartedAt = Date.now();
     const parsed = parseRouterJson(aiReply);
     const sanitizedAnalysis = sanitizeAnalysis(parsed);
-    intentAnalysis = finalizeAnalysis(
+    const finalAnalysis = finalizeAnalysis(
       sanitizedAnalysis,
       userMessage,
       orderState,
       preExtraction,
     );
+    const validated = validateAIIntentRouterAnalysis(finalAnalysis);
+    intentAnalysis = validated.analysis;
+    validationFailed = validated.validationFailed;
     parseDurationMs = Date.now() - parseStartedAt;
 
     const meta = buildMeta({
@@ -1604,6 +1983,7 @@ export async function analyzeAIIntentWithMeta(
       parseDurationMs,
       usedAI,
       timedOut,
+      validationFailed,
     });
     logTiming(meta);
 
@@ -1617,12 +1997,15 @@ export async function analyzeAIIntentWithMeta(
       error instanceof Error &&
       error.message.toLowerCase().includes("timed out");
 
-    intentAnalysis = finalizeAnalysis(
+    const finalAnalysis = finalizeAnalysis(
       fallbackAnalysis,
       userMessage,
       orderState,
       preExtraction,
     );
+    const validated = validateAIIntentRouterAnalysis(finalAnalysis);
+    intentAnalysis = validated.analysis;
+    validationFailed = validated.validationFailed;
 
     const meta = buildMeta({
       totalStartedAt,
@@ -1631,6 +2014,7 @@ export async function analyzeAIIntentWithMeta(
       parseDurationMs,
       usedAI,
       timedOut,
+      validationFailed,
     });
     logTiming(meta);
 

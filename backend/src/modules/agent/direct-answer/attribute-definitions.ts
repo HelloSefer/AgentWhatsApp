@@ -129,6 +129,10 @@ export const colorDefinitions: ColorDefinition[] = [
     ],
   },
   {
+    replyName: "الأصفر",
+    values: ["أصفر", "اصفر", "الأصفر", "الاصفر", "صفر", "sfar", "yellow", "jaune"],
+  },
+  {
     replyName: "الأزرق",
     values: ["أزرق", "ازرق", "الأزرق", "الازرق", "blue", "bleu"],
   },
