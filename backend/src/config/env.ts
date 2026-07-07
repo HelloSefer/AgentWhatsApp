@@ -64,6 +64,14 @@ export const env = {
     process.env.ORDER_RECEIPT_OUTPUT_DIR || "storage/receipts",
   orderReceiptSendToCustomer:
     process.env.ORDER_RECEIPT_SEND_TO_CUSTOMER !== "false",
+  orderReceiptDeleteAfterSend:
+    process.env.ORDER_RECEIPT_DELETE_AFTER_SEND === "true",
+  orderReceiptKeepFailedFiles:
+    process.env.ORDER_RECEIPT_KEEP_FAILED_FILES !== "false",
+  orderReceiptCleanupOnStart:
+    process.env.ORDER_RECEIPT_CLEANUP_ON_START === "true",
+  orderReceiptCleanupMaxAgeHours:
+    Number(process.env.ORDER_RECEIPT_CLEANUP_MAX_AGE_HOURS) || 24,
   whatsappInteractiveChoicesEnabled:
     process.env.WHATSAPP_INTERACTIVE_CHOICES_ENABLED !== "false",
   whatsappInteractiveChoicesMode:

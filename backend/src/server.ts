@@ -2,6 +2,7 @@ import pino from "pino";
 import app from "./app";
 import { env } from "./config/env";
 import { warmNaturalReplyModel } from "./modules/agent/natural-reply/natural-reply-generator.service";
+import { cleanupOldOrderReceiptPdfs } from "./modules/order-receipt/order-receipt.service";
 import { startWhatsApp } from "./modules/whatsapp/whatsapp.service";
 
 const logger = pino({
@@ -21,6 +22,10 @@ app.listen(env.port, () => {
 
   warmNaturalReplyModel().catch((error) => {
     logger.error({ error }, "Failed to warm natural reply model");
+  });
+
+  cleanupOldOrderReceiptPdfs().catch((error) => {
+    logger.error({ error }, "Failed to clean old order receipt PDFs");
   });
 
   if (env.whatsappProvider === "cloud_api") {

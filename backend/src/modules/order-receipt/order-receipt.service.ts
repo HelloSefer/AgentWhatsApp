@@ -16,13 +16,25 @@ type GenerateReceiptResult = {
   errorMessage?: string;
 };
 
+export type LocalReceiptDeleteResult = {
+  localFileDeleted: boolean;
+  localFileDeletedAt?: string;
+  localFileDeleteError?: string;
+  pdfExistsAfterSend: boolean;
+};
+
 type OrderReceiptDiagnostics = {
   totalOrderReceiptPdfGenerated: number;
   totalOrderReceiptPdfFailed: number;
   totalOrderReceiptDocumentsSent: number;
   totalOrderReceiptDocumentsFailed: number;
   totalOrderReceiptDuplicateSkipped: number;
+  totalOrderReceiptLocalFilesDeleted: number;
+  totalOrderReceiptLocalFileDeleteFailed: number;
+  totalOrderReceiptCleanupDeleted: number;
   lastOrderReceiptSentAt?: string;
+  lastOrderReceiptLocalFileDeletedAt?: string;
+  lastOrderReceiptCleanupAt?: string;
 };
 
 const receiptRecords = new Map<string, OrderReceiptRecord>();
@@ -32,6 +44,9 @@ const diagnostics: OrderReceiptDiagnostics = {
   totalOrderReceiptDocumentsSent: 0,
   totalOrderReceiptDocumentsFailed: 0,
   totalOrderReceiptDuplicateSkipped: 0,
+  totalOrderReceiptLocalFilesDeleted: 0,
+  totalOrderReceiptLocalFileDeleteFailed: 0,
+  totalOrderReceiptCleanupDeleted: 0,
 };
 
 function logJson(payload: Record<string, unknown>) {
@@ -71,6 +86,9 @@ export function recordOrderReceiptDocumentSent(input: {
   orderId: string;
   pdfPath: string;
   mediaId?: string;
+  localFileDeleted?: boolean;
+  localFileDeletedAt?: string;
+  localFileDeleteError?: string;
 }) {
   diagnostics.totalOrderReceiptDocumentsSent += 1;
   diagnostics.lastOrderReceiptSentAt = new Date().toISOString();
@@ -80,6 +98,9 @@ export function recordOrderReceiptDocumentSent(input: {
     mediaId: input.mediaId,
     sentAt: diagnostics.lastOrderReceiptSentAt,
     sendStatus: "SENT",
+    localFileDeleted: input.localFileDeleted,
+    localFileDeletedAt: input.localFileDeletedAt,
+    localFileDeleteError: input.localFileDeleteError,
   });
 }
 
@@ -87,6 +108,9 @@ export function recordOrderReceiptDocumentFailed(input: {
   orderId: string;
   pdfPath?: string;
   errorMessage: string;
+  localFileDeleted?: boolean;
+  localFileDeletedAt?: string;
+  localFileDeleteError?: string;
 }) {
   diagnostics.totalOrderReceiptDocumentsFailed += 1;
   receiptRecords.set(input.orderId, {
@@ -94,6 +118,9 @@ export function recordOrderReceiptDocumentFailed(input: {
     pdfPath: input.pdfPath,
     sendStatus: "FAILED",
     lastError: input.errorMessage,
+    localFileDeleted: input.localFileDeleted,
+    localFileDeletedAt: input.localFileDeletedAt,
+    localFileDeleteError: input.localFileDeleteError,
   });
 }
 
@@ -107,6 +134,9 @@ export function recordOrderReceiptSkipped(input: {
     orderId: input.orderId,
     pdfPath: input.pdfPath,
     sendStatus: input.status || "SKIPPED",
+    localFileDeleted: receiptRecords.get(input.orderId)?.localFileDeleted,
+    localFileDeletedAt: receiptRecords.get(input.orderId)?.localFileDeletedAt,
+    localFileDeleteError: receiptRecords.get(input.orderId)?.localFileDeleteError,
   });
   logJson({
     event: "order_receipt.duplicate_skipped",
@@ -123,12 +153,162 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+export async function orderReceiptFileExists(filePath: string): Promise<boolean> {
+  return fileExists(filePath);
+}
+
 async function getFileSize(filePath: string): Promise<number> {
   try {
     const stat = await fs.stat(filePath);
     return stat.size;
   } catch (_error) {
     return 0;
+  }
+}
+
+export async function deleteLocalReceiptPdf(
+  orderId: string,
+  pdfPath: string,
+): Promise<LocalReceiptDeleteResult> {
+  try {
+    if (!(await fileExists(pdfPath))) {
+      const deletedAt = new Date().toISOString();
+
+      logJson({
+        event: "order_receipt.local_pdf.deleted",
+        orderId,
+        pdfPath,
+        alreadyMissing: true,
+      });
+
+      return {
+        localFileDeleted: true,
+        localFileDeletedAt: deletedAt,
+        pdfExistsAfterSend: false,
+      };
+    }
+
+    await fs.unlink(pdfPath);
+
+    const deletedAt = new Date().toISOString();
+
+    diagnostics.totalOrderReceiptLocalFilesDeleted += 1;
+    diagnostics.lastOrderReceiptLocalFileDeletedAt = deletedAt;
+
+    const existingRecord = receiptRecords.get(orderId);
+    receiptRecords.set(orderId, {
+      orderId,
+      pdfPath,
+      mediaId: existingRecord?.mediaId,
+      sentAt: existingRecord?.sentAt,
+      sendStatus: existingRecord?.sendStatus || "SENT",
+      lastError: existingRecord?.lastError,
+      localFileDeleted: true,
+      localFileDeletedAt: deletedAt,
+    });
+
+    logJson({
+      event: "order_receipt.local_pdf.deleted",
+      orderId,
+      pdfPath,
+    });
+
+    return {
+      localFileDeleted: true,
+      localFileDeletedAt: deletedAt,
+      pdfExistsAfterSend: false,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+    diagnostics.totalOrderReceiptLocalFileDeleteFailed += 1;
+    logJson({
+      event: "order_receipt.local_pdf.delete_failed",
+      orderId,
+      pdfPath,
+      errorMessage,
+    });
+
+    return {
+      localFileDeleted: false,
+      localFileDeleteError: errorMessage,
+      pdfExistsAfterSend: await fileExists(pdfPath),
+    };
+  }
+}
+
+export async function cleanupOldOrderReceiptPdfs(): Promise<{
+  ok: boolean;
+  deletedCount: number;
+  errorMessage?: string;
+}> {
+  if (!env.orderReceiptCleanupOnStart) {
+    return {
+      ok: true,
+      deletedCount: 0,
+    };
+  }
+
+  const outputDir = getOrderReceiptOutputDir();
+  const maxAgeMs = Math.max(env.orderReceiptCleanupMaxAgeHours, 1) * 60 * 60 * 1000;
+  const cutoff = Date.now() - maxAgeMs;
+  let deletedCount = 0;
+
+  try {
+    const entries = await fs.readdir(outputDir, {
+      withFileTypes: true,
+    }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        return [];
+      }
+
+      throw error;
+    });
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".pdf")) {
+        continue;
+      }
+
+      const filePath = path.join(outputDir, entry.name);
+      const stat = await fs.stat(filePath);
+
+      if (stat.mtimeMs > cutoff) {
+        continue;
+      }
+
+      await fs.unlink(filePath);
+      deletedCount += 1;
+    }
+
+    diagnostics.totalOrderReceiptCleanupDeleted += deletedCount;
+    diagnostics.lastOrderReceiptCleanupAt = new Date().toISOString();
+    logJson({
+      event: "order_receipt.cleanup.completed",
+      outputDir,
+      deletedCount,
+      maxAgeHours: env.orderReceiptCleanupMaxAgeHours,
+    });
+
+    return {
+      ok: true,
+      deletedCount,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+    diagnostics.lastOrderReceiptCleanupAt = new Date().toISOString();
+    logJson({
+      event: "order_receipt.cleanup.failed",
+      outputDir,
+      errorMessage,
+    });
+
+    return {
+      ok: false,
+      deletedCount,
+      errorMessage,
+    };
   }
 }
 

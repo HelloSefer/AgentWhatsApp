@@ -31,6 +31,9 @@ export interface ConfirmedOrder {
   receiptSentAt?: string;
   receiptMediaId?: string;
   receiptSendStatus?: OrderReceiptSendStatus;
+  receiptLocalFileDeleted?: boolean;
+  receiptLocalFileDeletedAt?: string;
+  receiptLocalFileDeleteError?: string;
 }
 
 type SaveConfirmedOrderInput = {
@@ -142,6 +145,9 @@ export function updateConfirmedOrderReceipt(
     receiptSentAt?: string;
     receiptMediaId?: string;
     receiptSendStatus?: OrderReceiptSendStatus;
+    receiptLocalFileDeleted?: boolean;
+    receiptLocalFileDeletedAt?: string;
+    receiptLocalFileDeleteError?: string;
   },
 ): ConfirmedOrder | undefined {
   const order = getConfirmedOrderById(id);

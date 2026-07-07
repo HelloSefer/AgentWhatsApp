@@ -8,6 +8,7 @@ import {
   buildSampleReceiptOrder,
   generateOrderReceiptPdf,
   getOrderReceiptPdfPath,
+  getOrderReceiptRecord,
 } from "./order-receipt.service";
 import { sendOrderReceiptDocumentForOrder } from "../whatsapp/cloud/whatsapp-cloud.service";
 
@@ -86,11 +87,16 @@ export async function testSendOrderReceipt(req: Request, res: Response) {
 export async function downloadOrderReceipt(req: Request, res: Response) {
   const orderId = typeof req.params.orderId === "string" ? req.params.orderId.trim() : "";
   const pdfPath = getOrderReceiptPdfPath(orderId);
+  const order = getConfirmedOrderById(orderId);
+  const receiptRecord = getOrderReceiptRecord(orderId);
 
   if (!(await exists(pdfPath))) {
     return res.status(404).json({
       ok: false,
-      message: "Receipt PDF not found",
+      message:
+        order?.receiptLocalFileDeleted || receiptRecord?.localFileDeleted
+          ? "Receipt PDF file is no longer available locally"
+          : "Receipt PDF not found",
     });
   }
 
@@ -99,4 +105,3 @@ export async function downloadOrderReceipt(req: Request, res: Response) {
 
   return res.sendFile(pdfPath);
 }
-

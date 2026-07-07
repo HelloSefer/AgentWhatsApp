@@ -21,6 +21,7 @@ import {
   resolveOrderFormBaseUrl,
 } from "../../order-form/order-form.service";
 import {
+  deleteLocalReceiptPdf,
   generateOrderReceiptPdf,
   getOrderReceiptDiagnostics,
   getOrderReceiptRecord,
@@ -1206,7 +1207,15 @@ export async function sendOrderReceiptDocumentForOrder(input: {
   phoneNumberId?: string;
   order: ConfirmedOrder;
   allowDuplicate?: boolean;
-}): Promise<WhatsAppCloudSendResult & { pdfPath?: string }> {
+}): Promise<
+  WhatsAppCloudSendResult & {
+    pdfPath?: string;
+    localFileDeleted?: boolean;
+    localFileDeletedAt?: string;
+    localFileDeleteError?: string;
+    pdfExistsAfterSend?: boolean;
+  }
+> {
   const existingReceipt = getOrderReceiptRecord(input.order.id);
 
   if (
@@ -1225,6 +1234,12 @@ export async function sendOrderReceiptDocumentForOrder(input: {
       payload: null,
       response: { skipped: "duplicate_receipt" },
       pdfPath: existingReceipt?.pdfPath || input.order.receiptPdfPath,
+      localFileDeleted:
+        existingReceipt?.localFileDeleted ||
+        input.order.receiptLocalFileDeleted,
+      localFileDeletedAt:
+        existingReceipt?.localFileDeletedAt ||
+        input.order.receiptLocalFileDeletedAt,
     };
   }
 
@@ -1299,34 +1314,67 @@ export async function sendOrderReceiptDocumentForOrder(input: {
   });
 
   if (sendResult.success) {
+    const deleteResult = env.orderReceiptDeleteAfterSend
+      ? await deleteLocalReceiptPdf(input.order.id, pdfResult.pdfPath)
+      : {
+          localFileDeleted: false,
+          pdfExistsAfterSend: true,
+        };
+
     recordOrderReceiptDocumentSent({
       orderId: input.order.id,
       pdfPath: pdfResult.pdfPath,
       mediaId: sendResult.mediaId,
+      localFileDeleted: deleteResult.localFileDeleted,
+      localFileDeletedAt: deleteResult.localFileDeletedAt,
+      localFileDeleteError: deleteResult.localFileDeleteError,
     });
     updateConfirmedOrderReceipt(input.order.id, {
       receiptPdfPath: pdfResult.pdfPath,
       receiptMediaId: sendResult.mediaId,
       receiptSentAt: new Date().toISOString(),
       receiptSendStatus: "SENT",
+      receiptLocalFileDeleted: deleteResult.localFileDeleted,
+      receiptLocalFileDeletedAt: deleteResult.localFileDeletedAt,
+      receiptLocalFileDeleteError: deleteResult.localFileDeleteError,
     });
+
+    return {
+      ...sendResult,
+      pdfPath: pdfResult.pdfPath,
+      ...deleteResult,
+    };
   } else {
+    const deleteResult = !env.orderReceiptKeepFailedFiles
+      ? await deleteLocalReceiptPdf(input.order.id, pdfResult.pdfPath)
+      : {
+          localFileDeleted: false,
+          pdfExistsAfterSend: true,
+        };
+
     recordOrderReceiptDocumentFailed({
       orderId: input.order.id,
       pdfPath: pdfResult.pdfPath,
       errorMessage: sendResult.errorMessage || "Document send failed",
+      localFileDeleted: deleteResult.localFileDeleted,
+      localFileDeletedAt: deleteResult.localFileDeletedAt,
+      localFileDeleteError: deleteResult.localFileDeleteError,
     });
     updateConfirmedOrderReceipt(input.order.id, {
       receiptPdfPath: pdfResult.pdfPath,
       receiptMediaId: sendResult.mediaId,
       receiptSendStatus: "FAILED",
+      receiptLocalFileDeleted: deleteResult.localFileDeleted,
+      receiptLocalFileDeletedAt: deleteResult.localFileDeletedAt,
+      receiptLocalFileDeleteError: deleteResult.localFileDeleteError,
     });
-  }
 
-  return {
-    ...sendResult,
-    pdfPath: pdfResult.pdfPath,
-  };
+    return {
+      ...sendResult,
+      pdfPath: pdfResult.pdfPath,
+      ...deleteResult,
+    };
+  }
 }
 
 export async function sendCtaUrl(input: {

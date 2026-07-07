@@ -9,7 +9,9 @@ export interface OrderReceiptRecord {
   sentAt?: string;
   sendStatus: ReceiptSendStatus;
   lastError?: string;
+  localFileDeleted?: boolean;
+  localFileDeletedAt?: string;
+  localFileDeleteError?: string;
 }
 
 export type OrderReceiptOrder = ConfirmedOrder;
-
