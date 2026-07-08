@@ -43,6 +43,7 @@ import type {
   WhatsAppCloudIncomingMessage,
   WhatsAppCloudSendResult,
 } from "./whatsapp-cloud.types";
+import type { CloudReplyDispatchResult } from "./cloud-reply-dispatch.types";
 
 const GRAPH_API_BASE_URL = "https://graph.facebook.com";
 const PREVIEW_LENGTH = 90;
@@ -1031,6 +1032,7 @@ export async function sendCloudText(input: {
   to: string;
   phoneNumberId?: string;
   text: string;
+  forceDryRun?: boolean;
 }): Promise<WhatsAppCloudSendResult> {
   const phoneNumberId =
     input.phoneNumberId || env.whatsappCloudPhoneNumberId || "";
@@ -1042,6 +1044,26 @@ export async function sendCloudText(input: {
       body: input.text,
     },
   };
+
+  if (input.forceDryRun) {
+    const result = {
+      success: true,
+      dryRun: true,
+      payload,
+      response: { dryRun: true, forced: true },
+    };
+
+    logJson({
+      event: "whatsapp.cloud.send.text",
+      to: maskPhone(input.to),
+      dryRun: true,
+      success: true,
+      forcedDryRun: true,
+    });
+
+    return result;
+  }
+
   const result = await postCloudMessage(phoneNumberId, payload);
 
   logJson({
@@ -2315,128 +2337,33 @@ async function sendAgentCloudResult(input: {
   customerId: string;
   userMessage: string;
   result: AgentResult;
-}): Promise<WhatsAppCloudSendResult> {
-  const { result } = input;
-  const orderStateSummary = result.meta?.orderStateSummary;
-
-  if (
-    shouldSendOrderConfirmationButtons({
-      reply: result.reply,
-      orderStateSummary,
-    })
-  ) {
-    const summary = stripConfirmationQuestion(result.reply);
-
-    if (summary) {
-      await sendCloudText({
-        to: input.to,
-        phoneNumberId: input.phoneNumberId,
-        text: summary,
-      });
-    }
-
-    return sendReplyButtonPreset({
-      to: input.to,
-      phoneNumberId: input.phoneNumberId,
-      preset: "order_confirmation",
-      fallbackText:
-        "واش نأكد لك الطلب؟ جاوب بنعم للتأكيد، أو قل لي شنو بغيتي تبدل.",
-    }).then((sendResult) => {
-      logJson({
-        event: "whatsapp.cloud.reply_buttons.auto_confirmation_sent",
-        waId: maskPhone(input.to),
-        success: sendResult.success,
-      });
-
-      return sendResult;
-    });
-  }
-
-  if (
-    shouldSendColorButtons({
-      reply: result.reply,
-      orderStateSummary,
-    })
-  ) {
-    if (result.reply.trim()) {
-      await sendCloudText({
-        to: input.to,
-        phoneNumberId: input.phoneNumberId,
-        text: result.reply,
-      });
-    }
-
-    const sendResult = await sendReplyButtonPreset({
-      to: input.to,
-      phoneNumberId: input.phoneNumberId,
-      preset: "color_choice",
-      fallbackText: "اختار اللون: أسود أو وردي.",
-    });
-
-    logJson({
-      event: "whatsapp.cloud.reply_buttons.auto_color_sent",
-      waId: maskPhone(input.to),
-      success: sendResult.success,
-    });
-
-    return sendResult;
-  }
-
-  if (isPriceQuestion(input.userMessage)) {
-    await sendCloudText({
-      to: input.to,
-      phoneNumberId: input.phoneNumberId,
-      text: result.reply,
-    });
-
-    if (shouldSkipRecentAutoButtonPreset(input.customerId, "after_price")) {
-      return {
-        success: true,
-        dryRun: env.whatsappCloudDryRun,
-        payload: null,
-        response: { skipped: "recent_after_price_buttons" },
-      };
-    }
-
-    const sendResult = await sendReplyButtonPreset({
-      to: input.to,
-      phoneNumberId: input.phoneNumberId,
-      preset: "after_price",
-      fallbackText: "إلى بغيتي نكمل لك الطلب، قول نطلب.",
-    });
-
-    if (sendResult.success) {
-      markRecentAutoButtonPreset(input.customerId, "after_price");
-    }
-
-    logJson({
-      event: "whatsapp.cloud.reply_buttons.auto_after_price_sent",
-      waId: maskPhone(input.to),
-      success: sendResult.success,
-      skippedRecent: false,
-    });
-
-    return sendResult;
-  }
-
-  const choiceListAction = result.actions.find(
-    (action): action is ChoiceListAction => action.type === "choice_list",
+}): Promise<CloudReplyDispatchResult> {
+  const { cloudReplyDispatchService } = await import(
+    "./cloud-reply-dispatch.service.js"
   );
-
-  if (choiceListAction) {
-    return sendCloudChoiceList({
-      to: input.to,
-      phoneNumberId: input.phoneNumberId,
-      action: choiceListAction,
-      fallbackReply: result.reply,
-    });
-  }
-
-  return sendCloudText({
+  const dispatchResult = await cloudReplyDispatchService.dispatchAgentReply({
     to: input.to,
     phoneNumberId: input.phoneNumberId,
-    text: result.reply,
+    replyText: input.result.reply,
+    whatsappInteractivePreview:
+      input.result.meta?.whatsappInteractivePreview ?? null,
+    interactiveSendDecision:
+      input.result.meta?.interactiveSendDecision ?? null,
+    forceDryRun: env.whatsappCloudDryRun,
   });
+
+  logJson({
+    event: "whatsapp.cloud.reply.dispatch",
+    waId: maskPhone(input.to),
+    mode: dispatchResult.mode,
+    dryRun: dispatchResult.dryRun,
+    ok: dispatchResult.ok,
+    fallbackUsed: dispatchResult.fallbackUsed,
+    reason: dispatchResult.reason,
+    error: dispatchResult.error,
+  });
+
+  return dispatchResult;
 }
 
 export async function processCloudWebhookBody(
@@ -2717,6 +2644,7 @@ export async function processCloudWebhookBody(
         sellerId: identity.sellerId,
         phoneNumberId: identity.phoneNumberId,
         useMemory: true,
+        interactiveSendChannel: "whatsapp_cloud",
       });
       const durationMs = result.meta?.durationMs ?? Date.now() - startedAt;
 
@@ -2746,7 +2674,7 @@ export async function processCloudWebhookBody(
       processResult.agentReplyPreview = previewText(result.reply);
       processResult.actionsCount = result.actions.length;
       processResult.sendAttempted = true;
-      processResult.sendSuccess = sendResult.success;
+      processResult.sendSuccess = sendResult.ok;
 
       if (result.meta?.orderStateSummary?.confirmed) {
         const confirmedOrder = listConfirmedOrders({

@@ -11,6 +11,7 @@ import {
 import { processOrderTurn } from "./order/order-state.service";
 import { env } from "../../config/env";
 import { interactiveSendDecisionService } from "./reply/interactive-send-decision.service";
+import type { InteractiveSendChannel } from "./reply/interactive-send-decision.types";
 import { whatsappInteractiveMapper } from "./reply/whatsapp-interactive.mapper";
 import { productContextService } from "./config/product-context.service";
 import { requiredFieldsService } from "./config/required-fields.service";
@@ -45,6 +46,8 @@ export type GenerateAgentOptions = {
   productId?: string;
   phoneNumberId?: string;
   useMemory?: boolean;
+  interactiveSendChannel?: InteractiveSendChannel;
+  interactiveEnabledOverride?: boolean;
 };
 
 const MAX_REPLY_LENGTH = 280;
@@ -1127,8 +1130,9 @@ export async function generateAgentResult(
       replyUi,
     });
   const interactiveSendDecision = interactiveSendDecisionService.decide({
-    channel: "test",
-    interactiveEnabled: env.whatsappInteractiveEnabled,
+    channel: activeOptions?.interactiveSendChannel || "test",
+    interactiveEnabled:
+      activeOptions?.interactiveEnabledOverride ?? env.whatsappInteractiveEnabled,
     whatsappInteractivePreview,
   });
   const finalResult: AgentResult = {

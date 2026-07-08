@@ -1,9 +1,11 @@
 import type { Request, Response } from "express";
 import { env } from "../../../config/env";
+import { generateAgentResult } from "../../agent/agent.service";
 import {
   buildOrderFormUrl,
   resolveOrderFormBaseUrl,
 } from "../../order-form/order-form.service";
+import { cloudReplyDispatchService } from "./cloud-reply-dispatch.service";
 import {
   buildSimulatedIncomingWebhook,
   checkSubscribedApps,
@@ -315,6 +317,153 @@ export async function testWhatsAppCloudSendInteractivePreview(
       payload: null,
       response: null,
       errorMessage: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function testWhatsAppCloudDispatchAgentReply(
+  req: Request,
+  res: Response,
+) {
+  if (!isDevToolAllowed()) {
+    return res.status(403).json({
+      ok: false,
+      mode: "text",
+      dryRun: true,
+      error: "Cloud reply dispatch test endpoint is disabled in production",
+    });
+  }
+
+  const to = typeof req.body?.to === "string" ? req.body.to.trim() : "";
+  const phoneNumberId =
+    typeof req.body?.phoneNumberId === "string" && req.body.phoneNumberId.trim()
+      ? req.body.phoneNumberId.trim()
+      : env.whatsappCloudPhoneNumberId;
+  const replyText =
+    typeof req.body?.replyText === "string" ? req.body.replyText.trim() : "";
+  const forceDryRun = req.body?.forceDryRun === false ? false : true;
+
+  if (!to || !replyText) {
+    return res.status(400).json({
+      ok: false,
+      mode: "text",
+      dryRun: true,
+      error: "to and replyText are required",
+    });
+  }
+
+  try {
+    const result = await cloudReplyDispatchService.dispatchAgentReply({
+      to,
+      phoneNumberId,
+      replyText,
+      whatsappInteractivePreview: req.body?.whatsappInteractivePreview || null,
+      interactiveSendDecision: req.body?.interactiveSendDecision || null,
+      forceDryRun,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      mode: "text",
+      dryRun: forceDryRun,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function testWhatsAppCloudAgentDispatchFlow(
+  req: Request,
+  res: Response,
+) {
+  if (!isDevToolAllowed()) {
+    return res.status(403).json({
+      ok: false,
+      message: "Cloud agent dispatch flow test endpoint is disabled in production",
+    });
+  }
+
+  const sellerId =
+    typeof req.body?.sellerId === "string" && req.body.sellerId.trim()
+      ? req.body.sellerId.trim()
+      : undefined;
+  const customerPhone =
+    typeof req.body?.customerPhone === "string" && req.body.customerPhone.trim()
+      ? req.body.customerPhone.trim()
+      : "";
+  const message =
+    typeof req.body?.message === "string" && req.body.message.trim()
+      ? req.body.message.trim()
+      : "";
+  const phoneNumberId =
+    typeof req.body?.phoneNumberId === "string" && req.body.phoneNumberId.trim()
+      ? req.body.phoneNumberId.trim()
+      : env.whatsappCloudPhoneNumberId;
+  const forceDryRun = req.body?.forceDryRun === false ? false : true;
+  const simulateNoProviderCall = req.body?.simulateNoProviderCall === true;
+  const interactiveEnabledOverride =
+    typeof req.body?.interactiveEnabledOverride === "boolean"
+      ? req.body.interactiveEnabledOverride
+      : undefined;
+  const interactiveLiveSendAllowedOverride =
+    typeof req.body?.interactiveLiveSendAllowedOverride === "boolean"
+      ? req.body.interactiveLiveSendAllowedOverride
+      : undefined;
+
+  if (!customerPhone || !message) {
+    return res.status(400).json({
+      ok: false,
+      message: "customerPhone and message are required",
+    });
+  }
+
+  try {
+    const agentResult = await generateAgentResult(message, undefined, {
+      customerPhone,
+      sellerId,
+      phoneNumberId,
+      useMemory: true,
+      interactiveSendChannel: "whatsapp_cloud",
+      interactiveEnabledOverride,
+    });
+    const dispatchResult = await cloudReplyDispatchService.dispatchAgentReply({
+      to: customerPhone,
+      phoneNumberId,
+      replyText: agentResult.reply,
+      whatsappInteractivePreview:
+        agentResult.meta?.whatsappInteractivePreview ?? null,
+      interactiveSendDecision:
+        agentResult.meta?.interactiveSendDecision ?? null,
+      forceDryRun,
+      interactiveLiveSendAllowedOverride,
+      simulateNoProviderCall,
+    });
+    const dispatchSafety = {
+      interactiveEnabled:
+        interactiveEnabledOverride ?? env.whatsappInteractiveEnabled,
+      interactiveLiveSendAllowed:
+        interactiveLiveSendAllowedOverride ??
+        env.whatsappInteractiveLiveSendAllowed,
+      cloudDryRun: env.whatsappCloudDryRun,
+      forceDryRun,
+      simulateNoProviderCall,
+    };
+
+    return res.status(200).json({
+      ok: true,
+      reply: agentResult.reply,
+      actions: agentResult.actions,
+      source: agentResult.source,
+      meta: agentResult.meta,
+      dispatchSafety,
+      dispatchResult,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      message: "Cloud agent dispatch flow test failed",
+      error: error instanceof Error ? error.message : "Unknown error",
     });
   }
 }
