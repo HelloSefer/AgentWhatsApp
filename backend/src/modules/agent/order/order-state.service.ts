@@ -3,6 +3,14 @@ import { createNewConfirmedOrderNotification } from "../admin/admin-notification
 import { fastAnalyzeCustomerMessage } from "../fast-intent-analyzer.service";
 import type { ProductContext } from "../product-context.types";
 import {
+  getInvalidOrderFields,
+  isValidOrderField,
+  recordInvalidCandidateRejected,
+  recordInvalidExistingCleared,
+  recordOrderConfirmationBlockedInvalidFields,
+  validateOrderEntities,
+} from "./order-field-validator.service";
+import {
   getConversationSession,
   saveConversationSession,
   updateConversationOrderState,
@@ -268,35 +276,48 @@ function validateIncomingOrderEntities(
   entities: Partial<OrderEntities>,
   productContext: ProductContext,
 ): { entities: Partial<OrderEntities>; reply?: string } {
+  const fieldValidation = validateOrderEntities(entities, productContext);
+
+  for (const invalidField of fieldValidation.invalidFields) {
+    const field = invalidField as keyof OrderEntities;
+
+    recordInvalidCandidateRejected({
+      field,
+      value: entities[field],
+    });
+  }
+
+  const validEntities = fieldValidation.validEntities;
+
   if (
-    typeof entities.color === "string" &&
-    entities.color.trim() &&
-    !isAvailableColorValue(entities.color, productContext)
+    typeof validEntities.color === "string" &&
+    validEntities.color.trim() &&
+    !isAvailableColorValue(validEntities.color, productContext)
   ) {
     return {
       entities: {
-        ...entities,
+        ...validEntities,
         color: undefined,
       },
-      reply: buildUnavailableColorReply(entities.color, productContext),
+      reply: buildUnavailableColorReply(validEntities.color, productContext),
     };
   }
 
   if (
-    typeof entities.size === "string" &&
-    entities.size.trim() &&
-    !isAvailableSizeValue(entities.size, productContext)
+    typeof validEntities.size === "string" &&
+    validEntities.size.trim() &&
+    !isAvailableSizeValue(validEntities.size, productContext)
   ) {
     return {
       entities: {
-        ...entities,
+        ...validEntities,
         size: undefined,
       },
-      reply: buildUnavailableSizeReply(entities.size, productContext),
+      reply: buildUnavailableSizeReply(validEntities.size, productContext),
     };
   }
 
-  return { entities };
+  return { entities: validEntities };
 }
 
 function getRequiredOrderFields(productContext: ProductContext): OrderField[] {
@@ -312,7 +333,9 @@ function computeMissingFields(
   productContext: ProductContext,
 ): string[] {
   return getRequiredOrderFields(productContext).filter(
-    (field) => !hasValue(collected[field]),
+    (field) =>
+      !hasValue(collected[field]) ||
+      !isValidOrderField(field, collected[field], productContext),
   );
 }
 
@@ -320,20 +343,64 @@ async function sanitizeStoredOrderState(
   session: ConversationSession,
   productContext: ProductContext,
 ): Promise<ConversationSession> {
-  const color = session.orderState.collected.color;
+  const collected: OrderEntities = { ...session.orderState.collected };
+  let changed = false;
 
-  if (
-    session.orderState.confirmed ||
-    typeof color !== "string" ||
-    !color.trim() ||
-    isAvailableColorValue(color, productContext)
-  ) {
+  if (session.orderState.confirmed) {
     return session;
   }
 
-  const collected: OrderEntities = { ...session.orderState.collected };
+  for (const [field, value] of Object.entries(collected) as Array<[
+    keyof OrderEntities,
+    OrderEntities[keyof OrderEntities],
+  ]>) {
+    if (!hasValue(value)) {
+      continue;
+    }
 
-  delete collected.color;
+    if (!isValidOrderField(field, value, productContext)) {
+      delete collected[field];
+      changed = true;
+      recordInvalidExistingCleared({
+        field,
+        value,
+      });
+    }
+  }
+
+  const color = collected.color;
+
+  if (
+    typeof color === "string" &&
+    color.trim() &&
+    !isAvailableColorValue(color, productContext)
+  ) {
+    delete collected.color;
+    changed = true;
+    recordInvalidExistingCleared({
+      field: "color",
+      value: color,
+    });
+  }
+
+  const size = collected.size;
+
+  if (
+    typeof size === "string" &&
+    size.trim() &&
+    !isAvailableSizeValue(size, productContext)
+  ) {
+    delete collected.size;
+    changed = true;
+    recordInvalidExistingCleared({
+      field: "size",
+      value: size,
+    });
+  }
+
+  if (!changed) {
+    return session;
+  }
 
   session.orderState = {
     ...session.orderState,
@@ -883,6 +950,39 @@ async function processConfirmationTurn(input: {
   productContext: ProductContext;
 }): Promise<ProcessOrderTurnResult> {
   if (isConfirmationMessage(input.message)) {
+    const missingFields = computeMissingFields(
+      input.session.orderState.collected,
+      input.productContext,
+    );
+
+    if (missingFields.length > 0) {
+      await updateConversationOrderState({
+        customerId: input.customerId,
+        sellerId: input.sellerId,
+        productId: input.productId,
+        collected: input.session.orderState.collected,
+        missingFields,
+        isComplete: false,
+        awaitingConfirmation: false,
+        confirmed: false,
+      });
+      recordOrderConfirmationBlockedInvalidFields({
+        invalidFields: missingFields,
+      });
+
+      return {
+        handled: true,
+        reply: buildOrderProgressReply({
+          collected: input.session.orderState.collected,
+          missingFields,
+          isComplete: false,
+          productContext: input.productContext,
+        }),
+        isComplete: false,
+        missingFields,
+      };
+    }
+
     const confirmedOrder = saveConfirmedOrder({
       customerId: input.customerId,
       productContext: input.productContext,

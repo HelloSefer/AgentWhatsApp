@@ -5,6 +5,10 @@ import {
   updateConfirmedOrderReceipt,
 } from "../agent/order/confirmed-order-store.service";
 import {
+  getInvalidOrderFields,
+  recordReceiptSkippedInvalidOrderFields,
+} from "../agent/order/order-field-validator.service";
+import {
   buildSampleReceiptOrder,
   generateOrderReceiptPdf,
   getOrderReceiptPdfPath,
@@ -41,6 +45,34 @@ export async function testGenerateOrderReceipt(req: Request, res: Response) {
       ok: false,
       message: "Order not found. Provide orderId or sample=true.",
     });
+  }
+
+  if (order) {
+    const invalidFields = getInvalidOrderFields(
+      {
+        fullName: order.fullName,
+        phone: order.phone,
+        city: order.city,
+        address: order.address,
+        size: order.size,
+        color: order.color,
+        quantity: order.quantity,
+      },
+      ["fullName", "phone", "city", "address", "size", "color", "quantity"],
+    );
+
+    if (invalidFields.length > 0) {
+      recordReceiptSkippedInvalidOrderFields({
+        orderId: order.id,
+        invalidFields,
+      });
+
+      return res.status(400).json({
+        ok: false,
+        message: "Order has invalid fields. Receipt was not generated.",
+        invalidFields,
+      });
+    }
   }
 
   const result = await generateOrderReceiptPdf(order || buildSampleReceiptOrder());

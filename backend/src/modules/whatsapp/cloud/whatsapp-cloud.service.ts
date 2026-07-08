@@ -11,6 +11,11 @@ import type {
 import type { OrderEntities } from "../../agent/agent-brain.types";
 import { fastAnalyzeCustomerMessage } from "../../agent/fast-intent-analyzer.service";
 import {
+  getInvalidOrderFields,
+  getOrderFieldValidationDiagnostics,
+  recordReceiptSkippedInvalidOrderFields,
+} from "../../agent/order/order-field-validator.service";
+import {
   listConfirmedOrders,
   updateConfirmedOrderReceipt,
   type ConfirmedOrder,
@@ -286,6 +291,7 @@ export function recordCloudWebhookVerify(input: {
 
 export function getCloudDiagnostics() {
   const receiptDiagnostics = getOrderReceiptDiagnostics();
+  const orderFieldDiagnostics = getOrderFieldValidationDiagnostics();
 
   return {
     ok: true,
@@ -326,6 +332,7 @@ export function getCloudDiagnostics() {
     lastReplyButtonsSentAt: webhookDiagnostics.lastReplyButtonsSentAt,
     lastButtonReplyAt: webhookDiagnostics.lastButtonReplyAt,
     ...receiptDiagnostics,
+    ...orderFieldDiagnostics,
     totalOrderFormOpened: webhookDiagnostics.totalOrderFormOpened,
     totalOrderFormSubmitted: webhookDiagnostics.totalOrderFormSubmitted,
     totalOrderFormTokenInvalid: webhookDiagnostics.totalOrderFormTokenInvalid,
@@ -1240,6 +1247,39 @@ export async function sendOrderReceiptDocumentForOrder(input: {
       localFileDeletedAt:
         existingReceipt?.localFileDeletedAt ||
         input.order.receiptLocalFileDeletedAt,
+    };
+  }
+
+  const invalidOrderFields = getInvalidOrderFields(
+    {
+      fullName: input.order.fullName,
+      phone: input.order.phone,
+      city: input.order.city,
+      address: input.order.address,
+      size: input.order.size,
+      color: input.order.color,
+      quantity: input.order.quantity,
+    },
+    ["fullName", "phone", "city", "address", "size", "color", "quantity"],
+  );
+
+  if (invalidOrderFields.length > 0) {
+    recordReceiptSkippedInvalidOrderFields({
+      orderId: input.order.id,
+      invalidFields: invalidOrderFields,
+    });
+    updateConfirmedOrderReceipt(input.order.id, {
+      receiptSendStatus: "SKIPPED",
+    });
+
+    return {
+      success: true,
+      dryRun: env.whatsappCloudDryRun,
+      payload: null,
+      response: {
+        skipped: "invalid_order_fields",
+        invalidFields: invalidOrderFields,
+      },
     };
   }
 
