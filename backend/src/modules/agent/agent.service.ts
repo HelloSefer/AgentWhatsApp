@@ -9,6 +9,10 @@ import {
   getNaturalReplyStatus,
 } from "./natural-reply/natural-reply-generator.service";
 import { processOrderTurn } from "./order/order-state.service";
+import { productContextService } from "./config/product-context.service";
+import { requiredFieldsService } from "./config/required-fields.service";
+import type { RequiredOrderField } from "./config/required-fields.types";
+import { sellerConfigService } from "./config/seller-config.service";
 import { buildSalesResponse } from "./sales/sales-response.builder";
 import {
   buildSellerBrainResponse,
@@ -267,6 +271,29 @@ function toOrderEntities(analysis: AIIntentRouterAnalysis): OrderEntities {
       return typeof value === "string" ? Boolean(value.trim()) : false;
     }),
   ) as OrderEntities;
+}
+
+function getRuntimeRequiredOrderFields(
+  options?: GenerateAgentOptions,
+): RequiredOrderField[] | undefined {
+  if (!options?.sellerId) {
+    return undefined;
+  }
+
+  try {
+    const sellerConfig = sellerConfigService.getSellerConfig(options.sellerId);
+    const configProductContext = productContextService.getActiveProductContext(
+      options.sellerId,
+    );
+
+    return requiredFieldsService.getRequiredOrderFields({
+      sellerConfig,
+      productContext: configProductContext,
+    });
+  } catch (error) {
+    console.error("❌ Required order fields resolution failed", error);
+    return undefined;
+  }
 }
 
 function mightBeOrderMessage(message: string): boolean {
@@ -640,6 +667,7 @@ async function saveSellerBrainReplyMemory(input: {
 
 async function getOrderStateSummary(
   options?: GenerateAgentOptions,
+  requiredFields?: RequiredOrderField[],
 ): Promise<AgentOrderStateSummary | undefined> {
   if (!options?.useMemory || !options.customerId) {
     return undefined;
@@ -658,6 +686,8 @@ async function getOrderStateSummary(
       awaitingConfirmation: session.orderState.awaitingConfirmation,
       confirmed: session.orderState.confirmed,
       missingFields: session.orderState.missingFields,
+      requiredFields: requiredFields?.map((field) => field.key),
+      requiredFieldKeys: requiredFields?.map((field) => field.key),
       collected: session.orderState.collected,
     };
   } catch (error) {
@@ -671,6 +701,7 @@ async function buildOrderResultFromRouter(input: {
   productContext: ProductContext;
   options?: GenerateAgentOptions;
   analysis: AIIntentRouterAnalysis;
+  requiredFields?: RequiredOrderField[];
 }): Promise<AgentResult> {
   if (input.options?.useMemory && input.options.customerId) {
     const orderResult = await processOrderTurn({
@@ -680,6 +711,7 @@ async function buildOrderResultFromRouter(input: {
       productId: input.options.productId,
       message: input.userMessage,
       productContext: input.productContext,
+      requiredFields: input.requiredFields,
       analysis: {
         intent: input.analysis.intent,
         entities: toOrderEntities(input.analysis),
@@ -706,6 +738,7 @@ async function buildSmartOrderResultIfLikely(
   userMessage: string,
   productContext: ProductContext,
   options?: GenerateAgentOptions,
+  requiredFields?: RequiredOrderField[],
 ): Promise<AgentResult | null> {
   if (!options?.useMemory || !options.customerId || !mightBeOrderMessage(userMessage)) {
     return null;
@@ -729,6 +762,7 @@ async function buildSmartOrderResultIfLikely(
       productContext,
       options,
       analysis: intentAnalysis,
+      requiredFields,
     });
 
     return {
@@ -750,6 +784,7 @@ async function buildSmartRouterResult(
   userMessage: string,
   productContext: ProductContext,
   options?: GenerateAgentOptions,
+  requiredFields?: RequiredOrderField[],
 ): Promise<AgentResult | null> {
   try {
     const { intentAnalysis, meta: routerMeta } = await analyzeAIIntentWithMeta({
@@ -766,6 +801,7 @@ async function buildSmartRouterResult(
         productContext,
         options,
         analysis: intentAnalysis,
+        requiredFields,
       });
 
       return {
@@ -928,12 +964,14 @@ async function buildAgentResult(
   userMessage: string,
   productContext: ProductContext,
   options?: GenerateAgentOptions,
+  requiredFields?: RequiredOrderField[],
 ): Promise<AgentResult> {
   if (shouldUseSmartRouterBeforeDirect(userMessage)) {
     const routerReply = await buildSmartRouterResult(
       userMessage,
       productContext,
       options,
+      requiredFields,
     );
 
     if (routerReply) {
@@ -948,6 +986,7 @@ async function buildAgentResult(
       userMessage,
       productContext,
       options,
+      requiredFields,
     );
 
     if (smartOrderResult) {
@@ -975,6 +1014,7 @@ async function buildAgentResult(
     userMessage,
     productContext,
     options,
+    requiredFields,
   );
 
   if (routerReply) {
@@ -992,6 +1032,7 @@ async function buildOrderResultIfHandled(
   userMessage: string,
   productContext: ProductContext,
   options?: GenerateAgentOptions,
+  requiredFields?: RequiredOrderField[],
 ): Promise<AgentResult | null> {
   if (!options?.useMemory || !options.customerId) {
     return null;
@@ -1005,6 +1046,7 @@ async function buildOrderResultIfHandled(
       productId: options.productId,
       message: userMessage,
       productContext,
+      requiredFields,
     });
 
     if (!orderResult.handled || !orderResult.reply) {
@@ -1031,6 +1073,7 @@ export async function generateAgentResult(
   const userMessage = message.trim();
   const normalized = normalizeAgentOptions(options);
   const activeOptions = normalized.options;
+  const requiredFields = getRuntimeRequiredOrderFields(activeOptions);
 
   if (!userMessage) {
     throw new Error("Message is required");
@@ -1039,10 +1082,20 @@ export async function generateAgentResult(
   await appendMessageToMemory(activeOptions, "customer", userMessage);
 
   const result =
-    (await buildOrderResultIfHandled(userMessage, productContext, activeOptions)) ||
-    (await buildAgentResult(userMessage, productContext, activeOptions));
+    (await buildOrderResultIfHandled(
+      userMessage,
+      productContext,
+      activeOptions,
+      requiredFields,
+    )) ||
+    (await buildAgentResult(
+      userMessage,
+      productContext,
+      activeOptions,
+      requiredFields,
+    ));
 
-  const orderStateSummary = await getOrderStateSummary(activeOptions);
+  const orderStateSummary = await getOrderStateSummary(activeOptions, requiredFields);
   const naturalReplyStatus = getNaturalReplyStatus();
   const actions = withChoiceListActions({
     result,

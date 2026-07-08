@@ -1,4 +1,5 @@
 import type { OrderEntities } from "../agent-brain.types";
+import type { RequiredOrderField } from "../config/required-fields.types";
 import type { ProductContext } from "../product-context.types";
 
 const fieldLabels: Record<keyof OrderEntities, string> = {
@@ -48,41 +49,77 @@ function formatList(items: string[]): string {
   return `${items.slice(0, -1).join("، ")} و${items[items.length - 1]}`;
 }
 
-function formatMissingFields(missingFields: string[]): string {
-  return formatList(
-    missingFields.map((field) => fieldLabels[field as keyof OrderEntities] || field),
+function getFieldLabel(
+  field: string,
+  requiredFields: RequiredOrderField[] | undefined,
+  fallbackLabels: Record<keyof OrderEntities, string>,
+): string {
+  return (
+    requiredFields?.find((requiredField) => requiredField.key === field)?.label ||
+    fallbackLabels[field as keyof OrderEntities] ||
+    field
   );
 }
 
-function buildCollectedSummary(collected: OrderEntities): string {
-  const collectedParts: string[] = [];
+function formatMissingFields(
+  missingFields: string[],
+  requiredFields?: RequiredOrderField[],
+): string {
+  return formatList(
+    missingFields.map((field) =>
+      getFieldLabel(field, requiredFields, fieldLabels),
+    ),
+  );
+}
 
-  if (collected.size) {
+function buildCollectedSummary(
+  collected: OrderEntities,
+  requiredFields?: RequiredOrderField[],
+): string {
+  const collectedParts: string[] = [];
+  const requiredFieldKeys = new Set(requiredFields?.map((field) => field.key) || []);
+  const allowedKeys = requiredFields?.length
+    ? new Set([...requiredFieldKeys, "quantity"])
+    : undefined;
+
+  if ((!allowedKeys || allowedKeys.has("size")) && collected.size) {
     collectedParts.push(`المقاس ${collected.size}`);
   }
 
-  if (collected.color) {
+  if ((!allowedKeys || allowedKeys.has("color")) && collected.color) {
     collectedParts.push(`اللون ${collected.color}`);
   }
 
-  if (collected.city) {
+  if ((!allowedKeys || allowedKeys.has("city")) && collected.city) {
     collectedParts.push(`المدينة ${collected.city}`);
   }
 
-  if (collected.fullName) {
+  if ((!allowedKeys || allowedKeys.has("fullName")) && collected.fullName) {
     collectedParts.push(`الاسم ${collected.fullName}`);
   }
 
-  if (collected.phone) {
+  if ((!allowedKeys || allowedKeys.has("phone")) && collected.phone) {
     collectedParts.push(`رقم الهاتف`);
   }
 
-  if (collected.address) {
+  if ((!allowedKeys || allowedKeys.has("address")) && collected.address) {
     collectedParts.push(`العنوان`);
   }
 
-  if (collected.quantity) {
+  if ((!allowedKeys || allowedKeys.has("quantity")) && collected.quantity) {
     collectedParts.push(`الكمية ${collected.quantity}`);
+  }
+
+  for (const field of requiredFields || []) {
+    if (summaryFieldOrder.includes(field.key as keyof OrderEntities)) {
+      continue;
+    }
+
+    const value = (collected as Record<string, unknown>)[field.key];
+
+    if (hasValue(value)) {
+      collectedParts.push(`${field.label} ${formatOrderValue(value)}`);
+    }
   }
 
   return collectedParts.length ? formatList(collectedParts) : "";
@@ -96,24 +133,58 @@ function hasValue(value: unknown): boolean {
   return typeof value === "string" ? Boolean(value.trim()) : Boolean(value);
 }
 
-function formatOrderValue(value: OrderEntities[keyof OrderEntities]): string {
+function formatOrderValue(value: unknown): string {
   return typeof value === "number" ? String(value) : String(value).trim();
 }
 
-function buildOrderSummaryLines(collected: OrderEntities): string[] {
-  return summaryFieldOrder.flatMap((field) => {
-    const value = collected[field];
+function buildOrderSummaryLines(
+  collected: OrderEntities,
+  requiredFields?: RequiredOrderField[],
+): string[] {
+  const collectedRecord = collected as Record<string, unknown>;
+  const dynamicFields = requiredFields?.length
+    ? [
+        ...requiredFields,
+        ...(hasValue(collected.quantity) && !requiredFields.some((field) => field.key === "quantity")
+          ? [
+              {
+                key: "quantity",
+                label: summaryFieldLabels.quantity,
+              } as RequiredOrderField,
+            ]
+          : []),
+      ]
+    : summaryFieldOrder.map(
+        (field, index) =>
+          ({
+            key: field,
+            label: summaryFieldLabels[field],
+            required: true,
+            enabled: true,
+            source: "customerField",
+            askOrder: index + 1,
+          }) as RequiredOrderField,
+      );
+
+  return dynamicFields.flatMap((field) => {
+    const value = collectedRecord[field.key];
 
     if (!hasValue(value)) {
       return [];
     }
 
-    return `${summaryFieldLabels[field]}: ${formatOrderValue(value)}`;
+    const label =
+      summaryFieldLabels[field.key as keyof OrderEntities] || field.label;
+
+    return `${label}: ${formatOrderValue(value)}`;
   });
 }
 
-function buildOrderConfirmationPrompt(collected: OrderEntities): string {
-  const summaryLines = buildOrderSummaryLines(collected);
+function buildOrderConfirmationPrompt(
+  collected: OrderEntities,
+  requiredFields?: RequiredOrderField[],
+): string {
+  const summaryLines = buildOrderSummaryLines(collected, requiredFields);
 
   if (!summaryLines.length) {
     return "تمام، توصلت بجميع معلومات الطلب.\n\nواش نأكد لك الطلب؟";
@@ -134,13 +205,20 @@ export function buildOrderProgressReply(input: {
   missingFields: string[];
   isComplete: boolean;
   productContext: ProductContext;
+  requiredFields?: RequiredOrderField[];
 }): string {
   if (input.isComplete) {
-    return buildOrderConfirmationPrompt(input.collected);
+    return buildOrderConfirmationPrompt(input.collected, input.requiredFields);
   }
 
-  const missingFieldsText = formatMissingFields(input.missingFields);
-  const collectedSummary = buildCollectedSummary(input.collected);
+  const missingFieldsText = formatMissingFields(
+    input.missingFields,
+    input.requiredFields,
+  );
+  const collectedSummary = buildCollectedSummary(
+    input.collected,
+    input.requiredFields,
+  );
 
   if (collectedSummary) {
     return `مزيان، توصلت ب${collectedSummary}. باقي عافاك صيفط ليا ${missingFieldsText} باش نأكد لك الطلب.`;

@@ -9,6 +9,8 @@ export interface AgentOrderStateSummary {
   awaitingConfirmation: boolean;
   confirmed: boolean;
   missingFields: string[];
+  requiredFields?: string[];
+  requiredFieldKeys?: string[];
   collected?: OrderEntities;
 }
 

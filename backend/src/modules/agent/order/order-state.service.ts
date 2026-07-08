@@ -1,4 +1,6 @@
 import type { ConversationSession, OrderEntities } from "../agent-brain.types";
+import type { RequiredOrderField } from "../config/required-fields.types";
+import { requiredFieldsService } from "../config/required-fields.service";
 import { createNewConfirmedOrderNotification } from "../admin/admin-notification.service";
 import { fastAnalyzeCustomerMessage } from "../fast-intent-analyzer.service";
 import type { ProductContext } from "../product-context.types";
@@ -31,6 +33,7 @@ type ProcessOrderTurnInput = {
     intent?: string;
     entities?: OrderEntities;
   };
+  requiredFields?: RequiredOrderField[];
 };
 
 type ProcessOrderTurnResult = {
@@ -40,11 +43,39 @@ type ProcessOrderTurnResult = {
   missingFields: string[];
 };
 
-const defaultRequiredOrderFields: OrderField[] = [
-  "fullName",
-  "phone",
-  "city",
-  "address",
+const defaultRequiredOrderFields: RequiredOrderField[] = [
+  {
+    key: "fullName",
+    label: "الاسم الكامل",
+    required: true,
+    enabled: true,
+    source: "customerField",
+    askOrder: 1,
+  },
+  {
+    key: "phone",
+    label: "رقم الهاتف",
+    required: true,
+    enabled: true,
+    source: "customerField",
+    askOrder: 2,
+  },
+  {
+    key: "city",
+    label: "المدينة",
+    required: true,
+    enabled: true,
+    source: "customerField",
+    askOrder: 3,
+  },
+  {
+    key: "address",
+    label: "العنوان",
+    required: true,
+    enabled: true,
+    source: "customerField",
+    askOrder: 4,
+  },
 ];
 
 const fieldLabelMap = new Map<string, OrderField>([
@@ -60,6 +91,18 @@ const fieldLabelMap = new Map<string, OrderField>([
   ["الكمية", "quantity"],
   ["productName", "productName"],
   ["variant", "variant"],
+]);
+const knownOrderFieldKeys = new Set<string>([
+  "fullName",
+  "phone",
+  "city",
+  "address",
+  "productName",
+  "variant",
+  "color",
+  "size",
+  "quantity",
+  "notes",
 ]);
 
 const cityAliases: Array<{ city: string; aliases: string[] }> = [
@@ -153,6 +196,20 @@ const alreadyConfirmedReply =
   "الطلب ديالك راه تأكد من قبل. غادي نتواصلو معاك قريباً.";
 const orderCancelledReply =
   "تمام، ما غاديش نأكد الطلب. إلى بغيتي تبدل شي حاجة ولا ترجع تطلب، أنا هنا.";
+
+function buildCorrectionClarificationReply(
+  requiredFields?: RequiredOrderField[],
+): string {
+  const labels = (requiredFields || [])
+    .map((field) => field.label)
+    .filter(Boolean);
+
+  if (!labels.length) {
+    return correctionClarificationReply;
+  }
+
+  return `شنو المعلومة اللي بغيتي تبدل؟ ${formatNaturalList(labels)}؟`;
+}
 
 function normalizeText(text: string): string {
   return text
@@ -273,9 +330,74 @@ function buildUnavailableSizeReply(
   )}.`;
 }
 
+function getOptionField(
+  key: string,
+  requiredFields?: RequiredOrderField[],
+): RequiredOrderField | undefined {
+  return requiredFields?.find(
+    (field) => field.key === key && field.source === "productOption",
+  );
+}
+
+function matchConfiguredOption(
+  value: unknown,
+  options: string[] | undefined,
+): string | undefined {
+  if (typeof value !== "string" || !options?.length) {
+    return undefined;
+  }
+
+  const comparableValue = normalizeComparable(value);
+
+  return options.find(
+    (option) => normalizeComparable(option) === comparableValue,
+  );
+}
+
+function findConfiguredOption(
+  message: string,
+  options: string[] | undefined,
+): string | undefined {
+  if (!options?.length) {
+    return undefined;
+  }
+
+  const normalizedMessage = normalizeText(message);
+
+  return options.find((option) => {
+    const normalizedOption = normalizeText(option);
+
+    return (
+      normalizedMessage === normalizedOption ||
+      normalizedMessage.includes(normalizedOption)
+    );
+  });
+}
+
+function buildUnavailableOptionReply(
+  field: RequiredOrderField,
+  value: unknown,
+): string {
+  const valueText = typeof value === "string" ? value.trim() : String(value);
+  const optionsText = formatNaturalList(field.options || []);
+
+  if (field.key === "color") {
+    const colorText = valueText.startsWith("ال") ? valueText : `ال${valueText}`;
+
+    return `اللون ${colorText} ما متوفرش حالياً. الألوان المتوفرة هي: ${optionsText}. شنو اللون اللي بغيتي؟`;
+  }
+
+  if (field.key === "size") {
+    return `مقاس ${valueText} ما متوفرش حالياً. المقاسات المتوفرة هي: ${optionsText}.`;
+  }
+
+  return `${field.label} ${valueText} ما متوفرش حالياً. الاختيارات المتوفرة هي: ${optionsText}.`;
+}
+
 function validateIncomingOrderEntities(
   entities: Partial<OrderEntities>,
   productContext: ProductContext,
+  requiredFields?: RequiredOrderField[],
 ): { entities: Partial<OrderEntities>; reply?: string } {
   const fieldValidation = validateOrderEntities(entities, productContext);
 
@@ -288,11 +410,45 @@ function validateIncomingOrderEntities(
     });
   }
 
-  const validEntities = fieldValidation.validEntities;
+  const validEntities = { ...fieldValidation.validEntities } as Record<
+    string,
+    unknown
+  >;
+
+  for (const [field, value] of Object.entries(entities)) {
+    const optionField = getOptionField(field, requiredFields);
+
+    if (!optionField?.options?.length || !hasValue(value)) {
+      continue;
+    }
+
+    const matchedOption = matchConfiguredOption(value, optionField.options);
+
+    if (!matchedOption) {
+      recordInvalidCandidateRejected({
+        field: field as keyof OrderEntities,
+        value: value as OrderEntities[keyof OrderEntities],
+        reason: "unavailable_configured_option",
+      });
+
+      delete validEntities[field];
+
+      return {
+        entities: validEntities as Partial<OrderEntities>,
+        reply: buildUnavailableOptionReply(optionField, value),
+      };
+    }
+
+    validEntities[field] = matchedOption;
+  }
+
+  const colorOptionField = getOptionField("color", requiredFields);
+  const sizeOptionField = getOptionField("size", requiredFields);
 
   if (
     typeof validEntities.color === "string" &&
     validEntities.color.trim() &&
+    !colorOptionField &&
     !isAvailableColorValue(validEntities.color, productContext)
   ) {
     return {
@@ -307,6 +463,7 @@ function validateIncomingOrderEntities(
   if (
     typeof validEntities.size === "string" &&
     validEntities.size.trim() &&
+    !sizeOptionField &&
     !isAvailableSizeValue(validEntities.size, productContext)
   ) {
     return {
@@ -318,31 +475,95 @@ function validateIncomingOrderEntities(
     };
   }
 
-  return { entities: validEntities };
+  return { entities: validEntities as Partial<OrderEntities> };
 }
 
-function getRequiredOrderFields(productContext: ProductContext): OrderField[] {
+function getActiveRequiredFields(
+  productContext: ProductContext,
+  requiredFields?: RequiredOrderField[],
+): RequiredOrderField[] {
+  if (requiredFields?.length) {
+    return requiredFields.filter((field) => field.required && field.enabled);
+  }
+
   const mappedFields = (productContext.requiredOrderFields || [])
-    .map((field) => fieldLabelMap.get(field))
-    .filter((field): field is OrderField => Boolean(field));
+    .map((field, index): RequiredOrderField | undefined => {
+      const key = fieldLabelMap.get(field);
+
+      if (!key) {
+        return undefined;
+      }
+
+      return {
+        key,
+        label: field,
+        required: true,
+        enabled: true,
+        source: "customerField",
+        askOrder: index + 1,
+      };
+    })
+    .filter((field): field is RequiredOrderField => Boolean(field));
 
   return mappedFields.length ? mappedFields : defaultRequiredOrderFields;
+}
+
+function isValidDynamicOrderField(
+  field: RequiredOrderField,
+  value: unknown,
+  productContext: ProductContext,
+): boolean {
+  if (!hasValue(value)) {
+    return false;
+  }
+
+  if (field.source === "productOption" && field.options?.length) {
+    return Boolean(matchConfiguredOption(value, field.options));
+  }
+
+  if (knownOrderFieldKeys.has(field.key)) {
+    return isValidOrderField(
+      field.key as keyof OrderEntities,
+      value as OrderEntities[keyof OrderEntities],
+      productContext,
+    );
+  }
+
+  return true;
 }
 
 function computeMissingFields(
   collected: OrderEntities,
   productContext: ProductContext,
+  requiredFields?: RequiredOrderField[],
 ): string[] {
-  return getRequiredOrderFields(productContext).filter(
-    (field) =>
-      !hasValue(collected[field]) ||
-      !isValidOrderField(field, collected[field], productContext),
-  );
+  const activeRequiredFields = getActiveRequiredFields(productContext, requiredFields);
+  const collectedRecord = collected as Record<string, unknown>;
+
+  return requiredFieldsService
+    .getMissingRequiredFields({
+      requiredFields: activeRequiredFields,
+      collected: collectedRecord,
+    })
+    .concat(
+      activeRequiredFields.filter(
+        (field) =>
+          hasValue(collectedRecord[field.key]) &&
+          !isValidDynamicOrderField(
+            field,
+            collectedRecord[field.key],
+            productContext,
+          ),
+      ),
+    )
+    .map((field) => field.key)
+    .filter((field, index, fields) => fields.indexOf(field) === index);
 }
 
 async function sanitizeStoredOrderState(
   session: ConversationSession,
   productContext: ProductContext,
+  requiredFields?: RequiredOrderField[],
 ): Promise<ConversationSession> {
   const collected: OrderEntities = { ...session.orderState.collected };
   let changed = false;
@@ -350,6 +571,8 @@ async function sanitizeStoredOrderState(
   if (session.orderState.confirmed) {
     return session;
   }
+
+  const activeRequiredFields = getActiveRequiredFields(productContext, requiredFields);
 
   for (const [field, value] of Object.entries(collected) as Array<[
     keyof OrderEntities,
@@ -359,7 +582,14 @@ async function sanitizeStoredOrderState(
       continue;
     }
 
-    if (!isValidOrderField(field, value, productContext)) {
+    const requiredField = activeRequiredFields.find(
+      (candidate) => candidate.key === field,
+    );
+    const isValid = requiredField
+      ? isValidDynamicOrderField(requiredField, value, productContext)
+      : isValidOrderField(field, value, productContext);
+
+    if (!isValid) {
       delete collected[field];
       changed = true;
       recordInvalidExistingCleared({
@@ -369,11 +599,14 @@ async function sanitizeStoredOrderState(
     }
   }
 
+  const colorOptionField = getOptionField("color", activeRequiredFields);
+  const sizeOptionField = getOptionField("size", activeRequiredFields);
   const color = collected.color;
 
   if (
     typeof color === "string" &&
     color.trim() &&
+    !colorOptionField &&
     !isAvailableColorValue(color, productContext)
   ) {
     delete collected.color;
@@ -389,6 +622,7 @@ async function sanitizeStoredOrderState(
   if (
     typeof size === "string" &&
     size.trim() &&
+    !sizeOptionField &&
     !isAvailableSizeValue(size, productContext)
   ) {
     delete collected.size;
@@ -406,7 +640,11 @@ async function sanitizeStoredOrderState(
   session.orderState = {
     ...session.orderState,
     collected,
-    missingFields: computeMissingFields(collected, productContext),
+    missingFields: computeMissingFields(
+      collected,
+      productContext,
+      activeRequiredFields,
+    ),
     isComplete: false,
     awaitingConfirmation: false,
     confirmed: false,
@@ -525,6 +763,29 @@ function findQuantity(message: string): number | undefined {
   }
 
   return undefined;
+}
+
+function shouldCollectOptionalQuantity(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+
+  return (
+    Boolean(findColor(message) || findSize(message) || isOrderStartMessage(message)) &&
+    (/(^|\s)[1-9](\s|$)/.test(message) ||
+      includesAny(normalizedMessage, [
+        "wa7da",
+        "wahda",
+        "w7da",
+        "wahed",
+        "wahd",
+        "واحدة",
+        "وحدة",
+        "واحد",
+        "jouj",
+        "jooj",
+        "جوج",
+        "زوج",
+      ]))
+  );
 }
 
 function stripAfterQuantityMarker(text: string): string {
@@ -711,8 +972,9 @@ function isSimpleArabicName(message: string): boolean {
 function extractStandaloneEntities(
   message: string,
   missingFields: string[],
+  requiredFields?: RequiredOrderField[],
 ): Partial<OrderEntities> {
-  const entities: Partial<OrderEntities> = {};
+  const entities = {} as Record<string, unknown>;
   const phone = findPhone(message);
 
   if (phone && missingFields.includes("phone")) {
@@ -741,8 +1003,28 @@ function extractStandaloneEntities(
     entities.color = findColor(message);
   }
 
-  if (missingFields.includes("quantity")) {
+  if (
+    missingFields.includes("quantity") ||
+    shouldCollectOptionalQuantity(message)
+  ) {
     entities.quantity = findQuantity(message);
+  }
+
+  for (const field of requiredFields || []) {
+    if (
+      field.source !== "productOption" ||
+      !field.options?.length ||
+      !missingFields.includes(field.key) ||
+      hasValue(entities[field.key])
+    ) {
+      continue;
+    }
+
+    const configuredOption = findConfiguredOption(message, field.options);
+
+    if (configuredOption) {
+      entities[field.key] = configuredOption;
+    }
   }
 
   if (!entities.address && missingFields.includes("address")) {
@@ -753,7 +1035,7 @@ function extractStandaloneEntities(
     entities.fullName = normalizeText(message);
   }
 
-  return cleanEntities(entities);
+  return cleanEntities(entities as OrderEntities);
 }
 
 function mergeEntities(
@@ -1040,11 +1322,13 @@ async function processConfirmationTurn(input: {
   productId?: string;
   message: string;
   productContext: ProductContext;
+  requiredFields?: RequiredOrderField[];
 }): Promise<ProcessOrderTurnResult> {
   if (isConfirmationMessage(input.message)) {
     const missingFields = computeMissingFields(
       input.session.orderState.collected,
       input.productContext,
+      input.requiredFields,
     );
 
     if (missingFields.length > 0) {
@@ -1070,6 +1354,7 @@ async function processConfirmationTurn(input: {
           missingFields,
           isComplete: false,
           productContext: input.productContext,
+          requiredFields: input.requiredFields,
         }),
         isComplete: false,
         missingFields,
@@ -1133,6 +1418,7 @@ async function processConfirmationTurn(input: {
     const validatedCorrections = validateIncomingOrderEntities(
       corrections,
       input.productContext,
+      input.requiredFields,
     );
 
     if (validatedCorrections.reply) {
@@ -1148,7 +1434,11 @@ async function processConfirmationTurn(input: {
       input.session.orderState.collected,
       validatedCorrections.entities,
     );
-    const missingFields = computeMissingFields(collected, input.productContext);
+    const missingFields = computeMissingFields(
+      collected,
+      input.productContext,
+      input.requiredFields,
+    );
     const isComplete = missingFields.length === 0;
 
     await updateConversationOrderState({
@@ -1170,6 +1460,7 @@ async function processConfirmationTurn(input: {
         missingFields,
         isComplete,
         productContext: input.productContext,
+        requiredFields: input.requiredFields,
       }),
       isComplete,
       missingFields,
@@ -1179,7 +1470,7 @@ async function processConfirmationTurn(input: {
   return {
     handled: true,
     reply: hasCorrectionOrRejectionIntent(input.message)
-      ? correctionClarificationReply
+      ? buildCorrectionClarificationReply(input.requiredFields)
       : "ما فهمتش واش نأكد الطلب ولا بغيتي تبدل شي معلومة. عافاك جاوب بنعم للتأكيد، أو قول ليا شنو بغيتي تبدل.",
     isComplete: input.session.orderState.isComplete,
     missingFields: input.session.orderState.missingFields,
@@ -1245,6 +1536,10 @@ function shouldTreatAsOrderFlow(input: {
 export async function processOrderTurn(
   input: ProcessOrderTurnInput,
 ): Promise<ProcessOrderTurnResult> {
+  const activeRequiredFields = getActiveRequiredFields(
+    input.productContext,
+    input.requiredFields,
+  );
   const session = await sanitizeStoredOrderState(
     await getConversationSession(
       input.customerId,
@@ -1253,6 +1548,7 @@ export async function processOrderTurn(
       input.customerPhone,
     ),
     input.productContext,
+    activeRequiredFields,
   );
 
   if (session.orderState.confirmed) {
@@ -1278,6 +1574,7 @@ export async function processOrderTurn(
       productId: input.productId,
       message: input.message,
       productContext: input.productContext,
+      requiredFields: activeRequiredFields,
     });
   }
 
@@ -1292,10 +1589,15 @@ export async function processOrderTurn(
   const currentMissingFields =
     session.orderState.missingFields.length > 0
       ? session.orderState.missingFields
-      : computeMissingFields(session.orderState.collected, input.productContext);
+      : computeMissingFields(
+          session.orderState.collected,
+          input.productContext,
+          activeRequiredFields,
+        );
   const standaloneEntities = extractStandaloneEntities(
     input.message,
     currentMissingFields,
+    activeRequiredFields,
   );
   const shouldHandle = shouldTreatAsOrderFlow({
     intent: analysis?.intent,
@@ -1320,6 +1622,7 @@ export async function processOrderTurn(
   const validatedIncomingEntities = validateIncomingOrderEntities(
     incomingEntities,
     input.productContext,
+    activeRequiredFields,
   );
 
   if (validatedIncomingEntities.reply) {
@@ -1348,7 +1651,11 @@ export async function processOrderTurn(
         session.orderState.collected,
         validatedIncomingEntities.entities,
       );
-  const missingFields = computeMissingFields(collected, input.productContext);
+  const missingFields = computeMissingFields(
+    collected,
+    input.productContext,
+    activeRequiredFields,
+  );
   const isComplete = missingFields.length === 0;
   const awaitingConfirmation = isComplete;
 
@@ -1371,6 +1678,7 @@ export async function processOrderTurn(
       missingFields,
       isComplete,
       productContext: input.productContext,
+      requiredFields: activeRequiredFields,
     }),
     isComplete,
     missingFields,
