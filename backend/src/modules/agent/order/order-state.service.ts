@@ -18,7 +18,11 @@ import {
   updateConversationOrderState,
 } from "../session/conversation-session.service";
 import { saveConfirmedOrder } from "./confirmed-order-store.service";
-import { buildOrderProgressReply } from "./order-response.builder";
+import {
+  renderOrderConfirmationSuccessReply,
+  renderOrderProgressReply,
+} from "./order-response.builder";
+import type { AgentReplyUiHint } from "../reply/reply-renderer.types";
 
 type OrderField = keyof OrderEntities;
 
@@ -39,6 +43,7 @@ type ProcessOrderTurnInput = {
 type ProcessOrderTurnResult = {
   handled: boolean;
   reply?: string;
+  replyUi?: AgentReplyUiHint;
   isComplete: boolean;
   missingFields: string[];
 };
@@ -1347,15 +1352,18 @@ async function processConfirmationTurn(input: {
         invalidFields: missingFields,
       });
 
+      const renderedReply = renderOrderProgressReply({
+        collected: input.session.orderState.collected,
+        missingFields,
+        isComplete: false,
+        productContext: input.productContext,
+        requiredFields: input.requiredFields,
+      });
+
       return {
         handled: true,
-        reply: buildOrderProgressReply({
-          collected: input.session.orderState.collected,
-          missingFields,
-          isComplete: false,
-          productContext: input.productContext,
-          requiredFields: input.requiredFields,
-        }),
+        reply: renderedReply.text,
+        replyUi: renderedReply.ui,
         isComplete: false,
         missingFields,
       };
@@ -1383,9 +1391,12 @@ async function processConfirmationTurn(input: {
       confirmed: true,
     });
 
+    const renderedReply = renderOrderConfirmationSuccessReply();
+
     return {
       handled: true,
-      reply: "تم تأكيد الطلب ديالك بنجاح. غادي نتواصلو معاك قريباً.",
+      reply: renderedReply.text,
+      replyUi: renderedReply.ui,
       isComplete: true,
       missingFields: [],
     };
@@ -1453,15 +1464,18 @@ async function processConfirmationTurn(input: {
       confirmed: false,
     });
 
+    const renderedReply = renderOrderProgressReply({
+      collected,
+      missingFields,
+      isComplete,
+      productContext: input.productContext,
+      requiredFields: input.requiredFields,
+    });
+
     return {
       handled: true,
-      reply: buildOrderProgressReply({
-        collected,
-        missingFields,
-        isComplete,
-        productContext: input.productContext,
-        requiredFields: input.requiredFields,
-      }),
+      reply: renderedReply.text,
+      replyUi: renderedReply.ui,
       isComplete,
       missingFields,
     };
@@ -1671,15 +1685,18 @@ export async function processOrderTurn(
     confirmed: false,
   });
 
+  const renderedReply = renderOrderProgressReply({
+    collected,
+    missingFields,
+    isComplete,
+    productContext: input.productContext,
+    requiredFields: activeRequiredFields,
+  });
+
   return {
     handled: true,
-    reply: buildOrderProgressReply({
-      collected,
-      missingFields,
-      isComplete,
-      productContext: input.productContext,
-      requiredFields: activeRequiredFields,
-    }),
+    reply: renderedReply.text,
+    replyUi: renderedReply.ui,
     isComplete,
     missingFields,
   };

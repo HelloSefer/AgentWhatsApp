@@ -723,6 +723,9 @@ async function buildOrderResultFromRouter(input: {
         reply: orderResult.reply,
         actions: [],
         source: "ai_router",
+        meta: {
+          replyUi: orderResult.replyUi,
+        },
       };
     }
   }
@@ -1057,6 +1060,9 @@ async function buildOrderResultIfHandled(
       reply: orderResult.reply,
       actions: [],
       source: "direct",
+      meta: {
+        replyUi: orderResult.replyUi,
+      },
     };
   } catch (error) {
     console.error("❌ Order state processing failed", error);
