@@ -22,6 +22,7 @@ type OrderField = keyof OrderEntities;
 
 type ProcessOrderTurnInput = {
   customerId: string;
+  customerPhone?: string;
   sellerId?: string;
   productId?: string;
   message: string;
@@ -586,7 +587,10 @@ function findAddressAfterPhone(message: string, phone: string): string | undefin
     return undefined;
   }
 
-  const phoneIndex = message.indexOf(phoneText);
+  const phoneIndex =
+    message.indexOf(phoneText) >= 0
+      ? message.indexOf(phoneText)
+      : normalizeText(message).indexOf(normalizeText(phoneText));
 
   if (phoneIndex < 0) {
     return undefined;
@@ -594,6 +598,21 @@ function findAddressAfterPhone(message: string, phone: string): string | undefin
 
   const addressCandidate = message.slice(phoneIndex + phoneText.length).trim();
   const address = stripAfterQuantityMarker(addressCandidate);
+
+  return looksLikeAddressText(address) ? normalizeText(address) : undefined;
+}
+
+function findAddressAfterDetectedPhone(message: string): string | undefined {
+  const phoneMatch = message.match(/(?:\+212|0)[67]\d{8}\b/);
+  const phoneText = phoneMatch?.[0];
+
+  if (!phoneText) {
+    return undefined;
+  }
+
+  const address = stripAfterQuantityMarker(
+    message.slice((phoneMatch.index || 0) + phoneText.length).trim(),
+  );
 
   return looksLikeAddressText(address) ? normalizeText(address) : undefined;
 }
@@ -705,7 +724,9 @@ function extractStandaloneEntities(
   }
 
   if (phone && missingFields.includes("address")) {
-    entities.address = findAddressAfterPhone(message, phone);
+    entities.address =
+      findAddressAfterDetectedPhone(message) ||
+      findAddressAfterPhone(message, phone);
   }
 
   if (missingFields.includes("city")) {
@@ -781,6 +802,76 @@ function isStandaloneSizeSelection(message: string, size?: string): boolean {
 
 function hasCollectedOrderData(collected: OrderEntities): boolean {
   return Object.values(collected).some((value) => hasValue(value));
+}
+
+function isOrderStartMessage(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const hasDarijaWantVerb = includesAny(normalizedMessage, [
+    "بغيت",
+    "باغي",
+    "باغية",
+    "عافاك",
+  ]);
+  const hasOrderWord = includesAny(normalizedMessage, [
+    "كوم",
+    "كموند",
+    "كومند",
+    "كوموند",
+    "طلب",
+    "نطلب",
+    "ناخد",
+    "ناخذ",
+    "commande",
+    "commander",
+    "order",
+    "ncommand",
+    "ncommande",
+    "nkomand",
+    "nkomandi",
+    "nakhod",
+    "nakhoud",
+  ]);
+
+  return (
+    (hasDarijaWantVerb && hasOrderWord) ||
+    [
+      "الطلب",
+      "طلب",
+      "commande",
+      "order",
+      "كومند",
+      "كوموند",
+      "كوموندي",
+    ].includes(normalizedMessage) ||
+    includesAny(normalizedMessage, [
+      "بغيت نكوموندي",
+      "بغيت نكومندي",
+      "بغيت نكوماند",
+      "بغيت نكوموند",
+      "بغيت كوموند",
+      "بغيت الطلب",
+      "بغيت ناخد",
+      "بغيت ناخذ",
+      "نطلب",
+      "دير ليا الطلب",
+      "وجد ليا الطلب",
+      "صوب ليا الطلب",
+      "صايب ليا الطلب",
+      "تصوب لي كومند",
+      "تصوب لي كوموند",
+      "bghit ncommande",
+      "bghit ncommandi",
+      "bghit ncommander",
+      "bghit nkomandi",
+      "bghit commande",
+      "bghit order",
+      "bghit nakhod",
+      "bghit nakhoud",
+      "dir lia commande",
+      "dir lia order",
+      "commander",
+    ])
+  );
 }
 
 function isConfirmationMessage(message: string): boolean {
@@ -944,6 +1035,7 @@ function extractCorrectionEntities(message: string): Partial<OrderEntities> {
 async function processConfirmationTurn(input: {
   session: ConversationSession;
   customerId: string;
+  customerPhone?: string;
   sellerId?: string;
   productId?: string;
   message: string;
@@ -958,6 +1050,7 @@ async function processConfirmationTurn(input: {
     if (missingFields.length > 0) {
       await updateConversationOrderState({
         customerId: input.customerId,
+        customerPhone: input.customerPhone,
         sellerId: input.sellerId,
         productId: input.productId,
         collected: input.session.orderState.collected,
@@ -985,6 +1078,9 @@ async function processConfirmationTurn(input: {
 
     const confirmedOrder = saveConfirmedOrder({
       customerId: input.customerId,
+      customerPhone: input.customerPhone,
+      conversationKey: input.customerId,
+      sellerId: input.sellerId,
       productContext: input.productContext,
       collected: input.session.orderState.collected,
     });
@@ -992,6 +1088,7 @@ async function processConfirmationTurn(input: {
 
     await updateConversationOrderState({
       customerId: input.customerId,
+      customerPhone: input.customerPhone,
       sellerId: input.sellerId,
       productId: input.productId,
       collected: input.session.orderState.collected,
@@ -1012,6 +1109,7 @@ async function processConfirmationTurn(input: {
   if (isCancellationMessage(input.message)) {
     await updateConversationOrderState({
       customerId: input.customerId,
+      customerPhone: input.customerPhone,
       sellerId: input.sellerId,
       productId: input.productId,
       collected: input.session.orderState.collected,
@@ -1055,6 +1153,7 @@ async function processConfirmationTurn(input: {
 
     await updateConversationOrderState({
       customerId: input.customerId,
+      customerPhone: input.customerPhone,
       sellerId: input.sellerId,
       productId: input.productId,
       collected,
@@ -1090,12 +1189,14 @@ async function processConfirmationTurn(input: {
 async function processConfirmedOrderTurn(input: {
   session: ConversationSession;
   customerId: string;
+  customerPhone?: string;
   sellerId?: string;
   productId?: string;
 }): Promise<ProcessOrderTurnResult> {
   if (input.session.orderState.awaitingConfirmation) {
     await updateConversationOrderState({
       customerId: input.customerId,
+      customerPhone: input.customerPhone,
       sellerId: input.sellerId,
       productId: input.productId,
       collected: input.session.orderState.collected,
@@ -1149,6 +1250,7 @@ export async function processOrderTurn(
       input.customerId,
       input.sellerId,
       input.productId,
+      input.customerPhone,
     ),
     input.productContext,
   );
@@ -1157,6 +1259,7 @@ export async function processOrderTurn(
     return processConfirmedOrderTurn({
       session,
       customerId: input.customerId,
+      customerPhone: input.customerPhone,
       sellerId: input.sellerId,
       productId: input.productId,
     });
@@ -1170,6 +1273,7 @@ export async function processOrderTurn(
     return processConfirmationTurn({
       session,
       customerId: input.customerId,
+      customerPhone: input.customerPhone,
       sellerId: input.sellerId,
       productId: input.productId,
       message: input.message,
@@ -1178,7 +1282,13 @@ export async function processOrderTurn(
   }
 
   const fastAnalysis = fastAnalyzeCustomerMessage(input.message);
-  const analysis = input.analysis || fastAnalysis;
+  const fallbackOrderStartAnalysis = isOrderStartMessage(input.message)
+    ? ({
+        intent: "order_intent",
+        entities: {},
+      } satisfies ProcessOrderTurnInput["analysis"])
+    : undefined;
+  const analysis = input.analysis || fastAnalysis || fallbackOrderStartAnalysis;
   const currentMissingFields =
     session.orderState.missingFields.length > 0
       ? session.orderState.missingFields
@@ -1244,6 +1354,7 @@ export async function processOrderTurn(
 
   await updateConversationOrderState({
     customerId: input.customerId,
+    customerPhone: input.customerPhone,
     sellerId: input.sellerId,
     productId: input.productId,
     collected,

@@ -19,6 +19,9 @@ import {
   appendSellerBrainReplyKey,
   getConversationSession,
 } from "./session/conversation-session.service";
+import type { AgentIdentity } from "./identity/agent-identity.types";
+import { conversationKeyService } from "./identity/conversation-key.service";
+import { DEFAULT_DEMO_SELLER_ID } from "./identity/seller-resolver.service";
 import type {
   AgentAction,
   AgentOrderStateSummary,
@@ -27,10 +30,13 @@ import type {
 import type { OrderEntities } from "./agent-brain.types";
 import type { ProductContext } from "./product-context.types";
 
-type GenerateAgentOptions = {
+export type GenerateAgentOptions = {
   customerId?: string;
+  customerPhone?: string;
+  conversationKey?: string;
   sellerId?: string;
   productId?: string;
+  phoneNumberId?: string;
   useMemory?: boolean;
 };
 
@@ -54,6 +60,96 @@ const badPhraseReplacements: Array<[RegExp, string]> = [
 ];
 const chineseCharacterPattern = /[\u4e00-\u9fff]/;
 const cyrillicCharacterPattern = /[\u0400-\u04ff]/;
+
+function cleanOptionalText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+
+  return trimmed || undefined;
+}
+
+function getCustomerPhoneFromConversationKey(
+  conversationKey: string | undefined,
+  sellerId: string,
+): string | undefined {
+  const cleanConversationKey = cleanOptionalText(conversationKey);
+
+  if (!cleanConversationKey) {
+    return undefined;
+  }
+
+  const prefix = `${sellerId}:`;
+
+  if (cleanConversationKey.startsWith(prefix)) {
+    return cleanOptionalText(cleanConversationKey.slice(prefix.length));
+  }
+
+  const separatorIndex = cleanConversationKey.indexOf(":");
+
+  if (separatorIndex >= 0) {
+    return cleanOptionalText(cleanConversationKey.slice(separatorIndex + 1));
+  }
+
+  return cleanConversationKey;
+}
+
+export function resolveAgentIdentity(
+  options?: GenerateAgentOptions,
+): AgentIdentity | undefined {
+  const hasIdentityInput = Boolean(
+    options?.customerId ||
+      options?.sellerId ||
+      options?.customerPhone ||
+      options?.conversationKey ||
+      options?.phoneNumberId,
+  );
+
+  if (!hasIdentityInput) {
+    return undefined;
+  }
+
+  const sellerId = cleanOptionalText(options?.sellerId) || DEFAULT_DEMO_SELLER_ID;
+  const conversationKey = cleanOptionalText(options?.conversationKey);
+  const customerPhone =
+    cleanOptionalText(options?.customerPhone) ||
+    getCustomerPhoneFromConversationKey(conversationKey, sellerId) ||
+    cleanOptionalText(options?.customerId);
+
+  if (!customerPhone && !conversationKey) {
+    return undefined;
+  }
+
+  return {
+    sellerId,
+    customerPhone: customerPhone || conversationKey || "",
+    conversationKey:
+      conversationKey ||
+      conversationKeyService.buildConversationKey(sellerId, customerPhone || ""),
+    phoneNumberId: cleanOptionalText(options?.phoneNumberId),
+  };
+}
+
+function normalizeAgentOptions(options?: GenerateAgentOptions): {
+  options?: GenerateAgentOptions;
+  identity?: AgentIdentity;
+} {
+  const identity = resolveAgentIdentity(options);
+
+  if (!identity) {
+    return { options, identity };
+  }
+
+  return {
+    identity,
+    options: {
+      ...options,
+      customerId: identity.conversationKey,
+      customerPhone: identity.customerPhone,
+      conversationKey: identity.conversationKey,
+      sellerId: identity.sellerId,
+      phoneNumberId: identity.phoneNumberId,
+    },
+  };
+}
 
 function removeSurroundingQuotes(text: string): string {
   const trimmed = text.trim();
@@ -149,6 +245,8 @@ async function appendMessageToMemory(
   try {
     await appendConversationMessage({
       customerId: options.customerId,
+      customerPhone: options.customerPhone,
+      conversationKey: options.conversationKey,
       sellerId: options.sellerId,
       productId: options.productId,
       role,
@@ -502,6 +600,7 @@ async function getSellerBrainRecentReplyKeys(
       options.customerId,
       options.sellerId,
       options.productId,
+      options.customerPhone,
     );
 
     return session.sellerBrain?.recentReplyKeys;
@@ -524,6 +623,8 @@ async function saveSellerBrainReplyMemory(input: {
   try {
     const session = await appendSellerBrainReplyKey({
       customerId: input.options.customerId,
+      customerPhone: input.options.customerPhone,
+      conversationKey: input.options.conversationKey,
       sellerId: input.options.sellerId,
       productId: input.options.productId,
       replyKey: input.replyKey,
@@ -549,6 +650,7 @@ async function getOrderStateSummary(
       options.customerId,
       options.sellerId,
       options.productId,
+      options.customerPhone,
     );
 
     return {
@@ -573,6 +675,7 @@ async function buildOrderResultFromRouter(input: {
   if (input.options?.useMemory && input.options.customerId) {
     const orderResult = await processOrderTurn({
       customerId: input.options.customerId,
+      customerPhone: input.options.customerPhone,
       sellerId: input.options.sellerId,
       productId: input.options.productId,
       message: input.userMessage,
@@ -897,6 +1000,7 @@ async function buildOrderResultIfHandled(
   try {
     const orderResult = await processOrderTurn({
       customerId: options.customerId,
+      customerPhone: options.customerPhone,
       sellerId: options.sellerId,
       productId: options.productId,
       message: userMessage,
@@ -925,18 +1029,20 @@ export async function generateAgentResult(
 ): Promise<AgentResult> {
   const startedAt = Date.now();
   const userMessage = message.trim();
+  const normalized = normalizeAgentOptions(options);
+  const activeOptions = normalized.options;
 
   if (!userMessage) {
     throw new Error("Message is required");
   }
 
-  await appendMessageToMemory(options, "customer", userMessage);
+  await appendMessageToMemory(activeOptions, "customer", userMessage);
 
   const result =
-    (await buildOrderResultIfHandled(userMessage, productContext, options)) ||
-    (await buildAgentResult(userMessage, productContext, options));
+    (await buildOrderResultIfHandled(userMessage, productContext, activeOptions)) ||
+    (await buildAgentResult(userMessage, productContext, activeOptions));
 
-  const orderStateSummary = await getOrderStateSummary(options);
+  const orderStateSummary = await getOrderStateSummary(activeOptions);
   const naturalReplyStatus = getNaturalReplyStatus();
   const actions = withChoiceListActions({
     result,
@@ -965,10 +1071,11 @@ export async function generateAgentResult(
       durationMs: Date.now() - startedAt,
       source: result.source,
       orderStateSummary,
+      identity: normalized.identity,
     },
   };
 
-  await appendMessageToMemory(options, "agent", finalResult.reply);
+  await appendMessageToMemory(activeOptions, "agent", finalResult.reply);
 
   return finalResult;
 }

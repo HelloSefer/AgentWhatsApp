@@ -88,6 +88,8 @@ export interface ConversationOrderState {
 export interface ConversationSession {
   sessionId: string;
   customerId: string;
+  customerPhone?: string;
+  conversationKey?: string;
   sellerId?: string;
   productId?: string;
   messages: ConversationMessage[];

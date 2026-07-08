@@ -183,6 +183,10 @@ export async function simulateWhatsAppCloudIncoming(req: Request, res: Response)
     req.body.buttonReplyTitle.trim()
       ? req.body.buttonReplyTitle.trim()
       : "";
+  const phoneNumberId =
+    typeof req.body?.phoneNumberId === "string" && req.body.phoneNumberId.trim()
+      ? req.body.phoneNumberId.trim()
+      : undefined;
 
   if (!from || (!text && !buttonReplyId)) {
     return res.status(400).json({
@@ -195,11 +199,15 @@ export async function simulateWhatsAppCloudIncoming(req: Request, res: Response)
     const result = await processCloudWebhookBody(
       buildSimulatedIncomingWebhook({
         from,
+        phoneNumberId,
         text,
         buttonReplyId,
         buttonReplyTitle,
       }),
-      { publicBaseUrl: getRequestBaseUrl(req) },
+      {
+        publicBaseUrl: getRequestBaseUrl(req),
+        allowUnknownPhoneNumberId: true,
+      },
     );
 
     return res.status(200).json({
@@ -209,6 +217,7 @@ export async function simulateWhatsAppCloudIncoming(req: Request, res: Response)
       actionsCount: result.actionsCount,
       sendAttempted: result.sendAttempted,
       sendSuccess: result.sendSuccess,
+      identity: result.identity,
       diagnostics: getCloudDiagnostics(),
     });
   } catch (error) {

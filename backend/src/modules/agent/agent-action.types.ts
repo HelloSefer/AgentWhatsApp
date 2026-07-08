@@ -1,5 +1,6 @@
 import type { ProductImage } from "./product-context.types";
 import type { OrderEntities } from "./agent-brain.types";
+import type { AgentIdentity } from "./identity/agent-identity.types";
 
 export type AgentActionType = "send_product_images" | "choice_list";
 
@@ -63,5 +64,6 @@ export interface AgentResult {
     intentRouterUsedAI?: boolean;
     intentRouterTimedOut?: boolean;
     intentRouterDurationMs?: number;
+    identity?: AgentIdentity;
   };
 }

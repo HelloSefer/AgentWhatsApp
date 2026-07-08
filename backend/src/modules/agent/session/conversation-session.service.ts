@@ -5,9 +5,13 @@ import type {
   ConversationSession,
   OrderEntities,
 } from "../agent-brain.types";
+import { conversationKeyService } from "../identity/conversation-key.service";
+import { DEFAULT_DEMO_SELLER_ID } from "../identity/seller-resolver.service";
 
 type SessionIdentity = {
   customerId: string;
+  customerPhone?: string;
+  conversationKey?: string;
   sellerId?: string;
   productId?: string;
 };
@@ -27,6 +31,79 @@ type UpdateConversationOrderStateInput = SessionIdentity & {
 
 const MAX_SESSION_MESSAGES = 20;
 
+function cleanText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+
+  return trimmed || undefined;
+}
+
+function parseConversationKey(conversationKey: string): {
+  sellerId?: string;
+  customerPhone?: string;
+} {
+  const separatorIndex = conversationKey.indexOf(":");
+
+  if (separatorIndex <= 0) {
+    return {};
+  }
+
+  return {
+    sellerId: cleanText(conversationKey.slice(0, separatorIndex)),
+    customerPhone: cleanText(conversationKey.slice(separatorIndex + 1)),
+  };
+}
+
+function resolveSessionIdentity(input: SessionIdentity): Required<
+  Pick<SessionIdentity, "customerId" | "conversationKey">
+> &
+  Omit<SessionIdentity, "customerId" | "conversationKey"> {
+  const explicitConversationKey = cleanText(input.conversationKey);
+  const cleanCustomerId = cleanText(input.customerId);
+
+  if (explicitConversationKey) {
+    const parsed = parseConversationKey(explicitConversationKey);
+
+    return {
+      ...input,
+      customerId: explicitConversationKey,
+      conversationKey: explicitConversationKey,
+      sellerId: cleanText(input.sellerId) || parsed.sellerId,
+      customerPhone: cleanText(input.customerPhone) || parsed.customerPhone,
+    };
+  }
+
+  if (!cleanCustomerId) {
+    throw new Error("customerId is required");
+  }
+
+  const parsed = parseConversationKey(cleanCustomerId);
+
+  if (parsed.sellerId && parsed.customerPhone) {
+    return {
+      ...input,
+      customerId: cleanCustomerId,
+      conversationKey: cleanCustomerId,
+      sellerId: cleanText(input.sellerId) || parsed.sellerId,
+      customerPhone: cleanText(input.customerPhone) || parsed.customerPhone,
+    };
+  }
+
+  const sellerId = cleanText(input.sellerId) || DEFAULT_DEMO_SELLER_ID;
+  const customerPhone = cleanText(input.customerPhone) || cleanCustomerId;
+  const conversationKey = conversationKeyService.buildConversationKey(
+    sellerId,
+    customerPhone,
+  );
+
+  return {
+    ...input,
+    customerId: conversationKey,
+    conversationKey,
+    sellerId,
+    customerPhone,
+  };
+}
+
 function getExpiryIsoDate(): string {
   return new Date(Date.now() + env.sessionTtlSeconds * 1000).toISOString();
 }
@@ -34,26 +111,29 @@ function getExpiryIsoDate(): string {
 export function buildSessionKey(
   customerId: string,
   sellerId?: string,
-  productId?: string,
+  _productId?: string,
 ): string {
-  return `agent:session:${sellerId || "default-seller"}:${
-    productId || "default-product"
-  }:${customerId}`;
+  const identity = resolveSessionIdentity({ customerId, sellerId });
+
+  return conversationKeyService.buildSessionKey(identity.conversationKey);
 }
 
 export function createEmptySession(input: SessionIdentity): ConversationSession {
+  const identity = resolveSessionIdentity(input);
   const now = new Date().toISOString();
   const sessionId = buildSessionKey(
-    input.customerId,
-    input.sellerId,
-    input.productId,
+    identity.customerId,
+    identity.sellerId,
+    identity.productId,
   );
 
   return {
     sessionId,
-    customerId: input.customerId,
-    sellerId: input.sellerId,
-    productId: input.productId,
+    customerId: identity.customerId,
+    customerPhone: identity.customerPhone,
+    conversationKey: identity.conversationKey,
+    sellerId: identity.sellerId,
+    productId: identity.productId,
     messages: [],
     orderState: {
       collected: {},
@@ -94,21 +174,41 @@ export async function getConversationSession(
   customerId: string,
   sellerId?: string,
   productId?: string,
+  customerPhone?: string,
 ): Promise<ConversationSession> {
-  const sessionKey = buildSessionKey(customerId, sellerId, productId);
+  const identity = resolveSessionIdentity({
+    customerId,
+    sellerId,
+    productId,
+    customerPhone,
+  });
+  const sessionKey = buildSessionKey(
+    identity.customerId,
+    identity.sellerId,
+    identity.productId,
+  );
   const client = getValkeyClient();
   const rawSession = await client.get(sessionKey);
 
   if (!rawSession) {
-    const session = createEmptySession({ customerId, sellerId, productId });
+    const session = createEmptySession(identity);
     await saveConversationSession(session);
     return session;
   }
 
   try {
-    return JSON.parse(rawSession) as ConversationSession;
+    const session = JSON.parse(rawSession) as ConversationSession;
+
+    return {
+      ...session,
+      customerId: session.customerId || identity.customerId,
+      customerPhone: session.customerPhone || identity.customerPhone,
+      conversationKey: session.conversationKey || identity.conversationKey,
+      sellerId: session.sellerId || identity.sellerId,
+      productId: session.productId || identity.productId,
+    };
   } catch (_error) {
-    const session = createEmptySession({ customerId, sellerId, productId });
+    const session = createEmptySession(identity);
     await saveConversationSession(session);
     return session;
   }
@@ -121,6 +221,7 @@ export async function appendConversationMessage(
     input.customerId,
     input.sellerId,
     input.productId,
+    input.customerPhone,
   );
 
   session.messages.push({
@@ -142,6 +243,7 @@ export async function updateConversationOrderState(
     input.customerId,
     input.sellerId,
     input.productId,
+    input.customerPhone,
   );
 
   session.orderState = {
@@ -173,6 +275,7 @@ export async function appendSellerBrainReplyKey(
     input.customerId,
     input.sellerId,
     input.productId,
+    input.customerPhone,
   );
   const recentReplyKeys = [
     ...(session.sellerBrain?.recentReplyKeys || []).filter(
@@ -196,9 +299,10 @@ export async function clearConversationSession(
   customerId: string,
   sellerId?: string,
   productId?: string,
-): Promise<void> {
+): Promise<boolean> {
   const sessionKey = buildSessionKey(customerId, sellerId, productId);
   const client = getValkeyClient();
+  const deletedCount = await client.del(sessionKey);
 
-  await client.del(sessionKey);
+  return deletedCount > 0;
 }

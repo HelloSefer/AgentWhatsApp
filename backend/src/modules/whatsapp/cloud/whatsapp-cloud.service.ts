@@ -8,6 +8,9 @@ import type {
   AgentResult,
   ChoiceListAction,
 } from "../../agent/agent-action.types";
+import type { AgentIdentity } from "../../agent/identity/agent-identity.types";
+import { conversationKeyService } from "../../agent/identity/conversation-key.service";
+import { sellerResolverService } from "../../agent/identity/seller-resolver.service";
 import type { OrderEntities } from "../../agent/agent-brain.types";
 import { fastAnalyzeCustomerMessage } from "../../agent/fast-intent-analyzer.service";
 import {
@@ -115,6 +118,7 @@ type CloudWebhookDiagnosticsState = {
 type ProcessCloudWebhookResult = {
   ok: boolean;
   handled: boolean;
+  identity?: AgentIdentity;
   agentReplyPreview?: string;
   actionsCount: number;
   sendAttempted: boolean;
@@ -123,6 +127,7 @@ type ProcessCloudWebhookResult = {
 
 type ProcessCloudWebhookOptions = {
   publicBaseUrl?: string;
+  allowUnknownPhoneNumberId?: boolean;
 };
 
 type ReplyButtonPreset = "order_confirmation" | "color_choice" | "after_price";
@@ -225,6 +230,23 @@ function maskPhone(value: string | undefined): string | undefined {
   return value.length > 6
     ? `${value.slice(0, 3)}***${value.slice(-3)}`
     : "***";
+}
+
+function maskConversationKey(conversationKey: string | undefined): string | undefined {
+  if (!conversationKey) {
+    return undefined;
+  }
+
+  const separatorIndex = conversationKey.indexOf(":");
+
+  if (separatorIndex < 0) {
+    return maskPhone(conversationKey);
+  }
+
+  const sellerId = conversationKey.slice(0, separatorIndex);
+  const customerPhone = conversationKey.slice(separatorIndex + 1);
+
+  return `${sellerId}:${maskPhone(customerPhone) || "***"}`;
 }
 
 function previewToken(token: string): string | null {
@@ -416,6 +438,27 @@ function isUnknownConfiguredPhoneNumberId(phoneNumberId: string): boolean {
       env.whatsappCloudPhoneNumberId &&
       phoneNumberId !== env.whatsappCloudPhoneNumberId,
   );
+}
+
+function buildCloudAgentIdentity(input: {
+  phoneNumberId: string;
+  waId: string;
+}): AgentIdentity {
+  const sellerId = sellerResolverService.resolveSellerIdByPhoneNumberId(
+    input.phoneNumberId,
+  );
+  const customerPhone = input.waId;
+  const conversationKey = conversationKeyService.buildConversationKey(
+    sellerId,
+    customerPhone,
+  );
+
+  return {
+    sellerId,
+    customerPhone,
+    conversationKey,
+    phoneNumberId: input.phoneNumberId,
+  };
 }
 
 function recordIgnoredUnknownPhoneNumberId(input: {
@@ -2255,7 +2298,10 @@ export async function processCloudWebhookBody(
   };
 
   for (const message of messages) {
-    if (isUnknownConfiguredPhoneNumberId(message.phoneNumberId)) {
+    if (
+      !options.allowUnknownPhoneNumberId &&
+      isUnknownConfiguredPhoneNumberId(message.phoneNumberId)
+    ) {
       recordIgnoredUnknownPhoneNumberId({
         phoneNumberId: message.phoneNumberId,
         waId: message.waId,
@@ -2285,7 +2331,12 @@ export async function processCloudWebhookBody(
       continue;
     }
 
-    const customerId = `cloud:${message.phoneNumberId}:${message.waId}`;
+    const identity = buildCloudAgentIdentity({
+      phoneNumberId: message.phoneNumberId,
+      waId: message.waId,
+    });
+    const customerId = identity.conversationKey;
+    processResult.identity = identity;
 
     const now = new Date().toISOString();
     webhookDiagnostics.lastIncomingMessageAt = now;
@@ -2304,6 +2355,8 @@ export async function processCloudWebhookBody(
     logJson({
       event: "whatsapp.cloud.webhook.message",
       phoneNumberId: message.phoneNumberId,
+      sellerId: identity.sellerId,
+      conversationKey: maskConversationKey(identity.conversationKey),
       waId: maskPhone(message.waId),
       messageId: message.messageId,
       messageType: message.type,
@@ -2384,6 +2437,9 @@ export async function processCloudWebhookBody(
 
         await updateConversationOrderState({
           customerId,
+          customerPhone: identity.customerPhone,
+          conversationKey: identity.conversationKey,
+          sellerId: identity.sellerId,
           collected: message.flowOrder,
           missingFields,
           isComplete,
@@ -2471,14 +2527,20 @@ export async function processCloudWebhookBody(
 
       const startedAt = Date.now();
       const result = await generateAgentResult(message.text, undefined, {
-        customerId,
+        customerPhone: identity.customerPhone,
+        conversationKey: identity.conversationKey,
+        sellerId: identity.sellerId,
+        phoneNumberId: identity.phoneNumberId,
         useMemory: true,
       });
       const durationMs = result.meta?.durationMs ?? Date.now() - startedAt;
 
       logJson({
         event: "whatsapp.cloud.agent.reply",
-        customerId: `cloud:${message.phoneNumberId}:${maskPhone(message.waId)}`,
+        customerId: maskConversationKey(customerId),
+        customerPhone: maskPhone(identity.customerPhone),
+        sellerId: identity.sellerId,
+        conversationKey: maskConversationKey(identity.conversationKey),
         messagePreview: previewText(message.text),
         replyPreview: previewText(result.reply),
         source: result.source,
@@ -2537,6 +2599,7 @@ export async function processCloudWebhookBody(
 
 export function buildSimulatedIncomingWebhook(input: {
   from: string;
+  phoneNumberId?: string;
   text?: string;
   buttonReplyId?: string;
   buttonReplyTitle?: string;
@@ -2578,7 +2641,10 @@ export function buildSimulatedIncomingWebhook(input: {
           {
             value: {
               metadata: {
-                phone_number_id: env.whatsappCloudPhoneNumberId || "local-test",
+                phone_number_id:
+                  input.phoneNumberId ||
+                  env.whatsappCloudPhoneNumberId ||
+                  "local-test",
               },
               contacts: [
                 {

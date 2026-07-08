@@ -1,5 +1,7 @@
 import type { Request, Response } from "express";
 import { env } from "../../config/env";
+import { conversationKeyService } from "../agent/identity/conversation-key.service";
+import { sellerResolverService } from "../agent/identity/seller-resolver.service";
 import { updateConversationOrderState } from "../agent/session/conversation-session.service";
 import {
   recordOrderFormOpened,
@@ -93,10 +95,20 @@ export async function submitOrderForm(req: Request, res: Response) {
     });
   }
 
-  const customerId = `cloud:${tokenResult.payload.phoneNumberId}:${tokenResult.payload.waId}`;
+  const sellerId = sellerResolverService.resolveSellerIdByPhoneNumberId(
+    tokenResult.payload.phoneNumberId,
+  );
+  const customerPhone = tokenResult.payload.waId;
+  const conversationKey = conversationKeyService.buildConversationKey(
+    sellerId,
+    customerPhone,
+  );
 
   await updateConversationOrderState({
-    customerId,
+    customerId: conversationKey,
+    customerPhone,
+    conversationKey,
+    sellerId,
     collected: order,
     missingFields: [],
     isComplete: true,

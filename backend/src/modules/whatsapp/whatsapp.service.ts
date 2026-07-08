@@ -2,6 +2,8 @@ import qrcode from "qrcode-terminal";
 import pino from "pino";
 import { generateAgentResult } from "../agent/agent.service";
 import type { AgentAction, ChoiceListAction } from "../agent/agent-action.types";
+import { conversationKeyService } from "../agent/identity/conversation-key.service";
+import { DEFAULT_DEMO_SELLER_ID } from "../agent/identity/seller-resolver.service";
 import { env } from "../../config/env";
 import { bufferIncomingWhatsappMessage } from "./whatsapp-message-buffer.service";
 
@@ -49,6 +51,23 @@ function maskCustomerId(customerId: string | undefined): string | undefined {
       : "***";
 
   return domain ? `${masked}@${domain}` : masked;
+}
+
+function maskConversationKey(conversationKey: string): string {
+  const separatorIndex = conversationKey.indexOf(":");
+
+  if (separatorIndex < 0) {
+    return maskCustomerId(conversationKey) || "***";
+  }
+
+  const sellerId = conversationKey.slice(0, separatorIndex);
+  const customerPhone = conversationKey.slice(separatorIndex + 1);
+
+  return `${sellerId}:${maskCustomerId(customerPhone) || "***"}`;
+}
+
+function getCustomerPhoneFromJid(jid: string): string {
+  return jid.split("@")[0] || jid;
 }
 
 function normalizeSelectedChoiceText(text: string): string {
@@ -386,8 +405,15 @@ export async function startWhatsApp() {
       return;
     }
 
+    const sellerId = DEFAULT_DEMO_SELLER_ID;
+    const customerPhone = getCustomerPhoneFromJid(from);
+    const conversationKey = conversationKeyService.buildConversationKey(
+      sellerId,
+      customerPhone,
+    );
+
     bufferIncomingWhatsappMessage({
-      chatId: from,
+      chatId: conversationKeyService.buildBufferKey(conversationKey),
       text,
       onFlush: async (combinedText) => {
         console.log("🧵 WhatsApp message buffer flushed");
@@ -396,7 +422,9 @@ export async function startWhatsApp() {
         try {
           const startedAt = Date.now();
           const result = await generateAgentResult(combinedText, undefined, {
-            customerId: from,
+            customerPhone,
+            conversationKey,
+            sellerId,
             useMemory: true,
           });
           const durationMs = result.meta?.durationMs ?? Date.now() - startedAt;
@@ -405,7 +433,10 @@ export async function startWhatsApp() {
           console.log(
             JSON.stringify({
               event: "whatsapp.agent.reply",
-              customerId: maskCustomerId(from),
+              customerId: maskConversationKey(conversationKey),
+              customerPhone: maskCustomerId(customerPhone),
+              sellerId,
+              conversationKey: maskConversationKey(conversationKey),
               messagePreview: previewText(combinedText),
               replyPreview: previewText(result.reply),
               source: result.source,

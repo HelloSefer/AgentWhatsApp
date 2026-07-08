@@ -157,6 +157,10 @@ export function isActionPhrase(text: string): boolean {
   return actionPhrases.some((phrase) => {
     const normalizedPhrase = normalizeText(phrase);
 
+    if (normalizedPhrase.length <= 2) {
+      return normalized === normalizedPhrase;
+    }
+
     return (
       normalized === normalizedPhrase ||
       normalized.includes(normalizedPhrase)
@@ -406,4 +410,3 @@ export function recordReceiptSkippedInvalidOrderFields(input: {
     invalidFields: input.invalidFields,
   });
 }
-

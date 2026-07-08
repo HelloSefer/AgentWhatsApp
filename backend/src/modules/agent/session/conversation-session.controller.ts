@@ -2,17 +2,102 @@ import type { Request, Response } from "express";
 import type { ConversationMessage, OrderEntities } from "../agent-brain.types";
 import {
   appendConversationMessage,
+  buildSessionKey,
   clearConversationSession,
   getConversationSession,
   updateConversationOrderState,
 } from "./conversation-session.service";
+import { conversationKeyService } from "../identity/conversation-key.service";
+import { DEFAULT_DEMO_SELLER_ID } from "../identity/seller-resolver.service";
 
 function getOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function getCustomerId(req: Request): string | undefined {
-  return getOptionalString(req.params.customerId);
+type SessionRequestIdentity = {
+  customerId: string;
+  customerPhone?: string;
+  conversationKey?: string;
+  sellerId?: string;
+  productId?: string;
+};
+
+function getIdentityValue(
+  req: Request,
+  field: string,
+  source: "query" | "body" | "both" = "both",
+): string | undefined {
+  if (source === "query" || source === "both") {
+    const queryValue = getOptionalString(req.query[field]);
+
+    if (queryValue) {
+      return queryValue;
+    }
+  }
+
+  if (source === "body" || source === "both") {
+    return getOptionalString(req.body?.[field]);
+  }
+
+  return undefined;
+}
+
+function resolveSessionIdentity(
+  req: Request,
+  source: "query" | "body" | "both" = "both",
+): SessionRequestIdentity | undefined {
+  const routeCustomerId = getOptionalString(req.params.customerId);
+
+  if (!routeCustomerId) {
+    return undefined;
+  }
+
+  const sellerId =
+    getIdentityValue(req, "sellerId", source) || DEFAULT_DEMO_SELLER_ID;
+  const productId = getIdentityValue(req, "productId", source);
+  const conversationKey = getIdentityValue(req, "conversationKey", source);
+  const customerPhone =
+    getIdentityValue(req, "customerPhone", source) || routeCustomerId;
+
+  if (conversationKey) {
+    return {
+      customerId: conversationKey,
+      customerPhone,
+      conversationKey,
+      sellerId,
+      productId,
+    };
+  }
+
+  const builtConversationKey = conversationKeyService.buildConversationKey(
+    sellerId,
+    customerPhone,
+  );
+
+  return {
+    customerId: builtConversationKey,
+    customerPhone,
+    conversationKey: builtConversationKey,
+    sellerId,
+    productId,
+  };
+}
+
+function buildSessionDiagnostics(identity: SessionRequestIdentity) {
+  const sellerId = identity.sellerId || DEFAULT_DEMO_SELLER_ID;
+  const customerPhone = identity.customerPhone || identity.customerId;
+  const conversationKey =
+    identity.conversationKey ||
+    conversationKeyService.buildConversationKey(sellerId, customerPhone);
+
+  return {
+    identity: {
+      sellerId,
+      customerPhone,
+      conversationKey,
+    },
+    sessionKey: buildSessionKey(conversationKey, sellerId, identity.productId),
+  };
 }
 
 function isConversationRole(value: unknown): value is ConversationMessage["role"] {
@@ -20,9 +105,9 @@ function isConversationRole(value: unknown): value is ConversationMessage["role"
 }
 
 export async function getSession(req: Request, res: Response) {
-  const customerId = getCustomerId(req);
+  const identity = resolveSessionIdentity(req, "query");
 
-  if (!customerId) {
+  if (!identity) {
     return res.status(400).json({
       message: "Customer ID is required",
     });
@@ -30,12 +115,19 @@ export async function getSession(req: Request, res: Response) {
 
   try {
     const session = await getConversationSession(
-      customerId,
-      getOptionalString(req.query.sellerId),
-      getOptionalString(req.query.productId),
+      identity.customerId,
+      identity.sellerId,
+      identity.productId,
+      identity.customerPhone,
     );
+    const diagnostics = buildSessionDiagnostics(identity);
 
-    return res.status(200).json(session);
+    return res.status(200).json({
+      ...session,
+      ...diagnostics,
+      exists: true,
+      messageCount: session.messages.length,
+    });
   } catch (error) {
     return res.status(500).json({
       message: "Failed to get conversation session",
@@ -45,11 +137,11 @@ export async function getSession(req: Request, res: Response) {
 }
 
 export async function appendMessage(req: Request, res: Response) {
-  const customerId = getCustomerId(req);
+  const identity = resolveSessionIdentity(req, "both");
   const role = req.body?.role;
   const text = typeof req.body?.text === "string" ? req.body.text : "";
 
-  if (!customerId) {
+  if (!identity) {
     return res.status(400).json({
       message: "Customer ID is required",
     });
@@ -69,14 +161,22 @@ export async function appendMessage(req: Request, res: Response) {
 
   try {
     const session = await appendConversationMessage({
-      customerId,
-      sellerId: getOptionalString(req.body?.sellerId),
-      productId: getOptionalString(req.body?.productId),
+      customerId: identity.customerId,
+      customerPhone: identity.customerPhone,
+      conversationKey: identity.conversationKey,
+      sellerId: identity.sellerId,
+      productId: identity.productId,
       role,
       text,
     });
+    const diagnostics = buildSessionDiagnostics(identity);
 
-    return res.status(200).json(session);
+    return res.status(200).json({
+      ...session,
+      ...diagnostics,
+      exists: true,
+      messageCount: session.messages.length,
+    });
   } catch (error) {
     return res.status(500).json({
       message: "Failed to append conversation message",
@@ -86,9 +186,9 @@ export async function appendMessage(req: Request, res: Response) {
 }
 
 export async function updateOrderState(req: Request, res: Response) {
-  const customerId = getCustomerId(req);
+  const identity = resolveSessionIdentity(req, "both");
 
-  if (!customerId) {
+  if (!identity) {
     return res.status(400).json({
       message: "Customer ID is required",
     });
@@ -96,9 +196,11 @@ export async function updateOrderState(req: Request, res: Response) {
 
   try {
     const session = await updateConversationOrderState({
-      customerId,
-      sellerId: getOptionalString(req.body?.sellerId),
-      productId: getOptionalString(req.body?.productId),
+      customerId: identity.customerId,
+      customerPhone: identity.customerPhone,
+      conversationKey: identity.conversationKey,
+      sellerId: identity.sellerId,
+      productId: identity.productId,
       collected:
         typeof req.body?.collected === "object" && req.body.collected !== null
           ? (req.body.collected as Partial<OrderEntities>)
@@ -113,8 +215,14 @@ export async function updateOrderState(req: Request, res: Response) {
           ? req.body.isComplete
           : undefined,
     });
+    const diagnostics = buildSessionDiagnostics(identity);
 
-    return res.status(200).json(session);
+    return res.status(200).json({
+      ...session,
+      ...diagnostics,
+      exists: true,
+      messageCount: session.messages.length,
+    });
   } catch (error) {
     return res.status(500).json({
       message: "Failed to update conversation order state",
@@ -124,22 +232,27 @@ export async function updateOrderState(req: Request, res: Response) {
 }
 
 export async function clearSession(req: Request, res: Response) {
-  const customerId = getCustomerId(req);
+  const identity = resolveSessionIdentity(req, "both");
 
-  if (!customerId) {
+  if (!identity) {
     return res.status(400).json({
       message: "Customer ID is required",
     });
   }
 
   try {
-    await clearConversationSession(
-      customerId,
-      getOptionalString(req.body?.sellerId),
-      getOptionalString(req.body?.productId),
+    const deleted = await clearConversationSession(
+      identity.customerId,
+      identity.sellerId,
+      identity.productId,
     );
+    const diagnostics = buildSessionDiagnostics(identity);
 
-    return res.status(200).json({ ok: true });
+    return res.status(200).json({
+      ok: true,
+      deleted,
+      ...diagnostics,
+    });
   } catch (error) {
     return res.status(500).json({
       message: "Failed to clear conversation session",

@@ -17,6 +17,9 @@ export type OrderReceiptSendStatus = "SENT" | "FAILED" | "SKIPPED";
 export interface ConfirmedOrder {
   id: string;
   customerId: string;
+  sellerId?: string;
+  customerPhone?: string;
+  conversationKey?: string;
   productName: string;
   fullName: string;
   phone: string;
@@ -38,6 +41,9 @@ export interface ConfirmedOrder {
 
 type SaveConfirmedOrderInput = {
   customerId: string;
+  sellerId?: string;
+  customerPhone?: string;
+  conversationKey?: string;
   productContext: ProductContext;
   collected: OrderEntities;
 };
@@ -84,6 +90,9 @@ export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrd
   const order: ConfirmedOrder = {
     id: randomUUID(),
     customerId: input.customerId,
+    sellerId: input.sellerId,
+    customerPhone: input.customerPhone,
+    conversationKey: input.conversationKey,
     productName: input.productContext.productName,
     fullName: getTextValue(input.collected.fullName),
     phone: getTextValue(input.collected.phone),

@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { generateAgentResult } from "./agent.service";
+import { generateAgentResult, resolveAgentIdentity } from "./agent.service";
 import { analyzeAIIntentWithMeta } from "./ai/ai-intent-router.service";
 import { evaluateIntentRouter } from "./ai/ai-intent-router-eval.service";
 import type { IntentEvalCase } from "./ai/ai-intent-router-eval.service";
@@ -91,8 +91,11 @@ export async function testAgentReply(req: Request, res: Response) {
         : undefined;
     const result = await generateAgentResult(message, productContext, {
       customerId: getOptionalString(req.body?.customerId),
+      customerPhone: getOptionalString(req.body?.customerPhone),
+      conversationKey: getOptionalString(req.body?.conversationKey),
       sellerId: getOptionalString(req.body?.sellerId),
       productId: getOptionalString(req.body?.productId),
+      phoneNumberId: getOptionalString(req.body?.phoneNumberId),
       useMemory: req.body?.useMemory === true,
     });
 
@@ -101,6 +104,7 @@ export async function testAgentReply(req: Request, res: Response) {
       actions: result.actions,
       source: result.source,
       meta: result.meta,
+      identity: result.meta?.identity,
     });
   } catch (error) {
     return res.status(500).json({
@@ -126,15 +130,31 @@ export async function testAgentIntent(req: Request, res: Response) {
         ? (req.body.productContext as ProductContext)
         : undefined;
     const customerId = getOptionalString(req.body?.customerId);
+    const customerPhone = getOptionalString(req.body?.customerPhone);
+    const conversationKey = getOptionalString(req.body?.conversationKey);
     const sellerId = getOptionalString(req.body?.sellerId);
     const productId = getOptionalString(req.body?.productId);
+    const identity = resolveAgentIdentity({
+      customerId,
+      customerPhone,
+      conversationKey,
+      sellerId,
+      productId,
+      phoneNumberId: getOptionalString(req.body?.phoneNumberId),
+    });
+    const memoryCustomerId = identity?.conversationKey || customerId;
     const requestOrderState =
       typeof req.body?.orderState === "object" && req.body.orderState !== null
         ? (req.body.orderState as ConversationOrderState)
         : undefined;
     const sessionContext =
-      req.body?.useMemory === true && customerId
-        ? await getConversationSession(customerId, sellerId, productId)
+      req.body?.useMemory === true && memoryCustomerId
+        ? await getConversationSession(
+            memoryCustomerId,
+            identity?.sellerId || sellerId,
+            productId,
+            identity?.customerPhone || customerPhone,
+          )
         : undefined;
     const result = await analyzeAIIntentWithMeta({
       message,
