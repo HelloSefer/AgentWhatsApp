@@ -1,0 +1,80 @@
+import type { ProductContext } from "./product-context.types";
+
+export const demoProductContexts: ProductContext[] = [
+  {
+    sellerId: "seller_demo_sandals",
+    productId: "prod_demo_sandal_001",
+    name: "صندالة نسائية",
+    description: "صندالة نسائية مناسبة للاستعمال اليومي والخروج.",
+    price: 199,
+    currency: "MAD",
+    active: true,
+    images: [],
+    benefits: [
+      "تصميم عملي",
+      "متوفرة بعدة مقاسات",
+      "مناسبة مع بزاف ديال اللبسات",
+    ],
+    optionGroups: [
+      {
+        key: "size",
+        label: "المقاس",
+        required: true,
+        options: ["36", "37", "38", "39", "40"],
+        display: "list",
+        askOrder: 1,
+      },
+      {
+        key: "color",
+        label: "اللون",
+        required: true,
+        options: ["أسود", "وردي", "أبيض"],
+        display: "buttons",
+        askOrder: 2,
+      },
+    ],
+    infoMenu: [
+      "price",
+      "sizes",
+      "colors",
+      "pictures",
+      "delivery",
+      "quality",
+      "availability",
+    ],
+    stock: {
+      enabled: true,
+      status: "LIMITED",
+      text: "الكمية محدودة",
+    },
+  },
+  {
+    sellerId: "seller_demo_medical",
+    productId: "prod_demo_medical_001",
+    name: "كريم طبي",
+    description: "كريم للعناية، مع ضرورة احترام طريقة الاستعمال.",
+    price: 149,
+    currency: "MAD",
+    active: true,
+    images: [],
+    benefits: ["مناسب للعناية اليومية", "سهل الاستعمال"],
+    optionGroups: [],
+    infoMenu: [
+      "price",
+      "usage",
+      "benefits",
+      "delivery",
+      "payment",
+      "pictures",
+    ],
+    stock: {
+      enabled: true,
+      status: "AVAILABLE",
+      text: "متوفر حالياً",
+    },
+    safety: {
+      medicalDisclaimer: true,
+      avoidMedicalClaims: true,
+    },
+  },
+];
