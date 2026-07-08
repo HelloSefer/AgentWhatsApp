@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getWhatsAppCloudDiagnostics,
+  getWhatsAppCloudLiveInteractiveReadiness,
   getWhatsAppCloudSubscribedApps,
   receiveWhatsAppCloudWebhook,
   simulateWhatsAppCloudIncoming,
@@ -18,6 +19,7 @@ import {
 const router = Router();
 
 router.get("/diagnostics", getWhatsAppCloudDiagnostics);
+router.get("/live-interactive-readiness", getWhatsAppCloudLiveInteractiveReadiness);
 router.get("/subscribed-apps", getWhatsAppCloudSubscribedApps);
 router.post("/subscribe-app", subscribeWhatsAppCloudApp);
 router.post("/simulate-incoming", simulateWhatsAppCloudIncoming);

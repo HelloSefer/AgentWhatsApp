@@ -5,6 +5,7 @@ import {
   buildOrderFormUrl,
   resolveOrderFormBaseUrl,
 } from "../../order-form/order-form.service";
+import { buildLiveInteractiveReadiness } from "./cloud-live-interactive-readiness.service";
 import { cloudReplyDispatchService } from "./cloud-reply-dispatch.service";
 import {
   buildSimulatedIncomingWebhook,
@@ -58,6 +59,21 @@ export function verifyWhatsAppCloudWebhook(req: Request, res: Response) {
 
 export function getWhatsAppCloudDiagnostics(_req: Request, res: Response) {
   return res.status(200).json(getCloudDiagnostics());
+}
+
+export function getWhatsAppCloudLiveInteractiveReadiness(
+  req: Request,
+  res: Response,
+) {
+  const testRecipientPhone = getQueryString(req.query.testRecipientPhone);
+  const sellerId = getQueryString(req.query.sellerId);
+
+  return res.status(200).json(
+    buildLiveInteractiveReadiness({
+      testRecipientPhone,
+      sellerId,
+    }),
+  );
 }
 
 export async function receiveWhatsAppCloudWebhook(req: Request, res: Response) {
