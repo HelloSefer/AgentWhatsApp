@@ -9,6 +9,9 @@ import {
   getNaturalReplyStatus,
 } from "./natural-reply/natural-reply-generator.service";
 import { processOrderTurn } from "./order/order-state.service";
+import { env } from "../../config/env";
+import { interactiveSendDecisionService } from "./reply/interactive-send-decision.service";
+import { whatsappInteractiveMapper } from "./reply/whatsapp-interactive.mapper";
 import { productContextService } from "./config/product-context.service";
 import { requiredFieldsService } from "./config/required-fields.service";
 import type { RequiredOrderField } from "./config/required-fields.types";
@@ -1117,6 +1120,17 @@ export async function generateAgentResult(
     choiceListAction.context === "change_size"
       ? choiceListAction.body
       : result.reply;
+  const replyUi = result.meta?.replyUi;
+  const whatsappInteractivePreview =
+    whatsappInteractiveMapper.toCloudInteractivePreview({
+      replyText: reply,
+      replyUi,
+    });
+  const interactiveSendDecision = interactiveSendDecisionService.decide({
+    channel: "test",
+    interactiveEnabled: env.whatsappInteractiveEnabled,
+    whatsappInteractivePreview,
+  });
   const finalResult: AgentResult = {
     ...result,
     reply,
@@ -1131,6 +1145,8 @@ export async function generateAgentResult(
       source: result.source,
       orderStateSummary,
       identity: normalized.identity,
+      whatsappInteractivePreview,
+      interactiveSendDecision,
     },
   };
 

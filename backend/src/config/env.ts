@@ -55,6 +55,8 @@ export const env = {
   orderFormTokenSecret: process.env.ORDER_FORM_TOKEN_SECRET || "",
   whatsappCloudReplyButtonsEnabled:
     process.env.WHATSAPP_CLOUD_REPLY_BUTTONS_ENABLED !== "false",
+  whatsappInteractiveEnabled:
+    process.env.WHATSAPP_INTERACTIVE_ENABLED === "true",
   orderReceiptPdfEnabled: process.env.ORDER_RECEIPT_PDF_ENABLED === "true",
   orderReceiptStoreName:
     process.env.ORDER_RECEIPT_STORE_NAME || "AN9A STORE",

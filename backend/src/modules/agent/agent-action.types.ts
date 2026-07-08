@@ -1,7 +1,9 @@
 import type { ProductImage } from "./product-context.types";
 import type { OrderEntities } from "./agent-brain.types";
 import type { AgentIdentity } from "./identity/agent-identity.types";
+import type { InteractiveSendDecision } from "./reply/interactive-send-decision.types";
 import type { AgentReplyUiHint } from "./reply/reply-renderer.types";
+import type { WhatsAppInteractivePreview } from "./reply/whatsapp-interactive.types";
 
 export type AgentActionType = "send_product_images" | "choice_list";
 
@@ -69,5 +71,7 @@ export interface AgentResult {
     intentRouterDurationMs?: number;
     identity?: AgentIdentity;
     replyUi?: AgentReplyUiHint;
+    whatsappInteractivePreview?: WhatsAppInteractivePreview | null;
+    interactiveSendDecision?: InteractiveSendDecision;
   };
 }

@@ -8,6 +8,7 @@ import type {
   AgentResult,
   ChoiceListAction,
 } from "../../agent/agent-action.types";
+import type { WhatsAppInteractivePreview } from "../../agent/reply/whatsapp-interactive.types";
 import type { AgentIdentity } from "../../agent/identity/agent-identity.types";
 import { conversationKeyService } from "../../agent/identity/conversation-key.service";
 import { sellerResolverService } from "../../agent/identity/seller-resolver.service";
@@ -1049,6 +1050,190 @@ export async function sendCloudText(input: {
     dryRun: result.dryRun,
     success: result.success,
     errorMessage: result.errorMessage,
+  });
+
+  return result;
+}
+
+function validateInteractivePreview(
+  preview: unknown,
+): { ok: true } | { ok: false; errorMessage: string } {
+  const candidate = preview as WhatsAppInteractivePreview | undefined;
+
+  if (!candidate || typeof candidate !== "object") {
+    return { ok: false, errorMessage: "interactivePreview must be an object" };
+  }
+
+  if (candidate.type !== "interactive") {
+    return { ok: false, errorMessage: 'interactivePreview.type must be "interactive"' };
+  }
+
+  if (!candidate.interactive || typeof candidate.interactive !== "object") {
+    return {
+      ok: false,
+      errorMessage: "interactivePreview.interactive must be an object",
+    };
+  }
+
+  if (!["button", "list"].includes(candidate.interactive.type)) {
+    return {
+      ok: false,
+      errorMessage: 'interactive.type must be "button" or "list"',
+    };
+  }
+
+  const bodyText = candidate.interactive.body?.text;
+
+  if (typeof bodyText !== "string" || !bodyText.trim()) {
+    return { ok: false, errorMessage: "interactive.body.text is required" };
+  }
+
+  if (candidate.interactive.type === "button") {
+    const buttons = candidate.interactive.action?.buttons;
+
+    if (!Array.isArray(buttons) || buttons.length < 1) {
+      return { ok: false, errorMessage: "button interactive requires buttons" };
+    }
+
+    if (buttons.length > 3) {
+      return {
+        ok: false,
+        errorMessage: "button interactive supports at most 3 buttons",
+      };
+    }
+
+    const invalidButtonIndex = buttons.findIndex(
+      (button) =>
+        button?.type !== "reply" ||
+        typeof button.reply?.id !== "string" ||
+        !button.reply.id.trim() ||
+        typeof button.reply?.title !== "string" ||
+        !button.reply.title.trim(),
+    );
+
+    if (invalidButtonIndex >= 0) {
+      return {
+        ok: false,
+        errorMessage: `button ${invalidButtonIndex + 1} requires reply id and title`,
+      };
+    }
+
+    return { ok: true };
+  }
+
+  const action = candidate.interactive.action;
+
+  if (typeof action?.button !== "string" || !action.button.trim()) {
+    return { ok: false, errorMessage: "list interactive action.button is required" };
+  }
+
+  if (!Array.isArray(action.sections) || action.sections.length < 1) {
+    return { ok: false, errorMessage: "list interactive requires sections" };
+  }
+
+  for (const [sectionIndex, section] of action.sections.entries()) {
+    if (typeof section?.title !== "string" || !section.title.trim()) {
+      return {
+        ok: false,
+        errorMessage: `list section ${sectionIndex + 1} requires title`,
+      };
+    }
+
+    if (!Array.isArray(section.rows) || section.rows.length < 1) {
+      return {
+        ok: false,
+        errorMessage: `list section ${sectionIndex + 1} requires rows`,
+      };
+    }
+
+    const invalidRowIndex = section.rows.findIndex(
+      (row) =>
+        typeof row?.id !== "string" ||
+        !row.id.trim() ||
+        typeof row?.title !== "string" ||
+        !row.title.trim(),
+    );
+
+    if (invalidRowIndex >= 0) {
+      return {
+        ok: false,
+        errorMessage: `list section ${sectionIndex + 1} row ${
+          invalidRowIndex + 1
+        } requires id and title`,
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
+export async function sendCloudInteractiveMessage(input: {
+  to: string;
+  phoneNumberId?: string;
+  interactivePreview: WhatsAppInteractivePreview;
+  forceDryRun?: boolean;
+}): Promise<WhatsAppCloudSendResult> {
+  const validation = validateInteractivePreview(input.interactivePreview);
+  const phoneNumberId =
+    input.phoneNumberId || env.whatsappCloudPhoneNumberId || "";
+
+  if (!validation.ok) {
+    logJson({
+      event: "whatsapp.cloud.send.interactive",
+      to: maskPhone(input.to),
+      interactiveType: (input.interactivePreview as any)?.interactive?.type,
+      dryRun: Boolean(input.forceDryRun || env.whatsappCloudDryRun),
+      success: false,
+      validationFailed: true,
+      errorMessage: validation.errorMessage,
+    });
+
+    return {
+      success: false,
+      dryRun: Boolean(input.forceDryRun || env.whatsappCloudDryRun),
+      payload: null,
+      errorMessage: validation.errorMessage,
+    };
+  }
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: input.to,
+    type: "interactive",
+    interactive: input.interactivePreview.interactive,
+  };
+
+  if (input.forceDryRun) {
+    const result = {
+      success: true,
+      dryRun: true,
+      payload,
+      response: { dryRun: true, forced: true },
+    };
+
+    logJson({
+      event: "whatsapp.cloud.send.interactive",
+      to: maskPhone(input.to),
+      interactiveType: input.interactivePreview.interactive.type,
+      dryRun: true,
+      success: true,
+      forcedDryRun: true,
+    });
+
+    return result;
+  }
+
+  const result = await postCloudMessage(phoneNumberId, payload);
+
+  logJson({
+    event: "whatsapp.cloud.send.interactive",
+    to: maskPhone(input.to),
+    interactiveType: input.interactivePreview.interactive.type,
+    dryRun: result.dryRun,
+    success: result.success,
+    errorMessage: result.errorMessage,
+    graphCode: result.graphCode,
+    graphDetails: result.graphDetails,
   });
 
   return result;

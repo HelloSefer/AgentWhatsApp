@@ -12,6 +12,7 @@ import {
   recordCloudWebhookVerify,
   sendCtaUrl,
   sendCloudText,
+  sendCloudInteractiveMessage,
   sendOrderFlow,
   sendReplyButtonPreset,
   subscribeAppToWaba,
@@ -253,6 +254,67 @@ export async function testWhatsAppCloudSendText(req: Request, res: Response) {
     return res.status(500).json({
       message: "Cloud API test send failed",
       error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function testWhatsAppCloudSendInteractivePreview(
+  req: Request,
+  res: Response,
+) {
+  if (!isDevToolAllowed()) {
+    return res.status(403).json({
+      success: false,
+      dryRun: true,
+      payload: null,
+      response: null,
+      errorMessage: "Cloud interactive preview test endpoint is disabled in production",
+    });
+  }
+
+  const to = typeof req.body?.to === "string" ? req.body.to.trim() : "";
+  const phoneNumberId =
+    typeof req.body?.phoneNumberId === "string" && req.body.phoneNumberId.trim()
+      ? req.body.phoneNumberId.trim()
+      : env.whatsappCloudPhoneNumberId;
+  const interactivePreview = req.body?.interactivePreview;
+
+  if (!to) {
+    return res.status(400).json({
+      success: false,
+      dryRun: true,
+      payload: null,
+      response: null,
+      errorMessage: "to is required",
+    });
+  }
+
+  if (!interactivePreview || typeof interactivePreview !== "object") {
+    return res.status(400).json({
+      success: false,
+      dryRun: true,
+      payload: null,
+      response: null,
+      errorMessage: "interactivePreview is required",
+    });
+  }
+
+  try {
+    const result = await sendCloudInteractiveMessage({
+      to,
+      phoneNumberId,
+      interactivePreview,
+      forceDryRun: true,
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      dryRun: true,
+      payload: null,
+      response: null,
+      errorMessage: error instanceof Error ? error.message : "Unknown error",
     });
   }
 }
