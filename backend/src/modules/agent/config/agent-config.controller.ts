@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { normalizeSellerConfig } from "./first-entry-config.service";
 import { productContextService } from "./product-context.service";
 import { requiredFieldsService } from "./required-fields.service";
 import { sellerConfigService } from "./seller-config.service";
@@ -12,16 +13,20 @@ export function getAgentConfig(req: Request, res: Response) {
   const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
   const productResult =
     productContextService.getActiveProductContextWithMeta(sellerId);
+  const sellerConfig = normalizeSellerConfig(
+    sellerResult.sellerConfig,
+    productResult.productContext.price,
+  );
   const requiredOrderFields = requiredFieldsService.getRequiredOrderFields({
-    sellerConfig: sellerResult.sellerConfig,
+    sellerConfig,
     productContext: productResult.productContext,
   });
 
   return res.status(200).json({
-    sellerId: sellerResult.sellerConfig.sellerId,
+    sellerId: sellerConfig.sellerId,
     requestedSellerId: sellerId,
     fallbackUsed: sellerResult.fallbackUsed || productResult.fallbackUsed,
-    sellerConfig: sellerResult.sellerConfig,
+    sellerConfig,
     productContext: productResult.productContext,
     requiredOrderFields,
     requiredOrderFieldKeys: requiredOrderFields.map((field) => field.key),
@@ -33,13 +38,17 @@ export function getAgentRequiredFields(req: Request, res: Response) {
   const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
   const productResult =
     productContextService.getActiveProductContextWithMeta(sellerId);
+  const sellerConfig = normalizeSellerConfig(
+    sellerResult.sellerConfig,
+    productResult.productContext.price,
+  );
   const requiredOrderFields = requiredFieldsService.getRequiredOrderFields({
-    sellerConfig: sellerResult.sellerConfig,
+    sellerConfig,
     productContext: productResult.productContext,
   });
 
   return res.status(200).json({
-    sellerId: sellerResult.sellerConfig.sellerId,
+    sellerId: sellerConfig.sellerId,
     requestedSellerId: sellerId,
     fallbackUsed: sellerResult.fallbackUsed || productResult.fallbackUsed,
     requiredOrderFields,

@@ -77,4 +77,22 @@ export const demoProductContexts: ProductContext[] = [
       avoidMedicalClaims: true,
     },
   },
+  {
+    sellerId: "seller_demo_not_mentioned",
+    productId: "prod_demo_general_001",
+    name: "منتج تجريبي",
+    description: "منتج تجريبي عام لاستعمال إعدادات العرض فقط.",
+    price: 99,
+    currency: "MAD",
+    active: true,
+    images: [],
+    benefits: ["معلومات المنتج قابلة للتخصيص"],
+    optionGroups: [],
+    infoMenu: ["price", "availability"],
+    stock: {
+      enabled: true,
+      status: "AVAILABLE",
+      text: "متوفر",
+    },
+  },
 ];
