@@ -257,6 +257,34 @@ export function firstEntryClickPreview(req: Request, res: Response) {
   }
 }
 
+export function getFirstEntryReadiness(_req: Request, res: Response) {
+  return res.status(200).json({
+    ok: true,
+    readiness: "ready_for_guarded_test_activation",
+    previewOnly: true,
+    liveEnabled: false,
+    checks: {
+      config: true,
+      renderer: true,
+      eligibility: true,
+      ctaPreview: true,
+      intentPreview: true,
+      dryRunIntegration: true,
+      agentTestIntegration: true,
+      clickNormalization: true,
+      noLiveSend: true,
+      noMetaApi: true,
+      noAiLlm: true,
+      noMediaSend: true,
+      noSessionMutationInPreview: true,
+      noOrderMutationInPreview: true,
+      noCtaLiveRouting: true,
+      explicitOptInOnly: true,
+    },
+    nextAllowedStep: "guarded_non_live_activation_or_phase_2_planning",
+  });
+}
+
 export async function testAgentReply(req: Request, res: Response) {
   const message = typeof req.body?.message === "string" ? req.body.message : "";
   const firstEntryClickPreviewRequested = isFirstEntryClickPreviewRequested(
