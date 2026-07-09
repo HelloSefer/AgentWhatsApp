@@ -73,5 +73,24 @@ export interface AgentResult {
     replyUi?: AgentReplyUiHint;
     whatsappInteractivePreview?: WhatsAppInteractivePreview | null;
     interactiveSendDecision?: InteractiveSendDecision;
+    firstEntryLiveSmoke?: {
+      handledBy: "first_entry_live_smoke" | "first_entry_click_preview_blocked";
+      readinessReady?: boolean;
+      eligibilityReason?: string;
+      recommendedNextStep?: string;
+      clickIntent?: string;
+      interactiveEnabled?: boolean;
+      ctas?: unknown;
+      uiHints?: unknown;
+      presentationMode?: "single_message" | "split_info_and_cta";
+      messages?: Array<{
+        kind: "text" | "interactive_buttons";
+        text: string;
+        buttons?: Array<{
+          id: string;
+          label: string;
+        }>;
+      }>;
+    };
   };
 }

@@ -3,6 +3,10 @@ import { generateAgentResult, resolveAgentIdentity } from "./agent.service";
 import { runFirstEntryAgentTest } from "./config/first-entry-agent-test.service";
 import { normalizeFirstEntryClick } from "./config/first-entry-click-normalizer.service";
 import { runFirstEntryDryRun } from "./config/first-entry-dry-run.service";
+import {
+  buildFirstEntryLiveSmokeDispatchPreview,
+  buildFirstEntryLiveSmokeReadiness,
+} from "./config/first-entry-live-smoke.service";
 import { analyzeAIIntentWithMeta } from "./ai/ai-intent-router.service";
 import { evaluateIntentRouter } from "./ai/ai-intent-router-eval.service";
 import type { IntentEvalCase } from "./ai/ai-intent-router-eval.service";
@@ -283,6 +287,31 @@ export function getFirstEntryReadiness(_req: Request, res: Response) {
     },
     nextAllowedStep: "guarded_non_live_activation_or_phase_2_planning",
   });
+}
+
+export function getFirstEntryLiveSmokeReadiness(req: Request, res: Response) {
+  return res.status(200).json(
+    buildFirstEntryLiveSmokeReadiness({
+      testRecipientPhone: getOptionalString(req.query.testRecipientPhone),
+      sellerId: getOptionalString(req.query.sellerId),
+    }),
+  );
+}
+
+export function firstEntryLiveSmokeDispatchPreview(req: Request, res: Response) {
+  return res.status(200).json(
+    buildFirstEntryLiveSmokeDispatchPreview({
+      sellerId: getOptionalString(req.body?.sellerId),
+      customerPhone:
+        getOptionalString(req.body?.customerPhone) ||
+        getOptionalString(req.body?.customerId),
+      message: getOptionalString(req.body?.message),
+      interactiveEnabledOverride:
+        typeof req.body?.interactiveEnabledOverride === "boolean"
+          ? req.body.interactiveEnabledOverride
+          : undefined,
+    }),
+  );
 }
 
 export async function testAgentReply(req: Request, res: Response) {

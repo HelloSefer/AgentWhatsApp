@@ -9,6 +9,8 @@ import {
   evalAgentConversationScenarios,
   firstEntryClickPreview,
   firstEntryDryRun,
+  firstEntryLiveSmokeDispatchPreview,
+  getFirstEntryLiveSmokeReadiness,
   getFirstEntryReadiness,
   getAgentNaturalReplyStatus,
   getAgentOrder,
@@ -37,6 +39,11 @@ router.post("/test", testAgentReply);
 router.post("/first-entry-dry-run", firstEntryDryRun);
 router.post("/first-entry-click-preview", firstEntryClickPreview);
 router.get("/first-entry-readiness", getFirstEntryReadiness);
+router.get("/first-entry-live-smoke-readiness", getFirstEntryLiveSmokeReadiness);
+router.post(
+  "/first-entry-live-smoke-dispatch-preview",
+  firstEntryLiveSmokeDispatchPreview,
+);
 router.post("/intent-test", testAgentIntent);
 router.post("/eval-intents", evalAgentIntents);
 router.post("/eval-replies", evalAgentReplies);

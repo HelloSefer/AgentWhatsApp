@@ -12,6 +12,10 @@ import type { WhatsAppInteractivePreview } from "../../agent/reply/whatsapp-inte
 import type { AgentIdentity } from "../../agent/identity/agent-identity.types";
 import { conversationKeyService } from "../../agent/identity/conversation-key.service";
 import { sellerResolverService } from "../../agent/identity/seller-resolver.service";
+import {
+  buildFirstEntryLiveSmokeResult,
+  markFirstEntryLiveSmokeShown,
+} from "../../agent/config/first-entry-live-smoke.service";
 import type { OrderEntities } from "../../agent/agent-brain.types";
 import { fastAnalyzeCustomerMessage } from "../../agent/fast-intent-analyzer.service";
 import {
@@ -44,6 +48,7 @@ import type {
   WhatsAppCloudSendResult,
 } from "./whatsapp-cloud.types";
 import type { CloudReplyDispatchResult } from "./cloud-reply-dispatch.types";
+import { cloudReplyDispatchService } from "./cloud-reply-dispatch.service";
 import { normalizeCloudIncomingMessage } from "./cloud-interactive-reply-normalizer.service";
 
 const GRAPH_API_BASE_URL = "https://graph.facebook.com";
@@ -2328,9 +2333,6 @@ async function sendAgentCloudResult(input: {
   userMessage: string;
   result: AgentResult;
 }): Promise<CloudReplyDispatchResult> {
-  const { cloudReplyDispatchService } = await import(
-    "./cloud-reply-dispatch.service.js"
-  );
   const dispatchResult = await cloudReplyDispatchService.dispatchAgentReply({
     to: input.to,
     phoneNumberId: input.phoneNumberId,
@@ -2354,6 +2356,46 @@ async function sendAgentCloudResult(input: {
   });
 
   return dispatchResult;
+}
+
+function getFirstEntryLiveSmokeMessages(result: AgentResult):
+  | Array<{
+      kind: "text" | "interactive_buttons";
+      text: string;
+      buttons?: Array<{ id: string; label: string }>;
+    }>
+  | undefined {
+  const firstEntry = result.meta?.firstEntryLiveSmoke;
+
+  if (
+    firstEntry?.presentationMode !== "split_info_and_cta" ||
+    !Array.isArray(firstEntry.messages)
+  ) {
+    return undefined;
+  }
+
+  return firstEntry.messages.filter(
+    (message) =>
+      (message.kind === "text" || message.kind === "interactive_buttons") &&
+      typeof message.text === "string" &&
+      message.text.trim(),
+  );
+}
+
+function buildFirstEntryTextOnlyResult(
+  result: AgentResult,
+  text: string,
+): AgentResult {
+  return {
+    ...result,
+    reply: text,
+    meta: {
+      ...result.meta,
+      replyUi: undefined,
+      whatsappInteractivePreview: null,
+      interactiveSendDecision: undefined,
+    },
+  };
 }
 
 export async function processCloudWebhookBody(
@@ -2488,6 +2530,153 @@ export async function processCloudWebhookBody(
     }
 
     try {
+      const firstEntryLiveSmoke = await buildFirstEntryLiveSmokeResult({
+        customerPhone: identity.customerPhone,
+        phoneNumberId: identity.phoneNumberId || message.phoneNumberId,
+        message: message.text,
+        sourceType: message.sourceType,
+        buttonReplyId: message.buttonReplyId,
+        buttonReplyTitle: message.buttonReplyTitle,
+      });
+
+      if (!firstEntryLiveSmoke.handled) {
+        logJson({
+          event: "first_entry.live_smoke.blocked",
+          reason: firstEntryLiveSmoke.blockedReason,
+          customerPhone: maskPhone(identity.customerPhone),
+          sellerId: identity.sellerId,
+          conversationKey: maskConversationKey(identity.conversationKey),
+          ready: firstEntryLiveSmoke.readiness.ready,
+          firstEntryLiveSmokeEnabled:
+            firstEntryLiveSmoke.readiness.firstEntryLiveSmokeEnabled,
+          recipientAllowed: firstEntryLiveSmoke.readiness.recipientAllowed,
+          cloudProvider: firstEntryLiveSmoke.readiness.cloudProvider,
+          cloudGuardEnabled: firstEntryLiveSmoke.readiness.cloudGuardEnabled,
+          cloudDryRunDisabled:
+            firstEntryLiveSmoke.readiness.cloudDryRunDisabled,
+        });
+      }
+
+      if (firstEntryLiveSmoke.handled) {
+        const startedAt = Date.now();
+        const splitMessages = getFirstEntryLiveSmokeMessages(
+          firstEntryLiveSmoke.result,
+        );
+        const infoMessage = splitMessages?.find(
+          (item) => item.kind === "text",
+        );
+        const ctaMessage = splitMessages?.find(
+          (item) => item.kind === "interactive_buttons",
+        );
+        const firstSendResult = infoMessage
+          ? await sendAgentCloudResult({
+              to: message.waId,
+              phoneNumberId: message.phoneNumberId,
+              customerId,
+              userMessage: message.text,
+              result: buildFirstEntryTextOnlyResult(
+                firstEntryLiveSmoke.result,
+                infoMessage.text,
+              ),
+            })
+          : undefined;
+
+        if (
+          firstSendResult?.ok &&
+          firstEntryLiveSmoke.reason === "first_entry_live_smoke"
+        ) {
+          await markFirstEntryLiveSmokeShown({
+            conversationKey: firstEntryLiveSmoke.conversationKey,
+            sellerId: firstEntryLiveSmoke.sellerId,
+            customerPhone: firstEntryLiveSmoke.customerPhone,
+          });
+        }
+
+        let sendResult: CloudReplyDispatchResult;
+
+        if (ctaMessage && (!infoMessage || firstSendResult?.ok)) {
+          sendResult = await sendAgentCloudResult({
+            to: message.waId,
+            phoneNumberId: message.phoneNumberId,
+            customerId,
+            userMessage: message.text,
+            result: {
+              ...firstEntryLiveSmoke.result,
+              reply: ctaMessage.text,
+            },
+          });
+        } else if (firstSendResult) {
+          sendResult = firstSendResult;
+        } else {
+          sendResult = await sendAgentCloudResult({
+            to: message.waId,
+            phoneNumberId: message.phoneNumberId,
+            customerId,
+            userMessage: message.text,
+            result: firstEntryLiveSmoke.result,
+          });
+        }
+
+        const durationMs = Date.now() - startedAt;
+
+        if (
+          !infoMessage &&
+          sendResult.ok &&
+          firstEntryLiveSmoke.reason === "first_entry_live_smoke"
+        ) {
+          await markFirstEntryLiveSmokeShown({
+            conversationKey: firstEntryLiveSmoke.conversationKey,
+            sellerId: firstEntryLiveSmoke.sellerId,
+            customerPhone: firstEntryLiveSmoke.customerPhone,
+          });
+        }
+
+        logJson({
+          event: "first_entry.live_smoke.result",
+          reason: firstEntryLiveSmoke.reason,
+          presentationMode:
+            firstEntryLiveSmoke.result.meta?.firstEntryLiveSmoke
+              ?.presentationMode,
+          customerPhone: maskPhone(identity.customerPhone),
+          sellerId: identity.sellerId,
+          conversationKey: maskConversationKey(identity.conversationKey),
+          messagePreview: previewText(message.text),
+          replyPreview: previewText(firstEntryLiveSmoke.result.reply),
+          firstMessageOk: firstSendResult?.ok,
+          ctaMessageOk: sendResult.ok,
+          dispatchOk: Boolean((firstSendResult?.ok ?? true) && sendResult.ok),
+          dryRun: firstSendResult?.dryRun ?? sendResult.dryRun,
+          durationMs,
+          firstEntryShownMarked: Boolean(
+            (firstSendResult?.ok || (!infoMessage && sendResult.ok)) &&
+              firstEntryLiveSmoke.reason === "first_entry_live_smoke",
+          ),
+        });
+
+        if (infoMessage && firstSendResult?.ok && !sendResult.ok) {
+          logJson({
+            event: "first_entry.live_smoke.cta_send_failed_after_text",
+            customerPhone: maskPhone(identity.customerPhone),
+            sellerId: identity.sellerId,
+            conversationKey: maskConversationKey(identity.conversationKey),
+            reason: sendResult.reason,
+            error: sendResult.error,
+            firstEntryShownMarked: true,
+          });
+        }
+
+        processResult.handled = true;
+        processResult.agentReplyPreview = previewText(
+          firstEntryLiveSmoke.result.reply,
+        );
+        processResult.actionsCount = firstEntryLiveSmoke.result.actions.length;
+        processResult.sendAttempted = true;
+        processResult.sendSuccess = Boolean(
+          (firstSendResult?.ok ?? true) && sendResult.ok,
+        );
+        continue;
+      }
+
       if (message.isFlowSubmission) {
         const fieldsPresent = message.flowOrder
           ? Object.entries(message.flowOrder)

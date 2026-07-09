@@ -59,6 +59,12 @@ export const env = {
     process.env.WHATSAPP_INTERACTIVE_ENABLED === "true",
   whatsappInteractiveLiveSendAllowed:
     process.env.WHATSAPP_INTERACTIVE_LIVE_SEND_ALLOWED === "true",
+  firstEntryLiveSmokeEnabled:
+    process.env.FIRST_ENTRY_LIVE_SMOKE_ENABLED === "true",
+  firstEntryLiveSmokeTestRecipient:
+    process.env.FIRST_ENTRY_LIVE_SMOKE_TEST_RECIPIENT || "212600000000",
+  firstEntryLiveSmokeSellerId:
+    process.env.FIRST_ENTRY_LIVE_SMOKE_SELLER_ID || "seller_demo_sandals",
   orderReceiptPdfEnabled: process.env.ORDER_RECEIPT_PDF_ENABLED === "true",
   orderReceiptStoreName:
     process.env.ORDER_RECEIPT_STORE_NAME || "AN9A STORE",
