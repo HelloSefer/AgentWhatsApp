@@ -88,7 +88,9 @@ function hasPrice(productContext: ProductContext): boolean {
   );
 }
 
-function formatPrice(productContext: ProductContext): string | undefined {
+export function formatFirstEntryPrice(
+  productContext: ProductContext,
+): string | undefined {
   if (!hasPrice(productContext)) {
     return undefined;
   }
@@ -145,7 +147,7 @@ function buildOpeningLines(
   ];
 }
 
-function renderDeliveryLine(
+export function renderFirstEntryDeliveryLine(
   deliveryPolicy: DeliveryPolicy | undefined,
   warnings: string[],
 ): string | undefined {
@@ -200,7 +202,7 @@ function renderDeliveryLine(
   return undefined;
 }
 
-function renderPaymentLine(
+export function renderFirstEntryPaymentLine(
   sellerConfig: SellerConfig,
   policy: FirstEntryPolicy,
 ): string | undefined {
@@ -222,7 +224,7 @@ function renderTrustLine(style: GreetingStyle): string {
   return "يمكنك تأكيد الطلب قبل الإرسال.";
 }
 
-function renderCtaLine(
+export function renderFirstEntryCtaLine(
   ctaMode: FirstEntryCtaMode,
   style: GreetingStyle,
 ): string | undefined {
@@ -413,7 +415,7 @@ export function renderFirstEntryMessage(
   const lines = buildOpeningLines(policy.greetingStyle, productNameLine);
 
   if (policy.showPrice) {
-    const priceText = formatPrice(input.productContext);
+    const priceText = formatFirstEntryPrice(input.productContext);
 
     if (priceText) {
       safePushLine(lines, `الثمن: ${priceText}.`);
@@ -425,10 +427,10 @@ export function renderFirstEntryMessage(
   }
 
   if (policy.showDelivery) {
-    safePushLine(lines, renderDeliveryLine(deliveryPolicy, warnings));
+    safePushLine(lines, renderFirstEntryDeliveryLine(deliveryPolicy, warnings));
   }
 
-  safePushLine(lines, renderPaymentLine(sellerConfig, policy));
+  safePushLine(lines, renderFirstEntryPaymentLine(sellerConfig, policy));
 
   if (policy.showPromotion && input.productContext.stock?.text) {
     safePushLine(lines, input.productContext.stock.text);
@@ -438,7 +440,10 @@ export function renderFirstEntryMessage(
     safePushLine(lines, renderTrustLine(policy.greetingStyle));
   }
 
-  const ctaLine = renderCtaLine(policy.ctaMode, policy.greetingStyle);
+  const ctaLine = renderFirstEntryCtaLine(
+    policy.ctaMode,
+    policy.greetingStyle,
+  );
 
   if (ctaLine) {
     lines.push("");

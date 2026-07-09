@@ -25,6 +25,7 @@ import {
   getAgentFirstEntryEligibilityPreview,
   getAgentFirstEntryPreview,
   getAgentRequiredFields,
+  postAgentFirstEntryIntentPreview,
 } from "./config/agent-config.controller";
 
 const router = Router();
@@ -39,6 +40,10 @@ router.post("/eval-conversation-scenarios", evalAgentConversationScenarios);
 router.get(
   "/config/:sellerId/first-entry-eligibility-preview",
   getAgentFirstEntryEligibilityPreview,
+);
+router.post(
+  "/config/:sellerId/first-entry-intent-preview",
+  postAgentFirstEntryIntentPreview,
 );
 router.get("/config/:sellerId/first-entry-preview", getAgentFirstEntryPreview);
 router.get("/config/:sellerId/required-fields", getAgentRequiredFields);
