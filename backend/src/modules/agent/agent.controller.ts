@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { generateAgentResult, resolveAgentIdentity } from "./agent.service";
+import { runFirstEntryDryRun } from "./config/first-entry-dry-run.service";
 import { analyzeAIIntentWithMeta } from "./ai/ai-intent-router.service";
 import { evaluateIntentRouter } from "./ai/ai-intent-router-eval.service";
 import type { IntentEvalCase } from "./ai/ai-intent-router-eval.service";
@@ -37,6 +38,9 @@ import {
   updateConfirmedOrderStatus,
   orderStatuses,
 } from "./order/confirmed-order-store.service";
+import { normalizeSellerConfig } from "./config/first-entry-config.service";
+import { productContextService } from "./config/product-context.service";
+import { sellerConfigService } from "./config/seller-config.service";
 import { getConversationSession } from "./session/conversation-session.service";
 import type { ConversationOrderState } from "./agent-brain.types";
 import type { ProductContext } from "./product-context.types";
@@ -72,6 +76,80 @@ function getOptionalBooleanQuery(
   }
 
   return "invalid";
+}
+
+function getDryRunMockState(value: unknown) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+
+  return {
+    firstEntryShown: candidate.firstEntryShown === true,
+    hasSessionHistory: candidate.hasSessionHistory === true,
+    orderFlowActive: candidate.orderFlowActive === true,
+    awaitingConfirmation: candidate.awaitingConfirmation === true,
+    orderConfirmed: candidate.orderConfirmed === true,
+    editFlowActive: candidate.editFlowActive === true,
+    infoFlowActive: candidate.infoFlowActive === true,
+  };
+}
+
+export function firstEntryDryRun(req: Request, res: Response) {
+  const sellerId = getOptionalString(req.body?.sellerId) || "seller_demo_sandals";
+  const customerPhone = getOptionalString(req.body?.customerPhone);
+  const message = typeof req.body?.message === "string" ? req.body.message : "";
+
+  if (!customerPhone) {
+    return res.status(400).json({
+      ok: false,
+      previewOnly: true,
+      dryRun: true,
+      message: "customerPhone is required",
+    });
+  }
+
+  if (!message.trim()) {
+    return res.status(400).json({
+      ok: false,
+      previewOnly: true,
+      dryRun: true,
+      message: "message is required",
+    });
+  }
+
+  try {
+    const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
+    const productResult =
+      productContextService.getActiveProductContextWithMeta(sellerId);
+    const sellerConfig = normalizeSellerConfig(
+      sellerResult.sellerConfig,
+      productResult.productContext.price,
+    );
+    const result = runFirstEntryDryRun({
+      sellerConfig,
+      productContext: productResult.productContext,
+      sellerId: sellerConfig.sellerId,
+      customerPhone,
+      message,
+      mockState: getDryRunMockState(req.body?.mockState),
+    });
+
+    return res.status(200).json({
+      ...result,
+      requestedSellerId: sellerId,
+      fallbackUsed: sellerResult.fallbackUsed || productResult.fallbackUsed,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      previewOnly: true,
+      dryRun: true,
+      message: "First entry dry-run failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
 }
 
 export async function testAgentReply(req: Request, res: Response) {
