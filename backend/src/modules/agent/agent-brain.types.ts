@@ -101,6 +101,10 @@ export interface ConversationSession {
     lastIntent?: string;
     lastReplyAt?: string;
   };
+  firstEntry?: {
+    shown: boolean;
+    shownAt?: string;
+  };
   createdAt: string;
   updatedAt: string;
   expiresAt?: string;

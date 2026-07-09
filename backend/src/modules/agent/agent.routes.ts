@@ -22,6 +22,7 @@ import {
 } from "./agent.controller";
 import {
   getAgentConfig,
+  getAgentFirstEntryEligibilityPreview,
   getAgentFirstEntryPreview,
   getAgentRequiredFields,
 } from "./config/agent-config.controller";
@@ -35,6 +36,10 @@ router.post("/eval-replies", evalAgentReplies);
 router.post("/eval-natural-replies", evalAgentNaturalReplies);
 router.post("/eval-seller-brain", evalAgentSellerBrain);
 router.post("/eval-conversation-scenarios", evalAgentConversationScenarios);
+router.get(
+  "/config/:sellerId/first-entry-eligibility-preview",
+  getAgentFirstEntryEligibilityPreview,
+);
 router.get("/config/:sellerId/first-entry-preview", getAgentFirstEntryPreview);
 router.get("/config/:sellerId/required-fields", getAgentRequiredFields);
 router.get("/config/:sellerId", getAgentConfig);

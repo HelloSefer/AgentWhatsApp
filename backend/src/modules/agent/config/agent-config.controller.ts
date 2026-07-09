@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { evaluateFirstEntryEligibility } from "./first-entry-eligibility.service";
 import { normalizeSellerConfig } from "./first-entry-config.service";
 import { renderFirstEntryMessage } from "./first-entry-renderer.service";
 import { productContextService } from "./product-context.service";
@@ -67,6 +68,39 @@ export function getAgentFirstEntryPreview(req: Request, res: Response) {
     productResult.productContext.price,
   );
   const result = renderFirstEntryMessage({
+    sellerConfig,
+    productContext: productResult.productContext,
+  });
+  const eligibility = evaluateFirstEntryEligibility({
+    sellerConfig,
+    productContext: productResult.productContext,
+  });
+
+  return res.status(200).json({
+    ok: true,
+    previewOnly: true,
+    sellerId: sellerConfig.sellerId,
+    requestedSellerId: sellerId,
+    fallbackUsed: sellerResult.fallbackUsed || productResult.fallbackUsed,
+    productId: productResult.productContext.productId,
+    result,
+    eligibility,
+  });
+}
+
+export function getAgentFirstEntryEligibilityPreview(
+  req: Request,
+  res: Response,
+) {
+  const sellerId = getSellerId(req.params.sellerId);
+  const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
+  const productResult =
+    productContextService.getActiveProductContextWithMeta(sellerId);
+  const sellerConfig = normalizeSellerConfig(
+    sellerResult.sellerConfig,
+    productResult.productContext.price,
+  );
+  const result = evaluateFirstEntryEligibility({
     sellerConfig,
     productContext: productResult.productContext,
   });
