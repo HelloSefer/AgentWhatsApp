@@ -7,6 +7,7 @@ import {
   evalAgentReplies,
   evalAgentSellerBrain,
   evalAgentConversationScenarios,
+  firstEntryClickPreview,
   firstEntryDryRun,
   getAgentNaturalReplyStatus,
   getAgentOrder,
@@ -33,6 +34,7 @@ const router = Router();
 
 router.post("/test", testAgentReply);
 router.post("/first-entry-dry-run", firstEntryDryRun);
+router.post("/first-entry-click-preview", firstEntryClickPreview);
 router.post("/intent-test", testAgentIntent);
 router.post("/eval-intents", evalAgentIntents);
 router.post("/eval-replies", evalAgentReplies);

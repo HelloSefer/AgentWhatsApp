@@ -1,5 +1,7 @@
 import type { Request, Response } from "express";
 import { generateAgentResult, resolveAgentIdentity } from "./agent.service";
+import { runFirstEntryAgentTest } from "./config/first-entry-agent-test.service";
+import { normalizeFirstEntryClick } from "./config/first-entry-click-normalizer.service";
 import { runFirstEntryDryRun } from "./config/first-entry-dry-run.service";
 import { analyzeAIIntentWithMeta } from "./ai/ai-intent-router.service";
 import { evaluateIntentRouter } from "./ai/ai-intent-router-eval.service";
@@ -41,6 +43,7 @@ import {
 import { normalizeSellerConfig } from "./config/first-entry-config.service";
 import { productContextService } from "./config/product-context.service";
 import { sellerConfigService } from "./config/seller-config.service";
+import { conversationKeyService } from "./identity/conversation-key.service";
 import { getConversationSession } from "./session/conversation-session.service";
 import type { ConversationOrderState } from "./agent-brain.types";
 import type { ProductContext } from "./product-context.types";
@@ -93,6 +96,76 @@ function getDryRunMockState(value: unknown) {
     orderConfirmed: candidate.orderConfirmed === true,
     editFlowActive: candidate.editFlowActive === true,
     infoFlowActive: candidate.infoFlowActive === true,
+  };
+}
+
+function isFirstEntryAgentTestRequested(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return false;
+  }
+
+  const candidate = body as Record<string, unknown>;
+
+  return (
+    candidate.enableFirstEntryPreview === true ||
+    candidate.firstEntryMode === "preview"
+  );
+}
+
+function isFirstEntryClickPreviewRequested(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return false;
+  }
+
+  const candidate = body as Record<string, unknown>;
+
+  return (
+    candidate.enableFirstEntryClickPreview === true ||
+    candidate.firstEntryClickMode === "preview"
+  );
+}
+
+function getFirstEntryClickInput(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return "";
+  }
+
+  const candidate = body as Record<string, unknown>;
+
+  return (
+    candidate.clickId ||
+    candidate.interactiveReplyId ||
+    candidate.text ||
+    candidate.message ||
+    ""
+  );
+}
+
+function buildFirstEntryClickPreviewResponse(input: {
+  sellerId: string;
+  customerPhone: string;
+  rawInput: unknown;
+}) {
+  const conversationKey = conversationKeyService.buildConversationKey(
+    input.sellerId,
+    input.customerPhone,
+  );
+
+  return {
+    ok: true,
+    previewOnly: true,
+    dryRun: true,
+    sellerId: input.sellerId,
+    customerPhone: input.customerPhone,
+    conversationKey,
+    result: normalizeFirstEntryClick(input.rawInput),
+    safety: {
+      noLiveSend: true,
+      noMetaApi: true,
+      noSessionMutation: true,
+      noOrderMutation: true,
+      noLiveRouting: true,
+    },
   };
 }
 
@@ -152,13 +225,147 @@ export function firstEntryDryRun(req: Request, res: Response) {
   }
 }
 
+export function firstEntryClickPreview(req: Request, res: Response) {
+  const sellerId = getOptionalString(req.body?.sellerId) || "seller_demo_sandals";
+  const customerPhone = getOptionalString(req.body?.customerPhone);
+
+  if (!customerPhone) {
+    return res.status(400).json({
+      ok: false,
+      previewOnly: true,
+      dryRun: true,
+      message: "customerPhone is required",
+    });
+  }
+
+  try {
+    return res.status(200).json(
+      buildFirstEntryClickPreviewResponse({
+        sellerId,
+        customerPhone,
+        rawInput: getFirstEntryClickInput(req.body),
+      }),
+    );
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      previewOnly: true,
+      dryRun: true,
+      message: "First entry click preview failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
 export async function testAgentReply(req: Request, res: Response) {
   const message = typeof req.body?.message === "string" ? req.body.message : "";
+  const firstEntryClickPreviewRequested = isFirstEntryClickPreviewRequested(
+    req.body,
+  );
 
-  if (!message.trim()) {
+  if (!message.trim() && !firstEntryClickPreviewRequested) {
     return res.status(400).json({
       message: "Message is required",
     });
+  }
+
+  if (firstEntryClickPreviewRequested) {
+    const sellerId =
+      getOptionalString(req.body?.sellerId) || "seller_demo_sandals";
+    const customerPhone =
+      getOptionalString(req.body?.customerPhone) ||
+      getOptionalString(req.body?.customerId);
+
+    if (!customerPhone) {
+      return res.status(400).json({
+        ok: false,
+        mode: "agent_test",
+        previewOnly: true,
+        dryRun: true,
+        handledBy: "first_entry_click_preview_blocked",
+        message: "customerPhone is required for first-entry click preview",
+      });
+    }
+
+    try {
+      const preview = buildFirstEntryClickPreviewResponse({
+        sellerId,
+        customerPhone,
+        rawInput: getFirstEntryClickInput(req.body),
+      });
+
+      return res.status(200).json({
+        ...preview,
+        mode: "agent_test",
+        handledBy: "first_entry_click_preview",
+        reply: "",
+        actions: [],
+        firstEntryClick: preview.result,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        mode: "agent_test",
+        previewOnly: true,
+        dryRun: true,
+        handledBy: "first_entry_click_preview_blocked",
+        message: "First entry click preview failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+
+  if (isFirstEntryAgentTestRequested(req.body)) {
+    const sellerId =
+      getOptionalString(req.body?.sellerId) || "seller_demo_sandals";
+    const customerPhone =
+      getOptionalString(req.body?.customerPhone) ||
+      getOptionalString(req.body?.customerId);
+
+    if (!customerPhone) {
+      return res.status(400).json({
+        ok: false,
+        mode: "agent_test",
+        previewOnly: true,
+        dryRun: true,
+        handledBy: "first_entry_agent_test_blocked",
+        message: "customerPhone is required for first-entry preview",
+      });
+    }
+
+    try {
+      const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
+      const productResult =
+        productContextService.getActiveProductContextWithMeta(sellerId);
+      const sellerConfig = normalizeSellerConfig(
+        sellerResult.sellerConfig,
+        productResult.productContext.price,
+      );
+      const result = runFirstEntryAgentTest({
+        sellerConfig,
+        productContext: productResult.productContext,
+        sellerId: sellerConfig.sellerId,
+        customerPhone,
+        message,
+        mockState: getDryRunMockState(req.body?.mockState),
+      });
+
+      return res.status(200).json({
+        ...result,
+        requestedSellerId: sellerId,
+        fallbackUsed: sellerResult.fallbackUsed || productResult.fallbackUsed,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        mode: "agent_test",
+        previewOnly: true,
+        dryRun: true,
+        handledBy: "first_entry_agent_test_blocked",
+        message: "First entry agent test failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   }
 
   try {
