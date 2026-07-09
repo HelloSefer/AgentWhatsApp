@@ -31,7 +31,7 @@ export const demoSellerConfigs: SellerConfig[] = [
       free: false,
       text: "التوصيل حتى لباب الدار",
       paymentOnDelivery: true,
-      paymentText: "الأداء عند الاستلام",
+      paymentText: "الدفع عند الاستلام",
     },
     customerFields: [
       {
@@ -111,7 +111,7 @@ export const demoSellerConfigs: SellerConfig[] = [
       text: "التوصيل متوفر حتى لباب الدار",
       deliveryPrice: 25,
       paymentOnDelivery: true,
-      paymentText: "الأداء عند الاستلام",
+      paymentText: "الدفع عند الاستلام",
     },
     customerFields: [
       {

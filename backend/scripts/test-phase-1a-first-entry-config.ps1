@@ -189,7 +189,7 @@ $group = "D Existing config safety"
 Add-Check $group "sandals required fields compile" (@($data.requiredFields.sandals).Count -ge 6) "count=$(@($data.requiredFields.sandals).Count)" $duration
 Add-Check $group "medical required fields compile" (@($data.requiredFields.medical).Count -ge 3) "count=$(@($data.requiredFields.medical).Count)" $duration
 
-$failed = $checks | Where-Object { -not $_.Passed }
+$failed = @($checks | Where-Object { -not $_.Passed })
 $passed = $checks.Count - $failed.Count
 
 Write-Host "Phase 1A first entry config checks:"
