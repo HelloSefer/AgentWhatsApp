@@ -5,6 +5,7 @@ import {
   buildOrderFormUrl,
   resolveOrderFormBaseUrl,
 } from "../../order-form/order-form.service";
+import { normalizeCloudIncomingMessage } from "./cloud-interactive-reply-normalizer.service";
 import { buildLiveInteractiveReadiness } from "./cloud-live-interactive-readiness.service";
 import { cloudReplyDispatchService } from "./cloud-reply-dispatch.service";
 import {
@@ -74,6 +75,18 @@ export function getWhatsAppCloudLiveInteractiveReadiness(
       sellerId,
     }),
   );
+}
+
+export function testNormalizeWhatsAppCloudInteractiveReply(
+  req: Request,
+  res: Response,
+) {
+  const normalized = normalizeCloudIncomingMessage(req.body?.message);
+
+  return res.status(200).json({
+    ok: true,
+    normalized,
+  });
 }
 
 export async function receiveWhatsAppCloudWebhook(req: Request, res: Response) {

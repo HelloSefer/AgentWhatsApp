@@ -44,6 +44,7 @@ import type {
   WhatsAppCloudSendResult,
 } from "./whatsapp-cloud.types";
 import type { CloudReplyDispatchResult } from "./cloud-reply-dispatch.types";
+import { normalizeCloudIncomingMessage } from "./cloud-interactive-reply-normalizer.service";
 
 const GRAPH_API_BASE_URL = "https://graph.facebook.com";
 const PREVIEW_LENGTH = 90;
@@ -578,31 +579,20 @@ function getInteractiveMessageInfo(message: any): {
   buttonReplyId?: string;
   buttonReplyTitle?: string;
 } {
-  const interactive = message?.interactive;
+  const normalized = normalizeCloudIncomingMessage(message);
 
-  if (interactive?.button_reply) {
-    const buttonReplyId = String(interactive.button_reply.id || "").trim();
-    const buttonReplyTitle = String(interactive.button_reply.title || "").trim();
-    const text = mapButtonReplyIdToText(
-      buttonReplyId,
-      buttonReplyTitle || buttonReplyId,
-    );
-
+  if (normalized.kind === "interactive_reply") {
     return {
-      text,
-      sourceType: "button_reply",
-      buttonReplyId,
-      buttonReplyTitle,
-    };
-  }
-
-  if (interactive?.list_reply) {
-    const selected =
-      interactive.list_reply.id || interactive.list_reply.title || "";
-
-    return {
-      text: selected ? normalizeSelectedChoiceText(String(selected)) : "",
-      sourceType: "list_reply",
+      text: normalized.normalizedText,
+      sourceType: normalized.interactiveType,
+      buttonReplyId:
+        normalized.interactiveType === "button_reply"
+          ? normalized.replyId
+          : undefined,
+      buttonReplyTitle:
+        normalized.interactiveType === "button_reply"
+          ? normalized.replyTitle
+          : undefined,
     };
   }
 

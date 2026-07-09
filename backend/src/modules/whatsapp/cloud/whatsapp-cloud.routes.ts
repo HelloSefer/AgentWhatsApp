@@ -8,6 +8,7 @@ import {
   subscribeWhatsAppCloudApp,
   testWhatsAppCloudAgentDispatchFlow,
   testWhatsAppCloudDispatchAgentReply,
+  testNormalizeWhatsAppCloudInteractiveReply,
   testWhatsAppCloudSendOrderFormCta,
   testWhatsAppCloudSendOrderFlow,
   testWhatsAppCloudSendInteractivePreview,
@@ -27,6 +28,10 @@ router.get("/webhook", verifyWhatsAppCloudWebhook);
 router.post("/webhook", receiveWhatsAppCloudWebhook);
 router.post("/test-send-text", testWhatsAppCloudSendText);
 router.post("/test-dispatch-agent-reply", testWhatsAppCloudDispatchAgentReply);
+router.post(
+  "/test-normalize-interactive-reply",
+  testNormalizeWhatsAppCloudInteractiveReply,
+);
 router.post(
   "/test-agent-dispatch-flow",
   testWhatsAppCloudAgentDispatchFlow,
