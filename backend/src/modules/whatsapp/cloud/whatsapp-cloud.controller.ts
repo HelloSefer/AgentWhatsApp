@@ -425,6 +425,16 @@ export async function testWhatsAppCloudAgentDispatchFlow(
     typeof req.body?.message === "string" && req.body.message.trim()
       ? req.body.message.trim()
       : "";
+  const cloudMessage =
+    req.body?.cloudMessage && typeof req.body.cloudMessage === "object"
+      ? req.body.cloudMessage
+      : undefined;
+  const cloudNormalization =
+    !message && cloudMessage
+      ? normalizeCloudIncomingMessage(cloudMessage)
+      : undefined;
+  const agentInputText =
+    message || cloudNormalization?.normalizedText?.trim() || "";
   const phoneNumberId =
     typeof req.body?.phoneNumberId === "string" && req.body.phoneNumberId.trim()
       ? req.body.phoneNumberId.trim()
@@ -440,15 +450,16 @@ export async function testWhatsAppCloudAgentDispatchFlow(
       ? req.body.interactiveLiveSendAllowedOverride
       : undefined;
 
-  if (!customerPhone || !message) {
+  if (!customerPhone || !agentInputText) {
     return res.status(400).json({
       ok: false,
-      message: "customerPhone and message are required",
+      message: "customerPhone and message or cloudMessage are required",
+      ...(cloudNormalization ? { cloudNormalization } : {}),
     });
   }
 
   try {
-    const agentResult = await generateAgentResult(message, undefined, {
+    const agentResult = await generateAgentResult(agentInputText, undefined, {
       customerPhone,
       sellerId,
       phoneNumberId,
@@ -485,6 +496,7 @@ export async function testWhatsAppCloudAgentDispatchFlow(
       actions: agentResult.actions,
       source: agentResult.source,
       meta: agentResult.meta,
+      ...(cloudNormalization ? { cloudNormalization } : {}),
       dispatchSafety,
       dispatchResult,
     });
