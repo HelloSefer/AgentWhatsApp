@@ -5,7 +5,8 @@ export type AgentReplyUiHintPurpose =
   | "missing_fields"
   | "confirmation"
   | "field_options"
-  | "info_menu";
+  | "info_menu"
+  | "first_entry";
 
 export type AgentReplyUiHint = {
   kind: AgentReplyUiHintKind;
@@ -17,6 +18,7 @@ export type AgentReplyUiHint = {
     label: string;
     value?: string;
   }>;
+  previewOnly?: boolean;
 };
 
 export type RenderedAgentReply = {

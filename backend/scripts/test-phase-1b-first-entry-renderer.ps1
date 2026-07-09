@@ -102,6 +102,8 @@ function renderCase(input) {
     lines: result.lines,
     warnings: result.warnings || [],
     ctaMode: result.ctaMode,
+    ctas: result.ctas,
+    uiHints: result.uiHints,
     previewOnly: result.previewOnly,
     primaryCtaLabel: result.primaryCtaLabel,
     secondaryCtaLabel: result.secondaryCtaLabel,
@@ -255,6 +257,7 @@ $previewJson = $preview | ConvertTo-Json -Depth 80
 Add-Check $group "preview endpoint ok" ($preview.ok -eq $true -and $preview.previewOnly -eq $true) "" $previewTimed.DurationMs
 Add-Check $group "preview result previewOnly" ($preview.result.previewOnly -eq $true) "" $previewTimed.DurationMs
 Add-Check $group "preview includes text" ([string]$preview.result.text -and $preview.result.text.Contains("الثمن")) $preview.result.text $previewTimed.DurationMs
+Add-Check $group "preview includes CTA metadata" ($preview.result.ctas.previewOnly -eq $true -and @($preview.result.ctas.items).Count -ge 1) "count=$(@($preview.result.ctas.items).Count)" $previewTimed.DurationMs
 Add-Check $group "preview has no send payload" (-not $previewJson.Contains("messaging_product") -and -not $previewJson.Contains("dispatchResult") -and -not $previewJson.Contains("interactiveResult")) "" $previewTimed.DurationMs
 
 $sessionCustomer = "phase-1b-preview-session"

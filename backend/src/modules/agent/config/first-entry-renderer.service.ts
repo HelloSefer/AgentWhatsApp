@@ -1,5 +1,6 @@
 import { normalizeSellerConfig } from "./first-entry-config.service";
 import type { ProductContext } from "./product-context.types";
+import type { AgentReplyUiHint } from "../reply/reply-renderer.types";
 import type {
   DeliveryPolicy,
   FirstEntryCtaMode,
@@ -8,12 +9,43 @@ import type {
   SellerConfig,
 } from "./seller-config.types";
 
+export type FirstEntryCtaKind = "order" | "info";
+
+export type FirstEntryCtaId =
+  | "first_entry:order_now"
+  | "first_entry:more_info";
+
+export type FirstEntryCtaItem = {
+  id: FirstEntryCtaId;
+  label: string;
+  kind: FirstEntryCtaKind;
+  enabled: boolean;
+};
+
+export type FirstEntryCtaPreview = {
+  mode: FirstEntryCtaMode;
+  items: FirstEntryCtaItem[];
+  previewOnly: true;
+};
+
+export type FirstEntryUiHintsPreview = {
+  preferred: "buttons" | "none";
+  buttons: Array<{
+    id: FirstEntryCtaId;
+    title: string;
+  }>;
+  replyUi: AgentReplyUiHint;
+  previewOnly: true;
+};
+
 export type FirstEntryRenderResult = {
   text: string;
   lines: string[];
   policy: FirstEntryPolicy;
   deliveryPolicy?: DeliveryPolicy;
   ctaMode: FirstEntryCtaMode;
+  ctas: FirstEntryCtaPreview;
+  uiHints: FirstEntryUiHintsPreview;
   primaryCtaLabel?: string;
   secondaryCtaLabel?: string;
   previewOnly: true;
@@ -32,6 +64,9 @@ const unsafeCommercialClaims = [
   "نتيجة مضمونة",
   "علاج نهائي",
 ];
+
+const defaultPrimaryCtaLabel = "أطلب الآن";
+const defaultSecondaryCtaLabel = "المزيد من المعلومات";
 
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -218,6 +253,120 @@ function renderCtaLine(
     : "واش بغيتي دير الطلب دابا ولا تشوف معلومات أكثر؟";
 }
 
+function cleanCtaLabel(value: unknown, fallback: string): string {
+  const label = cleanText(value);
+
+  return label || fallback;
+}
+
+function buildCtaItem(input: {
+  id: FirstEntryCtaId;
+  label: string;
+  kind: FirstEntryCtaKind;
+}): FirstEntryCtaItem {
+  return {
+    id: input.id,
+    label: input.label,
+    kind: input.kind,
+    enabled: true,
+  };
+}
+
+export function buildFirstEntryCtaPreview(
+  policy: FirstEntryPolicy,
+): FirstEntryCtaPreview {
+  const primaryLabel = cleanCtaLabel(
+    policy.primaryCtaLabel,
+    defaultPrimaryCtaLabel,
+  );
+  const secondaryLabel = cleanCtaLabel(
+    policy.secondaryCtaLabel,
+    defaultSecondaryCtaLabel,
+  );
+
+  if (policy.ctaMode === "none") {
+    return {
+      mode: policy.ctaMode,
+      items: [],
+      previewOnly: true,
+    };
+  }
+
+  if (policy.ctaMode === "order_only") {
+    return {
+      mode: policy.ctaMode,
+      items: [
+        buildCtaItem({
+          id: "first_entry:order_now",
+          label: primaryLabel,
+          kind: "order",
+        }),
+      ],
+      previewOnly: true,
+    };
+  }
+
+  if (policy.ctaMode === "info_only") {
+    return {
+      mode: policy.ctaMode,
+      items: [
+        buildCtaItem({
+          id: "first_entry:more_info",
+          label: secondaryLabel,
+          kind: "info",
+        }),
+      ],
+      previewOnly: true,
+    };
+  }
+
+  return {
+    mode: policy.ctaMode,
+    items: [
+      buildCtaItem({
+        id: "first_entry:order_now",
+        label: primaryLabel,
+        kind: "order",
+      }),
+      buildCtaItem({
+        id: "first_entry:more_info",
+        label: secondaryLabel,
+        kind: "info",
+      }),
+    ],
+    previewOnly: true,
+  };
+}
+
+export function buildFirstEntryUiHintsPreview(
+  ctas: FirstEntryCtaPreview,
+  body: string,
+): FirstEntryUiHintsPreview {
+  const buttons = ctas.items.map((item) => ({
+    id: item.id,
+    title: item.label,
+  }));
+  const options = ctas.items.map((item) => ({
+    id: item.id,
+    label: item.label,
+    value: item.kind,
+  }));
+
+  return {
+    preferred: buttons.length ? "buttons" : "none",
+    buttons,
+    replyUi: {
+      kind: buttons.length ? "buttons" : "none",
+      purpose: "first_entry",
+      title: "اختيارات",
+      body,
+      options,
+      previewOnly: true,
+    },
+    previewOnly: true,
+  };
+}
+
 function safePushLine(lines: string[], line: string | undefined): void {
   const cleanLine = cleanText(line);
 
@@ -239,12 +388,16 @@ export function renderFirstEntryMessage(
   const warnings: string[] = [];
 
   if (!policy.enabled) {
+    const ctas = buildFirstEntryCtaPreview(policy);
+
     return {
       text: "",
       lines: [],
       policy,
       deliveryPolicy,
       ctaMode: policy.ctaMode,
+      ctas,
+      uiHints: buildFirstEntryUiHintsPreview(ctas, ""),
       primaryCtaLabel: policy.primaryCtaLabel,
       secondaryCtaLabel: policy.secondaryCtaLabel,
       previewOnly: true,
@@ -292,12 +445,17 @@ export function renderFirstEntryMessage(
     safePushLine(lines, ctaLine);
   }
 
+  const text = lines.join("\n").trim();
+  const ctas = buildFirstEntryCtaPreview(policy);
+
   return {
-    text: lines.join("\n").trim(),
+    text,
     lines,
     policy,
     deliveryPolicy,
     ctaMode: policy.ctaMode,
+    ctas,
+    uiHints: buildFirstEntryUiHintsPreview(ctas, text),
     primaryCtaLabel: policy.primaryCtaLabel,
     secondaryCtaLabel: policy.secondaryCtaLabel,
     previewOnly: true,
