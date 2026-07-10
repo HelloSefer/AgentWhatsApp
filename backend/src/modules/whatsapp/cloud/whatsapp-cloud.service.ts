@@ -2221,6 +2221,10 @@ function isFlowTriggerText(text: string): boolean {
   ].some((trigger) => normalized === normalizeText(trigger));
 }
 
+function isFirstEntryOrderClickText(text: string): boolean {
+  return normalizeText(text) === normalizeText("first_entry:order_now");
+}
+
 function stripConfirmationQuestion(reply: string): string {
   return reply
     .split("\n")
@@ -2326,6 +2330,42 @@ function markRecentAutoButtonPreset(
   );
 }
 
+function normalizeFallbackComparable(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export function buildCloudInteractiveFallbackText(result: AgentResult): string {
+  const choiceListAction = result.actions.find(
+    (action) => action.type === "choice_list",
+  );
+
+  if (choiceListAction?.type === "choice_list" && choiceListAction.fallbackText) {
+    return choiceListAction.fallbackText;
+  }
+
+  const optionLabels =
+    result.meta?.replyUi?.options
+      ?.map((option) => option.label.trim())
+      .filter(Boolean) || [];
+
+  if (!optionLabels.length) {
+    return result.reply;
+  }
+
+  const normalizedReply = normalizeFallbackComparable(result.reply);
+  const missingLabels = optionLabels.filter(
+    (label) => !normalizedReply.includes(normalizeFallbackComparable(label)),
+  );
+
+  if (!missingLabels.length) {
+    return result.reply;
+  }
+
+  return `${result.reply}\n\nالاختيارات المتوفرة:\n${missingLabels
+    .map((label) => `- ${label}`)
+    .join("\n")}`;
+}
+
 async function sendAgentCloudResult(input: {
   to: string;
   phoneNumberId: string;
@@ -2336,7 +2376,7 @@ async function sendAgentCloudResult(input: {
   const dispatchResult = await cloudReplyDispatchService.dispatchAgentReply({
     to: input.to,
     phoneNumberId: input.phoneNumberId,
-    replyText: input.result.reply,
+    replyText: buildCloudInteractiveFallbackText(input.result),
     whatsappInteractivePreview:
       input.result.meta?.whatsappInteractivePreview ?? null,
     interactiveSendDecision:
@@ -2788,6 +2828,7 @@ export async function processCloudWebhookBody(
 
       if (
         env.whatsappCloudOrderFlowOnOrderStart &&
+        !isFirstEntryOrderClickText(message.text) &&
         fastAnalyzeCustomerMessage(message.text)?.intent === "order_intent"
       ) {
         logJson({

@@ -21,12 +21,12 @@ function hasCollectedValue(value: unknown): boolean {
 
 function sortRequiredFields(fields: RequiredOrderField[]): RequiredOrderField[] {
   return [...fields].sort((left, right) => {
-    if (left.source !== right.source) {
-      return left.source === "customerField" ? -1 : 1;
-    }
-
     if (left.askOrder !== right.askOrder) {
       return left.askOrder - right.askOrder;
+    }
+
+    if (left.source !== right.source) {
+      return left.source === "productOption" ? -1 : 1;
     }
 
     return left.key.localeCompare(right.key);
@@ -43,6 +43,7 @@ export class RequiredFieldsService {
         fields.set(field.key, {
           key: field.key,
           label: field.label,
+          prompt: field.prompt,
           required: field.required,
           enabled: field.enabled,
           source: "customerField",
@@ -60,6 +61,7 @@ export class RequiredFieldsService {
         fields.set(group.key, {
           key: group.key,
           label: group.label,
+          prompt: group.prompt,
           required: group.required,
           enabled: true,
           source: "productOption",

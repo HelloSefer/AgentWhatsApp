@@ -153,6 +153,19 @@ function Has-ButtonId {
   return @($Result.dispatchResult.interactiveResult.payload.interactive.action.buttons | Where-Object { $_.reply.id -eq $Id }).Count -eq 1
 }
 
+function Has-ListRowId {
+  param(
+    [object]$Result,
+    [string]$Id
+  )
+
+  return @(
+    $Result.dispatchResult.interactiveResult.payload.interactive.action.sections |
+      ForEach-Object { $_.rows } |
+      Where-Object { $_.id -eq $Id }
+  ).Count -eq 1
+}
+
 $group = "A Safe default text-only"
 $phoneA = "2126000C2C3A"
 Clear-Session -SellerId "seller_demo_medical" -Phone $phoneA
@@ -167,28 +180,28 @@ Add-Check $group "no interactive live send" ($a.dispatchResult.interactiveBlocke
 
 $group = "B Interactive enabled dry-run"
 $phoneB = "2126000C2C3B"
-Clear-Session -SellerId "seller_demo_medical" -Phone $phoneB
-[void](Send-CloudFlow -SellerId "seller_demo_medical" -Phone $phoneB -Message "بغيت نكوموندي" -InteractiveEnabledOverride $true)
-$bResultTimed = Send-CloudFlow -SellerId "seller_demo_medical" -Phone $phoneB -Message "محمد 0612345678 مراكش" -InteractiveEnabledOverride $true
+Clear-Session -SellerId "seller_demo_sandals" -Phone $phoneB
+$bResultTimed = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $phoneB -Message "بغيت نكوموندي" -InteractiveEnabledOverride $true
 $b = $bResultTimed.Response
-Add-Check $group "confirmation preview is button" ($b.meta.whatsappInteractivePreview.interactive.type -eq "button") "" $bResultTimed.DurationMs
+Add-Check $group "field option preview is list" ($b.meta.whatsappInteractivePreview.interactive.type -eq "list") "" $bResultTimed.DurationMs
 Add-Check $group "decision is interactive_preview" ($b.meta.interactiveSendDecision.mode -eq "interactive_preview") "" $bResultTimed.DurationMs
 Add-Check $group "dispatches interactive" ($b.dispatchResult.mode -eq "interactive") $b.dispatchResult.reason $bResultTimed.DurationMs
 Add-Check $group "interactive dry-run only" ($b.dispatchResult.dryRun -eq $true -and $b.dispatchResult.interactiveResult.dryRun -eq $true) "" $bResultTimed.DurationMs
-Add-Check $group "button includes confirm yes" (Has-ButtonId -Result $b -Id "confirm:yes") "" $bResultTimed.DurationMs
-Add-Check $group "button includes confirm edit" (Has-ButtonId -Result $b -Id "confirm:edit") "" $bResultTimed.DurationMs
+Add-Check $group "list includes size 36" (Has-ListRowId -Result $b -Id "size:36") "" $bResultTimed.DurationMs
+Add-Check $group "list includes size 40" (Has-ListRowId -Result $b -Id "size:40") "" $bResultTimed.DurationMs
 
 $group = "C Live guard blocks unsafe live"
 $phoneC = "2126000C2C3C"
-Clear-Session -SellerId "seller_demo_medical" -Phone $phoneC
-[void](Send-CloudFlow -SellerId "seller_demo_medical" -Phone $phoneC -Message "بغيت نكوموندي" -InteractiveEnabledOverride $true -InteractiveLiveSendAllowedOverride $false -ForceDryRun $false -SimulateNoProviderCall $true)
-$cResultTimed = Send-CloudFlow -SellerId "seller_demo_medical" -Phone $phoneC -Message "محمد 0612345678 مراكش" -InteractiveEnabledOverride $true -InteractiveLiveSendAllowedOverride $false -ForceDryRun $false -SimulateNoProviderCall $true
+Clear-Session -SellerId "seller_demo_sandals" -Phone $phoneC
+$cResultTimed = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $phoneC -Message "بغيت نكوموندي" -InteractiveEnabledOverride $true -InteractiveLiveSendAllowedOverride $false -ForceDryRun $false -SimulateNoProviderCall $true
 $c = $cResultTimed.Response
 Add-Check $group "decision can be interactive" ($c.meta.interactiveSendDecision.mode -eq "interactive_preview") "" $cResultTimed.DurationMs
 Add-Check $group "falls back to text" ($c.dispatchResult.mode -eq "text" -and $c.dispatchResult.fallbackUsed -eq $true) $c.dispatchResult.reason $cResultTimed.DurationMs
 Add-Check $group "interactive blocked by guard" ($c.dispatchResult.interactiveBlocked -eq $true) "" $cResultTimed.DurationMs
 Add-Check $group "guard reason is explicit" ($c.dispatchResult.reason -eq "interactive_blocked_by_live_guard") $c.dispatchResult.reason $cResultTimed.DurationMs
 Add-Check $group "no provider call simulation" ($c.dispatchSafety.simulateNoProviderCall -eq $true -and $c.dispatchResult.textResult.dryRun -eq $true) "" $cResultTimed.DurationMs
+Add-Check $group "fallback text includes size 36" ($c.dispatchResult.textResult.payload.text.body -like "*36*") "" $cResultTimed.DurationMs
+Add-Check $group "fallback text includes size 40" ($c.dispatchResult.textResult.payload.text.body -like "*40*") "" $cResultTimed.DurationMs
 
 $group = "D Readiness endpoint non-sending"
 $fakePhone = "212600000000"
@@ -231,7 +244,7 @@ Clear-Session -SellerId "seller_demo_medical" -Phone $medicalPhone
 $medicalConfirmTimed = Send-CloudFlow -SellerId "seller_demo_medical" -Phone $medicalPhone -CloudMessage (New-ButtonReply -Id "confirm:yes" -Title "نعم") -InteractiveEnabledOverride $true
 $medicalConfirm = $medicalConfirmTimed.Response
 Add-Check $group "medical confirm normalized" ($medicalConfirm.cloudNormalization.normalizedText -eq "نعم") "" $medicalConfirmTimed.DurationMs
-Add-Check $group "medical order confirmed" ($medicalConfirm.meta.orderStateSummary.confirmed -eq $true) "" $medicalConfirmTimed.DurationMs
+Add-Check $group "medical order not confirmed in Phase 2A" ($medicalConfirm.meta.orderStateSummary.confirmed -eq $false -and $medicalConfirm.reply -like "*Phase 4*") "" $medicalConfirmTimed.DurationMs
 Add-Check $group "medical dry-run only" ($medicalConfirm.dispatchResult.dryRun -eq $true) "" $medicalConfirmTimed.DurationMs
 
 $sandalsPhone = "2126000C2C3F2"
@@ -242,12 +255,15 @@ $sandalsSizeTimed = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sanda
 $sandalsSize = $sandalsSizeTimed.Response
 $sandalsColorTimed = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -CloudMessage (New-ListReply -Id "color:أسود" -Title "أسود") -InteractiveEnabledOverride $true
 $sandalsColor = $sandalsColorTimed.Response
+$sandalsQuantityTimed = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -Message "1" -InteractiveEnabledOverride $true
+$sandalsQuantity = $sandalsQuantityTimed.Response
 $sandalsConfirmTimed = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -CloudMessage (New-ButtonReply -Id "confirm:yes" -Title "نعم") -InteractiveEnabledOverride $true
 $sandalsConfirm = $sandalsConfirmTimed.Response
 Add-Check $group "sandals size collected" ($sandalsSize.meta.orderStateSummary.collected.size -eq "38") "" $sandalsSizeTimed.DurationMs
 Add-Check $group "sandals color collected" ($sandalsColor.meta.orderStateSummary.collected.color -eq "أسود") "" $sandalsColorTimed.DurationMs
-Add-Check $group "sandals awaits confirmation before final confirm" ($sandalsColor.meta.orderStateSummary.awaitingConfirmation -eq $true -and $sandalsColor.meta.orderStateSummary.confirmed -eq $false) "" $sandalsColorTimed.DurationMs
-Add-Check $group "sandals order confirmed" ($sandalsConfirm.meta.orderStateSummary.confirmed -eq $true) "" $sandalsConfirmTimed.DurationMs
+Add-Check $group "sandals still missing quantity before summary" (@($sandalsColor.meta.orderStateSummary.missingFields) -contains "quantity") "" $sandalsColorTimed.DurationMs
+Add-Check $group "sandals quantity completes review" ($sandalsQuantity.meta.orderStateSummary.awaitingConfirmation -eq $true -and $sandalsQuantity.meta.orderStateSummary.confirmed -eq $false -and $sandalsQuantity.reply -like "*الطلب واجد للمراجعة*") "" $sandalsQuantityTimed.DurationMs
+Add-Check $group "sandals order not confirmed in Phase 2A" ($sandalsConfirm.meta.orderStateSummary.confirmed -eq $false -and $sandalsConfirm.reply -like "*Phase 4*") "" $sandalsConfirmTimed.DurationMs
 Add-Check $group "sandals dry-run only" ($sandalsConfirm.dispatchResult.dryRun -eq $true) "" $sandalsConfirmTimed.DurationMs
 
 $group = "G Normal text unchanged"

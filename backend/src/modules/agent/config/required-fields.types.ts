@@ -5,6 +5,7 @@ export type RequiredFieldSource = "customerField" | "productOption";
 export type RequiredOrderField = {
   key: string;
   label: string;
+  prompt?: string;
   required: boolean;
   enabled: boolean;
   source: RequiredFieldSource;

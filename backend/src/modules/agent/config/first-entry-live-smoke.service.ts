@@ -283,9 +283,7 @@ function buildBlockedClickReply(input: {
 }): AgentResult {
   const click = normalizeFirstEntryClick(input.rawInput);
   const reply =
-    click.intent === "order"
-      ? "هاد الزر باقي فمرحلة تجربة آمنة. الطلب الحقيقي ما مربطش به دابا، وغادي يتفعل فمرحلة جاية."
-      : "هاد الزر باقي فمرحلة تجربة آمنة. مسار المعلومات الإضافية ما مربطش به دابا، وغادي يتفعل فمرحلة جاية.";
+    "هاد الزر ديال المعلومات باقي غادي يتفعل في Phase 3.";
 
   return {
     reply,
@@ -572,10 +570,21 @@ export async function buildFirstEntryLiveSmokeResult(
       buttonReplyTitle: input.buttonReplyTitle,
     })
   ) {
+    const rawInput = input.buttonReplyId || input.buttonReplyTitle || input.message;
+    const click = normalizeFirstEntryClick(rawInput);
+
+    if (click.intent === "order") {
+      return {
+        handled: false,
+        blockedReason: "first_entry_order_click_routes_to_phase_2a_order_path",
+        readiness,
+      };
+    }
+
     return {
       handled: true,
       result: buildBlockedClickReply({
-        rawInput: input.buttonReplyId || input.buttonReplyTitle || input.message,
+        rawInput,
         conversationKey,
         customerPhone,
         sellerId,

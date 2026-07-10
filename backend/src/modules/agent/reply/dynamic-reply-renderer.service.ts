@@ -15,6 +15,22 @@ const summaryLabelOverrides: Record<string, string> = {
   notes: "ملاحظات",
 };
 
+const fieldPromptOverrides: Record<string, string> = {
+  size: "اختار المقاس المناسب ليك.",
+  color: "اختار اللون اللي بغيتي.",
+  quantity: "شحال من وحدة بغيتي؟",
+  fullName: "عافاك عطيني الاسم الكامل.",
+  phone: "عافاك عطيني رقم الهاتف.",
+  city: "شنو المدينة ديالك؟",
+  address: "عافاك عطيني العنوان الكامل ديال التوصيل.",
+};
+
+const deliveryFieldKeys = ["fullName", "phone", "city", "address"];
+const groupedDeliveryPrompt = [
+  "عافاك عطيني معلومات التوصيل:",
+  "الاسم + الهاتف + المدينة + العنوان",
+].join("\n");
+
 function hasValue(value: unknown): boolean {
   if (typeof value === "number") {
     return Number.isFinite(value) && value > 0;
@@ -107,17 +123,20 @@ export class DynamicReplyRenderer {
   renderOrderStart(input: {
     missingFields: RequiredOrderField[];
   }): RenderedAgentReply {
-    const missingFieldsText = this.formatFieldList(input.missingFields);
+    const nextField = input.missingFields[0];
+    const prompt = this.getNextPrompt(input.missingFields);
 
     return {
-      text: `أكيد، صيفط ليا ${missingFieldsText} باش نوجد لك الطلب.`,
-      ui: {
-        kind: "auto",
-        purpose: "order_start",
-        title: "معلومات الطلب",
-        body: "صيفط ليا المعلومات المطلوبة باش نوجد لك الطلب.",
-        options: [],
-      },
+      text: ["تمام ✅", "نبدأو الطلب ديالك.", "", prompt].join("\n"),
+      ui: nextField
+        ? this.buildFieldUiHint(nextField, prompt, "order_start")
+        : {
+            kind: "auto",
+            purpose: "order_start",
+            title: "معلومات الطلب",
+            body: "صيفط ليا المعلومات المطلوبة باش نوجد لك الطلب.",
+            options: [],
+          },
     };
   }
 
@@ -125,23 +144,18 @@ export class DynamicReplyRenderer {
     collectedLabels?: string[];
     missingFields: RequiredOrderField[];
   }): RenderedAgentReply {
-    const missingFieldsText = this.formatFieldList(input.missingFields);
-    const collectedText = input.collectedLabels?.length
-      ? this.formatFieldList(input.collectedLabels.map((label) => ({ label })))
-      : "";
-    const optionField = this.getNextOptionField(input.missingFields);
+    const nextField = input.missingFields[0];
+    const prompt = this.getNextPrompt(input.missingFields);
 
     return {
-      text: collectedText
-        ? `مزيان، توصلت ب${collectedText}. باقي عافاك صيفط ليا ${missingFieldsText} باش نأكد لك الطلب.`
-        : this.renderOrderStart({ missingFields: input.missingFields }).text,
-      ui: optionField
-        ? this.buildOptionFieldUiHint(optionField)
+      text: prompt,
+      ui: nextField
+        ? this.buildFieldUiHint(nextField, prompt, "missing_fields")
         : {
             kind: "auto",
             purpose: "missing_fields",
             title: "باقي معلومات",
-            body: missingFieldsText,
+            body: prompt,
             options: [],
           },
     };
@@ -275,6 +289,64 @@ export class DynamicReplyRenderer {
         value: option,
       })),
     };
+  }
+
+  private buildFieldUiHint(
+    field: RequiredOrderField,
+    prompt: string,
+    purpose: "order_start" | "missing_fields",
+  ): RenderedAgentReply["ui"] {
+    if (field.source === "productOption" && field.options?.length) {
+      const optionCount = field.options.length;
+      const prefersButtons =
+        (field.display === "buttons" || field.display === "auto") &&
+        optionCount <= 3;
+
+      return {
+        kind: prefersButtons ? "buttons" : "list",
+        purpose: "field_options",
+        title: `اختار ${field.label}`,
+        body: prompt,
+        options: field.options.map((option) => ({
+          id: `${field.key}:${option}`,
+          label: option,
+          value: option,
+        })),
+      };
+    }
+
+    return {
+      kind: "auto",
+      purpose,
+      title: field.label,
+      body: prompt,
+      options: [],
+    };
+  }
+
+  private getFieldPrompt(field: RequiredOrderField | undefined): string {
+    if (!field) {
+      return "صيفط ليا المعلومات المطلوبة باش نوجد لك الطلب.";
+    }
+
+    return field.prompt || fieldPromptOverrides[field.key] || `عافاك عطيني ${field.label}.`;
+  }
+
+  private getNextPrompt(fields: RequiredOrderField[]): string {
+    const missingKeys = new Set(fields.map((field) => field.key));
+    const hasConfiguredDeliveryPrompt = fields.some(
+      (field) => deliveryFieldKeys.includes(field.key) && Boolean(field.prompt),
+    );
+    const allDeliveryFieldsMissing =
+      fields[0]?.key === "fullName" &&
+      !hasConfiguredDeliveryPrompt &&
+      deliveryFieldKeys.every((key) => missingKeys.has(key));
+
+    if (allDeliveryFieldsMissing) {
+      return groupedDeliveryPrompt;
+    }
+
+    return this.getFieldPrompt(fields[0]);
   }
 
   private buildConfirmationOptions(): Array<{

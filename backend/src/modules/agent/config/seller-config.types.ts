@@ -30,6 +30,7 @@ export type CustomerFieldKey =
 export type CustomerFieldConfig = {
   key: CustomerFieldKey;
   label: string;
+  prompt?: string;
   required: boolean;
   enabled: boolean;
   askOrder?: number;

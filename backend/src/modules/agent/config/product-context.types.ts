@@ -3,6 +3,7 @@ import type { DisplayMode } from "./seller-config.types";
 export type ProductOptionGroup = {
   key: string;
   label: string;
+  prompt?: string;
   required: boolean;
   options: string[];
   display: DisplayMode;

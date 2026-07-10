@@ -10,6 +10,7 @@ import { buildLiveInteractiveReadiness } from "./cloud-live-interactive-readines
 import { cloudReplyDispatchService } from "./cloud-reply-dispatch.service";
 import {
   buildSimulatedIncomingWebhook,
+  buildCloudInteractiveFallbackText,
   checkSubscribedApps,
   getCloudDiagnostics,
   processCloudWebhookBody,
@@ -470,7 +471,7 @@ export async function testWhatsAppCloudAgentDispatchFlow(
     const dispatchResult = await cloudReplyDispatchService.dispatchAgentReply({
       to: customerPhone,
       phoneNumberId,
-      replyText: agentResult.reply,
+      replyText: buildCloudInteractiveFallbackText(agentResult),
       whatsappInteractivePreview:
         agentResult.meta?.whatsappInteractivePreview ?? null,
       interactiveSendDecision:

@@ -374,9 +374,16 @@ function isDomainOrderStartRequest(message: string): boolean {
   const normalizedMessage = normalizeText(message);
 
   return (
-    ["الطلب", "طلب", "commande", "order", "كومند", "كوموند"].includes(
-      normalizedMessage,
-    ) ||
+    [
+      "first_entry order_now",
+      "first_entry:order_now",
+      "الطلب",
+      "طلب",
+      "commande",
+      "order",
+      "كومند",
+      "كوموند",
+    ].includes(normalizedMessage) ||
     includesAny(message, [
       "بغيت نكوموندي",
       "بغيت نكومندي",

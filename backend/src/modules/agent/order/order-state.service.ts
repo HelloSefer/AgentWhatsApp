@@ -201,6 +201,8 @@ const alreadyConfirmedReply =
   "الطلب ديالك راه تأكد من قبل. غادي نتواصلو معاك قريباً.";
 const orderCancelledReply =
   "تمام، ما غاديش نأكد الطلب. إلى بغيتي تبدل شي حاجة ولا ترجع تطلب، أنا هنا.";
+const phase2AFinalConfirmationNotReadyReply =
+  "التأكيد النهائي باقي ما مربوطش في هاد المرحلة. غادي يتفعل في Phase 4.";
 
 function buildCorrectionClarificationReply(
   requiredFields?: RequiredOrderField[],
@@ -846,6 +848,48 @@ function looksLikeAddressText(text: string): boolean {
   return normalizedText.split(/\s+/).length >= 2;
 }
 
+function stripLeadingCityFromAddressCandidate(text: string): string {
+  const normalizedText = normalizeText(text);
+
+  for (const cityAlias of cityAliases) {
+    for (const alias of cityAlias.aliases) {
+      const normalizedAlias = normalizeText(alias);
+
+      if (normalizedText === normalizedAlias) {
+        return "";
+      }
+
+      if (normalizedText.startsWith(`${normalizedAlias} `)) {
+        return normalizedText.slice(normalizedAlias.length).trim();
+      }
+    }
+  }
+
+  return normalizedText;
+}
+
+function stripKnownOrderTokensFromAddress(text: string): string {
+  let cleaned = normalizeText(text);
+
+  for (const colorAlias of colorAliases) {
+    for (const alias of colorAlias.aliases) {
+      cleaned = cleaned.replace(
+        new RegExp(`(^|\\s)${normalizeText(alias)}(?=\\s|$)`, "g"),
+        " ",
+      );
+    }
+  }
+
+  return cleaned
+    .replace(/(^|\s)(3[6-9]|4[0-5])(?=\s|$)/g, " ")
+    .replace(
+      /(^|\s)(wa7da|wahda|w7da|wahed|wahd|واحدة|وحدة|واحد|jouj|jooj|جوج|زوج)(?=\s|$)/g,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function findAddressAfterPhone(message: string, phone: string): string | undefined {
   const phoneText = getPhoneTextFromMessage(message, phone);
 
@@ -863,9 +907,12 @@ function findAddressAfterPhone(message: string, phone: string): string | undefin
   }
 
   const addressCandidate = message.slice(phoneIndex + phoneText.length).trim();
-  const address = stripAfterQuantityMarker(addressCandidate);
+  const address = stripLeadingCityFromAddressCandidate(
+    stripAfterQuantityMarker(addressCandidate),
+  );
+  const cleanedAddress = stripKnownOrderTokensFromAddress(address);
 
-  return looksLikeAddressText(address) ? normalizeText(address) : undefined;
+  return looksLikeAddressText(cleanedAddress) ? cleanedAddress : undefined;
 }
 
 function findAddressAfterDetectedPhone(message: string): string | undefined {
@@ -876,11 +923,14 @@ function findAddressAfterDetectedPhone(message: string): string | undefined {
     return undefined;
   }
 
-  const address = stripAfterQuantityMarker(
-    message.slice((phoneMatch.index || 0) + phoneText.length).trim(),
+  const address = stripLeadingCityFromAddressCandidate(
+    stripAfterQuantityMarker(
+      message.slice((phoneMatch.index || 0) + phoneText.length).trim(),
+    ),
   );
+  const cleanedAddress = stripKnownOrderTokensFromAddress(address);
 
-  return looksLikeAddressText(address) ? normalizeText(address) : undefined;
+  return looksLikeAddressText(cleanedAddress) ? cleanedAddress : undefined;
 }
 
 function cleanLabeledValue(value: string): string {
@@ -1122,6 +1172,7 @@ function isOrderStartMessage(message: string): boolean {
   return (
     (hasDarijaWantVerb && hasOrderWord) ||
     [
+      "first_entry:order_now",
       "الطلب",
       "طلب",
       "commande",
@@ -1369,16 +1420,6 @@ async function processConfirmationTurn(input: {
       };
     }
 
-    const confirmedOrder = saveConfirmedOrder({
-      customerId: input.customerId,
-      customerPhone: input.customerPhone,
-      conversationKey: input.customerId,
-      sellerId: input.sellerId,
-      productContext: input.productContext,
-      collected: input.session.orderState.collected,
-    });
-    createNewConfirmedOrderNotification(confirmedOrder);
-
     await updateConversationOrderState({
       customerId: input.customerId,
       customerPhone: input.customerPhone,
@@ -1387,16 +1428,13 @@ async function processConfirmationTurn(input: {
       collected: input.session.orderState.collected,
       missingFields: [],
       isComplete: true,
-      awaitingConfirmation: false,
-      confirmed: true,
+      awaitingConfirmation: true,
+      confirmed: false,
     });
-
-    const renderedReply = renderOrderConfirmationSuccessReply();
 
     return {
       handled: true,
-      reply: renderedReply.text,
-      replyUi: renderedReply.ui,
+      reply: phase2AFinalConfirmationNotReadyReply,
       isComplete: true,
       missingFields: [],
     };

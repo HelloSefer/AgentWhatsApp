@@ -17,6 +17,7 @@ import { productContextService } from "./config/product-context.service";
 import { requiredFieldsService } from "./config/required-fields.service";
 import type { RequiredOrderField } from "./config/required-fields.types";
 import { sellerConfigService } from "./config/seller-config.service";
+import type { SellerConfig } from "./config/seller-config.types";
 import { buildSalesResponse } from "./sales/sales-response.builder";
 import {
   buildSellerBrainResponse,
@@ -54,6 +55,8 @@ const MAX_REPLY_LENGTH = 280;
 const SAFE_FALLBACK_REPLY = "سمح ليا، نقدر نعاونك فمعلومات المنتج أو التوصيل.";
 const SAFE_ROUTER_FALLBACK_REPLY =
   "نقدر نعاونك فالثمن، التوصيل، الألوان، المقاسات أو الطلب.";
+const FIRST_ENTRY_MORE_INFO_PHASE_3_REPLY =
+  "هاد الزر ديال المعلومات باقي غادي يتفعل في Phase 3.";
 const badPhraseReplacements: Array<[RegExp, string]> = [
   [/الأوردي/g, "الوردي"],
   [/دفع الأموال/g, "تخلص"],
@@ -299,6 +302,91 @@ function getRuntimeRequiredOrderFields(
   } catch (error) {
     console.error("❌ Required order fields resolution failed", error);
     return undefined;
+  }
+}
+
+function getRuntimeInteractiveEnabled(options?: GenerateAgentOptions): boolean {
+  if (typeof options?.interactiveEnabledOverride === "boolean") {
+    return options.interactiveEnabledOverride;
+  }
+
+  if (options?.interactiveSendChannel === "whatsapp_cloud") {
+    return (
+      env.whatsappInteractiveEnabled ||
+      (env.whatsappCloudReplyButtonsEnabled &&
+        env.whatsappInteractiveChoicesEnabled)
+    );
+  }
+
+  return env.whatsappInteractiveEnabled;
+}
+
+function toAgentProductContext(input: {
+  sellerConfig: SellerConfig;
+  configProductContext: ReturnType<typeof productContextService.getActiveProductContext>;
+}): ProductContext {
+  const colorGroup = input.configProductContext.optionGroups.find(
+    (group) => group.key === "color",
+  );
+  const sizeGroup = input.configProductContext.optionGroups.find(
+    (group) => group.key === "size",
+  );
+
+  return {
+    businessName: input.sellerConfig.businessName,
+    productName: input.configProductContext.name,
+    description: input.configProductContext.description,
+    price: String(input.configProductContext.price),
+    currency:
+      input.configProductContext.currency === "MAD"
+        ? "درهم"
+        : input.configProductContext.currency,
+    availableColors: colorGroup?.options,
+    availableSizes: sizeGroup?.options,
+    deliveryInfo: input.sellerConfig.delivery.text || undefined,
+    paymentMethods: input.sellerConfig.delivery.paymentText
+      ? [input.sellerConfig.delivery.paymentText]
+      : undefined,
+    offer: input.configProductContext.stock.text,
+    recommendationNotes: input.configProductContext.benefits,
+    images: input.configProductContext.images.map((url) => ({ url })),
+    requiredOrderFields: [
+      ...input.configProductContext.optionGroups
+        .filter((group) => group.required)
+        .map((group) => group.label),
+      ...input.sellerConfig.customerFields
+        .filter((field) => field.required && field.enabled)
+        .sort((left, right) => (left.askOrder || 0) - (right.askOrder || 0))
+        .map((field) => field.label),
+    ],
+    attributes: {},
+    faqs: [],
+    unavailableProducts: [],
+    extraNotes: [],
+  };
+}
+
+function resolveRuntimeProductContext(
+  productContext: ProductContext,
+  options?: GenerateAgentOptions,
+): ProductContext {
+  if (!options?.sellerId || productContext !== DEFAULT_PRODUCT_CONTEXT) {
+    return productContext;
+  }
+
+  try {
+    const sellerConfig = sellerConfigService.getSellerConfig(options.sellerId);
+    const configProductContext = productContextService.getActiveProductContext(
+      options.sellerId,
+    );
+
+    return toAgentProductContext({
+      sellerConfig,
+      configProductContext,
+    });
+  } catch (error) {
+    console.error("❌ Runtime product context resolution failed", error);
+    return productContext;
   }
 }
 
@@ -975,6 +1063,14 @@ async function buildAgentResult(
   options?: GenerateAgentOptions,
   requiredFields?: RequiredOrderField[],
 ): Promise<AgentResult> {
+  if (userMessage.trim() === "first_entry:more_info") {
+    return {
+      reply: FIRST_ENTRY_MORE_INFO_PHASE_3_REPLY,
+      actions: [],
+      source: "direct",
+    };
+  }
+
   if (shouldUseSmartRouterBeforeDirect(userMessage)) {
     const routerReply = await buildSmartRouterResult(
       userMessage,
@@ -1085,6 +1181,10 @@ export async function generateAgentResult(
   const userMessage = message.trim();
   const normalized = normalizeAgentOptions(options);
   const activeOptions = normalized.options;
+  const runtimeProductContext = resolveRuntimeProductContext(
+    productContext,
+    activeOptions,
+  );
   const requiredFields = getRuntimeRequiredOrderFields(activeOptions);
 
   if (!userMessage) {
@@ -1096,13 +1196,13 @@ export async function generateAgentResult(
   const result =
     (await buildOrderResultIfHandled(
       userMessage,
-      productContext,
+      runtimeProductContext,
       activeOptions,
       requiredFields,
     )) ||
     (await buildAgentResult(
       userMessage,
-      productContext,
+      runtimeProductContext,
       activeOptions,
       requiredFields,
     ));
@@ -1112,7 +1212,7 @@ export async function generateAgentResult(
   const actions = withChoiceListActions({
     result,
     userMessage,
-    productContext,
+    productContext: runtimeProductContext,
     orderStateSummary,
   });
   const choiceListAction = actions.find(
@@ -1131,8 +1231,7 @@ export async function generateAgentResult(
     });
   const interactiveSendDecision = interactiveSendDecisionService.decide({
     channel: activeOptions?.interactiveSendChannel || "test",
-    interactiveEnabled:
-      activeOptions?.interactiveEnabledOverride ?? env.whatsappInteractiveEnabled,
+    interactiveEnabled: getRuntimeInteractiveEnabled(activeOptions),
     whatsappInteractivePreview,
   });
   const finalResult: AgentResult = {

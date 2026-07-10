@@ -27,6 +27,8 @@ export type CloudInteractiveReplyNormalizationResult =
     };
 
 const knownReplyIdMappings: Record<string, string> = {
+  "first_entry:order_now": "first_entry:order_now",
+  "first_entry:more_info": "first_entry:more_info",
   "confirm:yes": "نعم",
   "confirm:edit": "تعديل",
   "confirm:no": "لا",
