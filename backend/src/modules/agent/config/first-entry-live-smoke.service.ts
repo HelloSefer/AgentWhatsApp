@@ -93,7 +93,7 @@ type FirstEntryLiveSmokeBuildResult =
       customerPhone: string;
       readiness: FirstEntryLiveSmokeReadiness;
       session?: ConversationSession;
-      reason: "first_entry_live_smoke" | "first_entry_click_preview_blocked";
+      reason: "first_entry_live_smoke";
     }
   | {
       handled: false;
@@ -271,36 +271,6 @@ export function buildFirstEntryLiveSmokeReadiness(input: {
       noProviderPayload: true,
       noMetaApiCall: true,
       noSecrets: true,
-    },
-  };
-}
-
-function buildBlockedClickReply(input: {
-  rawInput: string;
-  conversationKey: string;
-  customerPhone: string;
-  sellerId: string;
-}): AgentResult {
-  const click = normalizeFirstEntryClick(input.rawInput);
-  const reply =
-    "هاد الزر ديال المعلومات باقي غادي يتفعل في Phase 3.";
-
-  return {
-    reply,
-    actions: [],
-    source: "direct",
-    meta: {
-      source: "direct",
-      firstEntryLiveSmoke: {
-        handledBy: "first_entry_click_preview_blocked",
-        clickIntent: click.intent,
-        recommendedNextStep: click.recommendedNextStep,
-      },
-      identity: {
-        sellerId: input.sellerId,
-        customerPhone: input.customerPhone,
-        conversationKey: input.conversationKey,
-      },
     },
   };
 }
@@ -573,27 +543,13 @@ export async function buildFirstEntryLiveSmokeResult(
     const rawInput = input.buttonReplyId || input.buttonReplyTitle || input.message;
     const click = normalizeFirstEntryClick(rawInput);
 
-    if (click.intent === "order") {
-      return {
-        handled: false,
-        blockedReason: "first_entry_order_click_routes_to_phase_2a_order_path",
-        readiness,
-      };
-    }
-
     return {
-      handled: true,
-      result: buildBlockedClickReply({
-        rawInput,
-        conversationKey,
-        customerPhone,
-        sellerId,
-      }),
-      conversationKey,
-      sellerId,
-      customerPhone,
+      handled: false,
+      blockedReason:
+        click.intent === "order"
+          ? "first_entry_order_click_routes_to_phase_2a_order_path"
+          : "first_entry_info_click_routes_to_phase_3a_info_path",
       readiness,
-      reason: "first_entry_click_preview_blocked",
     };
   }
 

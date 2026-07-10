@@ -34,6 +34,9 @@ export type CustomerFieldConfig = {
   required: boolean;
   enabled: boolean;
   askOrder?: number;
+  minValue?: number;
+  maxValue?: number;
+  defaultValue?: number | string;
 };
 
 export type FirstEntryPolicy = {

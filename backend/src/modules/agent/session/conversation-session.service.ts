@@ -29,6 +29,11 @@ type UpdateConversationOrderStateInput = SessionIdentity & {
   confirmed?: boolean;
 };
 
+type UpdateConversationProductInfoStateInput = SessionIdentity & {
+  lastTopic?: NonNullable<ConversationSession["productInfo"]>["lastTopic"];
+  pendingSelection?: NonNullable<ConversationSession["productInfo"]>["pendingSelection"];
+};
+
 const MAX_SESSION_MESSAGES = 20;
 
 function cleanText(value: string | undefined): string | undefined {
@@ -261,6 +266,51 @@ export async function updateConversationOrderState(
   };
 
   await saveConversationSession(session);
+
+  return session;
+}
+
+export async function updateConversationProductInfoState(
+  input: UpdateConversationProductInfoStateInput,
+): Promise<ConversationSession> {
+  const session = await getConversationSession(
+    input.customerId,
+    input.sellerId,
+    input.productId,
+    input.customerPhone,
+  );
+
+  session.productInfo = {
+    ...(session.productInfo || {}),
+    ...(input.lastTopic ? { lastTopic: input.lastTopic } : {}),
+    pendingSelection: input.pendingSelection,
+    lastUpdatedAt: new Date().toISOString(),
+  };
+
+  await saveConversationSession(session);
+
+  return session;
+}
+
+export async function clearConversationProductInfoSelection(
+  input: SessionIdentity,
+): Promise<ConversationSession> {
+  const session = await getConversationSession(
+    input.customerId,
+    input.sellerId,
+    input.productId,
+    input.customerPhone,
+  );
+
+  if (session.productInfo?.pendingSelection) {
+    session.productInfo = {
+      ...session.productInfo,
+      pendingSelection: undefined,
+      lastUpdatedAt: new Date().toISOString(),
+    };
+
+    await saveConversationSession(session);
+  }
 
   return session;
 }

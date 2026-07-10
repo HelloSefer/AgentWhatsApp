@@ -269,7 +269,12 @@ export function isValidColor(
 }
 
 export function isValidQuantity(value: number | undefined): boolean {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 10;
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value > 0
+  );
 }
 
 export function isValidOrderField(

@@ -109,7 +109,18 @@ export const colorDefinitions: ColorDefinition[] = [
   },
   {
     replyName: "الأسود",
-    values: ["أسود", "اسود", "الأسود", "الاسود", "كحل", "black", "noir"],
+    values: [
+      "أسود",
+      "اسود",
+      "الأسود",
+      "الاسود",
+      "كحل",
+      "k7al",
+      "k7el",
+      "lk7el",
+      "black",
+      "noir",
+    ],
   },
   {
     replyName: "الوردي",

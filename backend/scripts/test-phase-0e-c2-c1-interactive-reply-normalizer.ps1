@@ -103,6 +103,30 @@ $colorList = Invoke-Normalize -Message @{
 }
 Add-Check "color list normalizes to أسود" ($colorList.normalized.normalizedText -eq "أسود")
 
+$infoPrice = Invoke-Normalize -Message @{
+  type = "interactive"
+  interactive = @{
+    type = "list_reply"
+    list_reply = @{
+      id = "info:price"
+      title = "الثمن"
+    }
+  }
+}
+Add-Check "info price keeps stable id" ($infoPrice.normalized.normalizedText -eq "info:price" -and $infoPrice.normalized.normalizedSource -eq "known_id_mapping")
+
+$infoMenu = Invoke-Normalize -Message @{
+  type = "interactive"
+  interactive = @{
+    type = "button_reply"
+    button_reply = @{
+      id = "info:menu"
+      title = "معلومات أخرى"
+    }
+  }
+}
+Add-Check "info menu keeps stable id" ($infoMenu.normalized.normalizedText -eq "info:menu" -and $infoMenu.normalized.normalizedSource -eq "known_id_mapping")
+
 $customList = Invoke-Normalize -Message @{
   type = "interactive"
   interactive = @{

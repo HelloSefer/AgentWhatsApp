@@ -12,4 +12,7 @@ export type RequiredOrderField = {
   askOrder: number;
   display?: DisplayMode;
   options?: string[];
+  minValue?: number;
+  maxValue?: number;
+  defaultValue?: number | string;
 };

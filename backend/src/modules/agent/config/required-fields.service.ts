@@ -48,6 +48,9 @@ export class RequiredFieldsService {
           enabled: field.enabled,
           source: "customerField",
           askOrder: field.askOrder ?? index + 1,
+          minValue: field.minValue,
+          maxValue: field.maxValue,
+          defaultValue: field.defaultValue,
         });
       });
 

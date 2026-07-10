@@ -105,6 +105,11 @@ export interface ConversationSession {
     shown: boolean;
     shownAt?: string;
   };
+  productInfo?: {
+    lastTopic?: "menu" | "price" | "sizes" | "colors" | "delivery_payment" | "availability" | "how_to_order";
+    pendingSelection?: "size" | "color";
+    lastUpdatedAt?: string;
+  };
   createdAt: string;
   updatedAt: string;
   expiresAt?: string;

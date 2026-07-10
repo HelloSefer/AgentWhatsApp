@@ -2580,8 +2580,14 @@ export async function processCloudWebhookBody(
       });
 
       if (!firstEntryLiveSmoke.handled) {
+        const routedToAgent = firstEntryLiveSmoke.blockedReason.includes(
+          "_routes_to_",
+        );
+
         logJson({
-          event: "first_entry.live_smoke.blocked",
+          event: routedToAgent
+            ? "first_entry.live_smoke.routed_to_agent"
+            : "first_entry.live_smoke.blocked",
           reason: firstEntryLiveSmoke.blockedReason,
           customerPhone: maskPhone(identity.customerPhone),
           sellerId: identity.sellerId,

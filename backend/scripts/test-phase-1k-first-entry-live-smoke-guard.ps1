@@ -199,6 +199,22 @@ function Invoke-Phase1KSafetyScan {
     $cloudService.Contains("markFirstEntryLiveSmokeShown")
   ) "first-entry hook dispatches through existing guarded path"
 
+  $firstEntryServicePath = Join-Path $backendRoot "src/modules/agent/config/first-entry-live-smoke.service.ts"
+  $firstEntryService = if (Test-Path $firstEntryServicePath) {
+    Get-Content -Raw -Encoding UTF8 $firstEntryServicePath
+  } else {
+    ""
+  }
+
+  Add-Result "Runtime CTA Routing" "implemented CTA clicks are released to AgentService" (
+    $firstEntryService.Contains("first_entry_order_click_routes_to_phase_2a_order_path") -and
+    $firstEntryService.Contains("first_entry_info_click_routes_to_phase_3a_info_path")
+  ) "order -> Phase 2A; info -> Phase 3A"
+  Add-Result "Runtime CTA Routing" "obsolete Phase 3 info blocker removed" (
+    -not $firstEntryService.Contains("first_entry_click_preview_blocked") -and
+    -not $firstEntryService.Contains("هاد الزر ديال المعلومات باقي غادي يتفعل في Phase 3")
+  ) "no runtime blocked AgentResult remains"
+
   $badDispatchImports = @(
     Get-ChildItem -Path (Join-Path $backendRoot "src") -Recurse -File -Filter "*.ts" -ErrorAction SilentlyContinue |
       Select-String -Pattern "cloud-reply-dispatch\.service\.js" -CaseSensitive:$false -ErrorAction SilentlyContinue
@@ -400,12 +416,12 @@ function Test-PreviewAndClickGuards {
     enableFirstEntryClickPreview = $true
   }
 
-  Add-Result "First Entry Click" "click is preview only" (
+  Add-Result "First Entry Click Preview" "explicit preview endpoint stays preview only" (
     $click.Ok -and
     $click.Response.handledBy -eq "first_entry_click_preview" -and
     $click.Response.safety.noLiveRouting -eq $true
   ) "$($click.Response.firstEntryClick.recommendedNextStep)" $click.DurationMs
-  Add-Result "First Entry Click" "click does not start real flow" (
+  Add-Result "First Entry Click Preview" "explicit preview endpoint does not mutate runtime" (
     $click.Ok -and
     $click.Response.reply -eq "" -and
     @($click.Response.actions).Count -eq 0

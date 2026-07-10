@@ -26,7 +26,10 @@ import {
 import {
   appendConversationMessage,
   appendSellerBrainReplyKey,
+  clearConversationProductInfoSelection,
   getConversationSession,
+  updateConversationOrderState,
+  updateConversationProductInfoState,
 } from "./session/conversation-session.service";
 import type { AgentIdentity } from "./identity/agent-identity.types";
 import { conversationKeyService } from "./identity/conversation-key.service";
@@ -36,6 +39,15 @@ import type {
   AgentOrderStateSummary,
   AgentResult,
 } from "./agent-action.types";
+import {
+  getInfoSelectionFromMessage,
+  isProductInfoContinueOrder,
+  matchAvailableInfoColor,
+  matchAvailableInfoSize,
+  normalizeInfoOrderMessage,
+  resolveProductInfoRequest,
+} from "./info/product-info.service";
+import { buildProductInfoReply } from "./info/product-info-response.builder";
 import type { OrderEntities } from "./agent-brain.types";
 import type { ProductContext } from "./product-context.types";
 
@@ -55,8 +67,6 @@ const MAX_REPLY_LENGTH = 280;
 const SAFE_FALLBACK_REPLY = "سمح ليا، نقدر نعاونك فمعلومات المنتج أو التوصيل.";
 const SAFE_ROUTER_FALLBACK_REPLY =
   "نقدر نعاونك فالثمن، التوصيل، الألوان، المقاسات أو الطلب.";
-const FIRST_ENTRY_MORE_INFO_PHASE_3_REPLY =
-  "هاد الزر ديال المعلومات باقي غادي يتفعل في Phase 3.";
 const badPhraseReplacements: Array<[RegExp, string]> = [
   [/الأوردي/g, "الوردي"],
   [/دفع الأموال/g, "تخلص"],
@@ -321,6 +331,177 @@ function getRuntimeInteractiveEnabled(options?: GenerateAgentOptions): boolean {
   return env.whatsappInteractiveEnabled;
 }
 
+function getRuntimeInfoMenuDisplayMode(
+  options?: GenerateAgentOptions,
+): SellerConfig["interactive"]["infoMenuDisplayMode"] {
+  if (!options?.sellerId) {
+    return "list";
+  }
+
+  try {
+    return sellerConfigService.getSellerConfig(options.sellerId).interactive
+      .infoMenuDisplayMode;
+  } catch (error) {
+    console.error("❌ Info menu display mode resolution failed", error);
+    return "list";
+  }
+}
+
+function withColorArticle(color: string): string {
+  return color.startsWith("ال") ? color : `ال${color}`;
+}
+
+function buildSoftInfoSelectionResult(input: {
+  field: "size" | "color";
+  value: string;
+  textMode?: boolean;
+}): AgentResult {
+  const selectionText =
+    input.field === "size"
+      ? `المقاس ${input.value} متوفر ✅`
+      : `اللون ${withColorArticle(input.value)} متوفر ✅`;
+  const fieldLabel = input.field === "size" ? "المقاس" : "اللون";
+  const body = `${selectionText}\n\nبغيتي نكمل لك الطلب بهذا ${fieldLabel}، ولا تشوف معلومات أخرى؟`;
+  const fallback = `${body}\n\nكتب "نكمل الطلب" باش نكملو الطلب، أو "معلومات أخرى" باش تشوف معلومات أخرى.`;
+
+  return {
+    reply: input.textMode ? fallback : body,
+    actions: [],
+    source: "direct",
+    meta: {
+      replyUi: input.textMode
+        ? { kind: "none", purpose: "info_menu" }
+        : {
+            kind: "buttons",
+            purpose: "info_menu",
+            body,
+            options: [
+              {
+                id: "info:continue_order",
+                label: "نكمل الطلب",
+                value: "نكمل الطلب",
+              },
+              {
+                id: "info:menu",
+                label: "معلومات أخرى",
+                value: "معلومات أخرى",
+              },
+            ],
+          },
+    },
+  };
+}
+
+async function saveSoftInfoPreference(input: {
+  options?: GenerateAgentOptions;
+  field: "size" | "color";
+  value: string;
+}): Promise<void> {
+  if (!input.options?.useMemory || !input.options.customerId) {
+    return;
+  }
+
+  await updateConversationOrderState({
+    customerId: input.options.customerId,
+    customerPhone: input.options.customerPhone,
+    conversationKey: input.options.conversationKey,
+    sellerId: input.options.sellerId,
+    productId: input.options.productId,
+    collected: {
+      [input.field]: input.value,
+    },
+    missingFields: [],
+    isComplete: false,
+    awaitingConfirmation: false,
+    confirmed: false,
+  });
+}
+
+async function updateProductInfoMarker(input: {
+  options?: GenerateAgentOptions;
+  topic?: "menu" | "price" | "sizes" | "colors" | "delivery_payment" | "availability" | "how_to_order";
+  pendingSelection?: "size" | "color";
+}): Promise<void> {
+  if (!input.options?.useMemory || !input.options.customerId || !input.topic) {
+    return;
+  }
+
+  await updateConversationProductInfoState({
+    customerId: input.options.customerId,
+    customerPhone: input.options.customerPhone,
+    conversationKey: input.options.conversationKey,
+    sellerId: input.options.sellerId,
+    productId: input.options.productId,
+    lastTopic: input.topic,
+    pendingSelection: input.pendingSelection,
+  });
+}
+
+async function clearProductInfoPendingSelection(
+  options?: GenerateAgentOptions,
+): Promise<void> {
+  if (!options?.useMemory || !options.customerId) {
+    return;
+  }
+
+  await clearConversationProductInfoSelection({
+    customerId: options.customerId,
+    customerPhone: options.customerPhone,
+    conversationKey: options.conversationKey,
+    sellerId: options.sellerId,
+    productId: options.productId,
+  });
+}
+
+async function buildSoftInfoSelectionResultIfHandled(input: {
+  userMessage: string;
+  productContext: ProductContext;
+  options?: GenerateAgentOptions;
+  infoMenuDisplayMode: SellerConfig["interactive"]["infoMenuDisplayMode"];
+}): Promise<AgentResult | null> {
+  if (!input.options?.useMemory || !input.options.customerId) {
+    return null;
+  }
+
+  const session = await getConversationSession(
+    input.options.customerId,
+    input.options.sellerId,
+    input.options.productId,
+    input.options.customerPhone,
+  );
+  const pendingSelection = session.productInfo?.pendingSelection;
+  const hasHardOrderFlow =
+    session.orderState.confirmed ||
+    session.orderState.awaitingConfirmation ||
+    session.orderState.missingFields.length > 0;
+
+  if (!pendingSelection || hasHardOrderFlow) {
+    return null;
+  }
+
+  const selection = getInfoSelectionFromMessage(
+    input.userMessage,
+    input.productContext,
+  );
+
+  if (!selection || selection.field !== pendingSelection) {
+    return null;
+  }
+
+  await saveSoftInfoPreference({
+    options: input.options,
+    field: selection.field,
+    value: selection.value,
+  });
+  await clearProductInfoPendingSelection(input.options);
+
+  return buildSoftInfoSelectionResult({
+    field: selection.field,
+    value: selection.value,
+    textMode: input.infoMenuDisplayMode === "text",
+  });
+}
+
 function toAgentProductContext(input: {
   sellerConfig: SellerConfig;
   configProductContext: ReturnType<typeof productContextService.getActiveProductContext>;
@@ -348,6 +529,16 @@ function toAgentProductContext(input: {
       ? [input.sellerConfig.delivery.paymentText]
       : undefined,
     offer: input.configProductContext.stock.text,
+    stockInfo:
+      input.configProductContext.stock.status === "OUT_OF_STOCK"
+        ? input.configProductContext.stock.text || "المنتج غير متوفر حالياً"
+        : input.configProductContext.stock.status === "LIMITED"
+          ? `المنتج متوفر حالياً${
+              input.configProductContext.stock.text
+                ? `. ${input.configProductContext.stock.text}`
+                : " بكمية محدودة"
+            }`
+          : input.configProductContext.stock.text || "المنتج متوفر حالياً",
     recommendationNotes: input.configProductContext.benefits,
     images: input.configProductContext.images.map((url) => ({ url })),
     requiredOrderFields: [
@@ -1063,14 +1254,6 @@ async function buildAgentResult(
   options?: GenerateAgentOptions,
   requiredFields?: RequiredOrderField[],
 ): Promise<AgentResult> {
-  if (userMessage.trim() === "first_entry:more_info") {
-    return {
-      reply: FIRST_ENTRY_MORE_INFO_PHASE_3_REPLY,
-      actions: [],
-      source: "direct",
-    };
-  }
-
   if (shouldUseSmartRouterBeforeDirect(userMessage)) {
     const routerReply = await buildSmartRouterResult(
       userMessage,
@@ -1186,6 +1369,7 @@ export async function generateAgentResult(
     activeOptions,
   );
   const requiredFields = getRuntimeRequiredOrderFields(activeOptions);
+  const infoMenuDisplayMode = getRuntimeInfoMenuDisplayMode(activeOptions);
 
   if (!userMessage) {
     throw new Error("Message is required");
@@ -1193,19 +1377,89 @@ export async function generateAgentResult(
 
   await appendMessageToMemory(activeOptions, "customer", userMessage);
 
+  const softInfoSelectionResult = await buildSoftInfoSelectionResultIfHandled({
+    userMessage,
+    productContext: runtimeProductContext,
+    options: activeOptions,
+    infoMenuDisplayMode,
+  });
+  const productInfoRequest = resolveProductInfoRequest(userMessage);
+  const orderRoutingMessage = normalizeInfoOrderMessage(userMessage);
+
+  if (isProductInfoContinueOrder(userMessage)) {
+    await clearProductInfoPendingSelection(activeOptions);
+  }
+
+  const productInfoReply =
+    !softInfoSelectionResult &&
+    productInfoRequest &&
+    productInfoRequest.topic !== "order_now"
+      ? buildProductInfoReply({
+          message: userMessage,
+          request: productInfoRequest,
+          productContext: runtimeProductContext,
+          requiredFields,
+          infoMenuDisplayMode,
+        })
+      : undefined;
+
+  if (productInfoRequest && productInfoRequest.topic !== "order_now") {
+    const selectedSize = matchAvailableInfoSize(
+      productInfoRequest.requestedSize,
+      runtimeProductContext,
+    );
+    const selectedColor = matchAvailableInfoColor(
+      productInfoRequest.requestedColor,
+      runtimeProductContext,
+    );
+
+    if (selectedSize) {
+      await saveSoftInfoPreference({
+        options: activeOptions,
+        field: "size",
+        value: selectedSize,
+      });
+    } else if (selectedColor) {
+      await saveSoftInfoPreference({
+        options: activeOptions,
+        field: "color",
+        value: selectedColor,
+      });
+    }
+
+    await updateProductInfoMarker({
+      options: activeOptions,
+      topic: productInfoRequest.topic,
+      pendingSelection:
+        productInfoRequest.topic === "sizes" && !selectedSize
+          ? "size"
+          : productInfoRequest.topic === "colors" && !selectedColor
+            ? "color"
+            : undefined,
+    });
+  }
+
   const result =
-    (await buildOrderResultIfHandled(
-      userMessage,
-      runtimeProductContext,
-      activeOptions,
-      requiredFields,
-    )) ||
-    (await buildAgentResult(
-      userMessage,
-      runtimeProductContext,
-      activeOptions,
-      requiredFields,
-    ));
+    softInfoSelectionResult ||
+    (productInfoReply
+      ? {
+          reply: productInfoReply.text,
+          actions: [],
+          source: "direct" as const,
+          meta: { replyUi: productInfoReply.ui },
+        }
+      : (await buildOrderResultIfHandled(
+          orderRoutingMessage,
+          runtimeProductContext,
+          activeOptions,
+          requiredFields,
+        )) ||
+        (await buildAgentResult(
+          orderRoutingMessage,
+          runtimeProductContext,
+          activeOptions,
+          requiredFields,
+        )));
 
   const orderStateSummary = await getOrderStateSummary(activeOptions, requiredFields);
   const naturalReplyStatus = getNaturalReplyStatus();

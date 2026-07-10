@@ -401,12 +401,61 @@ function buildUnavailableOptionReply(
   return `${field.label} ${valueText} ما متوفرش حالياً. الاختيارات المتوفرة هي: ${optionsText}.`;
 }
 
+function getQuantityField(
+  requiredFields?: RequiredOrderField[],
+): RequiredOrderField | undefined {
+  return requiredFields?.find((field) => field.key === "quantity");
+}
+
+function isQuantityWithinConfiguredRange(
+  value: unknown,
+  field?: RequiredOrderField,
+): boolean {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    return false;
+  }
+
+  if (typeof field?.minValue === "number" && value < field.minValue) {
+    return false;
+  }
+
+  if (typeof field?.maxValue === "number" && value > field.maxValue) {
+    return false;
+  }
+
+  return true;
+}
+
+function buildInvalidQuantityReply(
+  value: unknown,
+  field?: RequiredOrderField,
+): string {
+  const minQuantity = typeof field?.minValue === "number" ? field.minValue : 1;
+  const maxQuantity =
+    typeof field?.maxValue === "number" ? field.maxValue : undefined;
+
+  if (maxQuantity === 1 && minQuantity <= 1) {
+    return "حالياً نقدر نسجل لك كمية 1 فقط.\nعافاك كتب 1 باش نكملو الطلب.";
+  }
+
+  if (typeof maxQuantity === "number") {
+    return `الكمية المتوفرة حالياً حتى ${maxQuantity}.\nعافاك اختار كمية بين ${minQuantity} و ${maxQuantity}.`;
+  }
+
+  if (typeof value === "number" && value <= 0) {
+    return "عافاك اختار كمية صحيحة ابتداءً من 1.";
+  }
+
+  return "عافاك كتب الكمية برقم واضح باش نكملو الطلب.";
+}
+
 function validateIncomingOrderEntities(
   entities: Partial<OrderEntities>,
   productContext: ProductContext,
   requiredFields?: RequiredOrderField[],
 ): { entities: Partial<OrderEntities>; reply?: string } {
   const fieldValidation = validateOrderEntities(entities, productContext);
+  const quantityField = getQuantityField(requiredFields);
 
   for (const invalidField of fieldValidation.invalidFields) {
     const field = invalidField as keyof OrderEntities;
@@ -421,6 +470,24 @@ function validateIncomingOrderEntities(
     string,
     unknown
   >;
+
+  if (
+    hasValue(entities.quantity) &&
+    !isQuantityWithinConfiguredRange(entities.quantity, quantityField)
+  ) {
+    recordInvalidCandidateRejected({
+      field: "quantity",
+      value: entities.quantity,
+      reason: "invalid_or_out_of_range_quantity",
+    });
+
+    delete validEntities.quantity;
+
+    return {
+      entities: validEntities as Partial<OrderEntities>,
+      reply: buildInvalidQuantityReply(entities.quantity, quantityField),
+    };
+  }
 
   for (const [field, value] of Object.entries(entities)) {
     const optionField = getOptionField(field, requiredFields);
@@ -746,9 +813,23 @@ function findSize(message: string): string | undefined {
 }
 
 function findQuantity(message: string): number | undefined {
+  const normalizedMessage = normalizeText(message);
+  const labeledQuantityMatch = normalizedMessage.match(
+    /(?:الكمية|كمية|quantity|qte|qty|عدد)\s*(?:هو|هي|:)?\s*(?:ل)?([1-9]\d*)\b/i,
+  );
+  const standaloneNumberMatch = normalizedMessage.match(/^([1-9]\d*)$/);
+
+  if (labeledQuantityMatch?.[1]) {
+    return Number(labeledQuantityMatch[1]);
+  }
+
+  if (standaloneNumberMatch?.[1]) {
+    return Number(standaloneNumberMatch[1]);
+  }
+
   if (
     /(^|\s)1(\s|$)/.test(message) ||
-    includesAny(normalizeText(message), [
+    includesAny(normalizedMessage, [
       "wa7da",
       "wahda",
       "w7da",
@@ -764,7 +845,7 @@ function findQuantity(message: string): number | undefined {
 
   if (
     /(^|\s)2(\s|$)/.test(message) ||
-    includesAny(normalizeText(message), ["jouj", "jooj", "jوج", "جوج", "زوج"])
+    includesAny(normalizedMessage, ["jouj", "jooj", "jوج", "جوج", "زوج"])
   ) {
     return 2;
   }
@@ -777,7 +858,7 @@ function shouldCollectOptionalQuantity(message: string): boolean {
 
   return (
     Boolean(findColor(message) || findSize(message) || isOrderStartMessage(message)) &&
-    (/(^|\s)[1-9](\s|$)/.test(message) ||
+    (/(^|\s)[1-9]\d*(\s|$)/.test(message) ||
       includesAny(normalizedMessage, [
         "wa7da",
         "wahda",
@@ -791,6 +872,11 @@ function shouldCollectOptionalQuantity(message: string): boolean {
         "jooj",
         "جوج",
         "زوج",
+        "quantity",
+        "qte",
+        "qty",
+        "كمية",
+        "الكمية",
       ]))
   );
 }
@@ -1058,9 +1144,15 @@ function extractStandaloneEntities(
     entities.color = findColor(message);
   }
 
+  const isStandaloneMissingSizeSelection =
+    missingFields.includes("size") &&
+    typeof entities.size === "string" &&
+    isStandaloneSizeSelection(message, entities.size);
+
   if (
-    missingFields.includes("quantity") ||
-    shouldCollectOptionalQuantity(message)
+    !isStandaloneMissingSizeSelection &&
+    (missingFields.includes("quantity") ||
+      shouldCollectOptionalQuantity(message))
   ) {
     entities.quantity = findQuantity(message);
   }
