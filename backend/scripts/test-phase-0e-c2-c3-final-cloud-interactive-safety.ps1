@@ -166,17 +166,20 @@ function Has-ListRowId {
   ).Count -eq 1
 }
 
-$group = "A Safe default text-only"
+$OrderConfirmationFallbackText = 'كتب "نعم" باش نأكد الطلب، أو "تعديل" باش تبدل شي معلومة.'
+
+$group = "A Safe default confirmation preview"
 $phoneA = "2126000C2C3A"
 Clear-Session -SellerId "seller_demo_medical" -Phone $phoneA
 [void](Send-CloudFlow -SellerId "seller_demo_medical" -Phone $phoneA -Message "بغيت نكوموندي")
 $aResultTimed = Send-CloudFlow -SellerId "seller_demo_medical" -Phone $phoneA -Message "محمد 0612345678 مراكش"
 $a = $aResultTimed.Response
-Add-Check $group "decision remains text_only" ($a.meta.interactiveSendDecision.mode -eq "text_only") $a.meta.interactiveSendDecision.reason $aResultTimed.DurationMs
-Add-Check $group "safe default reason" (@("interactive_disabled", "no_interactive_preview") -contains $a.meta.interactiveSendDecision.reason) $a.meta.interactiveSendDecision.reason $aResultTimed.DurationMs
-Add-Check $group "dispatches text" ($a.dispatchResult.mode -eq "text") $a.dispatchResult.reason $aResultTimed.DurationMs
-Add-Check $group "dry-run only" ($a.dispatchResult.dryRun -eq $true -and $a.dispatchResult.textResult.dryRun -eq $true) "dryRun=$($a.dispatchResult.dryRun)" $aResultTimed.DurationMs
-Add-Check $group "no interactive live send" ($a.dispatchResult.interactiveBlocked -ne $false -or $a.dispatchResult.mode -eq "text") "mode=$($a.dispatchResult.mode)" $aResultTimed.DurationMs
+Add-Check $group "decision is safe dry-run decision" (@("text_only", "interactive_preview") -contains $a.meta.interactiveSendDecision.mode) $a.meta.interactiveSendDecision.reason $aResultTimed.DurationMs
+Add-Check $group "confirmation preview is available" ($a.meta.whatsappInteractivePreview.interactive.type -eq "button") $a.meta.interactiveSendDecision.reason $aResultTimed.DurationMs
+Add-Check $group "confirmation presentation is split" ($a.meta.orderConfirmationPresentation.presentationMode -eq "split_order_review_and_confirmation" -and $a.meta.orderConfirmationPresentation.messages[1].text -eq "واش المعلومات كلها صحيحة؟") "" $aResultTimed.DurationMs
+Add-Check $group "split review text is preserved" ($a.reviewDispatchResult.textResult.payload.text.body -like "*راجع تفاصيل الطلب ديالك قبل ما نأكدوه*" -and $a.reviewDispatchResult.textResult.payload.text.body -notlike "*$OrderConfirmationFallbackText*") "" $aResultTimed.DurationMs
+Add-Check $group "safe dispatch is dry-run" ($a.dispatchResult.dryRun -eq $true) "dryRun=$($a.dispatchResult.dryRun)" $aResultTimed.DurationMs
+Add-Check $group "no interactive live send" ($a.dispatchResult.dryRun -eq $true) "mode=$($a.dispatchResult.mode)" $aResultTimed.DurationMs
 
 $group = "B Interactive enabled dry-run"
 $phoneB = "2126000C2C3B"
@@ -244,7 +247,7 @@ Clear-Session -SellerId "seller_demo_medical" -Phone $medicalPhone
 $medicalConfirmTimed = Send-CloudFlow -SellerId "seller_demo_medical" -Phone $medicalPhone -CloudMessage (New-ButtonReply -Id "confirm:yes" -Title "نعم") -InteractiveEnabledOverride $true
 $medicalConfirm = $medicalConfirmTimed.Response
 Add-Check $group "medical confirm normalized" ($medicalConfirm.cloudNormalization.normalizedText -eq "نعم") "" $medicalConfirmTimed.DurationMs
-Add-Check $group "medical order not confirmed in Phase 2A" ($medicalConfirm.meta.orderStateSummary.confirmed -eq $false -and $medicalConfirm.reply -like "*Phase 4*") "" $medicalConfirmTimed.DurationMs
+Add-Check $group "medical order confirmed in Phase 4" ($medicalConfirm.meta.orderStateSummary.confirmed -eq $true -and $medicalConfirm.reply -like "*رقم الطلب:*") "" $medicalConfirmTimed.DurationMs
 Add-Check $group "medical dry-run only" ($medicalConfirm.dispatchResult.dryRun -eq $true) "" $medicalConfirmTimed.DurationMs
 
 $sandalsPhone = "2126000C2C3F2"
@@ -262,8 +265,11 @@ $sandalsConfirm = $sandalsConfirmTimed.Response
 Add-Check $group "sandals size collected" ($sandalsSize.meta.orderStateSummary.collected.size -eq "38") "" $sandalsSizeTimed.DurationMs
 Add-Check $group "sandals color collected" ($sandalsColor.meta.orderStateSummary.collected.color -eq "أسود") "" $sandalsColorTimed.DurationMs
 Add-Check $group "sandals still missing quantity before summary" (@($sandalsColor.meta.orderStateSummary.missingFields) -contains "quantity") "" $sandalsColorTimed.DurationMs
-Add-Check $group "sandals quantity completes review" ($sandalsQuantity.meta.orderStateSummary.awaitingConfirmation -eq $true -and $sandalsQuantity.meta.orderStateSummary.confirmed -eq $false -and $sandalsQuantity.reply -like "*الطلب واجد للمراجعة*") "" $sandalsQuantityTimed.DurationMs
-Add-Check $group "sandals order not confirmed in Phase 2A" ($sandalsConfirm.meta.orderStateSummary.confirmed -eq $false -and $sandalsConfirm.reply -like "*Phase 4*") "" $sandalsConfirmTimed.DurationMs
+Add-Check $group "sandals quantity completes review" ($sandalsQuantity.meta.orderStateSummary.awaitingConfirmation -eq $true -and $sandalsQuantity.meta.orderStateSummary.confirmed -eq $false -and $sandalsQuantity.reply -like "*راجع تفاصيل الطلب ديالك قبل ما نأكدوه*") "" $sandalsQuantityTimed.DurationMs
+Add-Check $group "sandals split sends structured review first" ($sandalsQuantity.reviewDispatchResult.mode -eq "text" -and $sandalsQuantity.reviewDispatchResult.textResult.payload.text.body -like "*راجع تفاصيل الطلب ديالك قبل ما نأكدوه*" -and $sandalsQuantity.reviewDispatchResult.textResult.payload.text.body -like "*ثمن الوحدة:*" -and $sandalsQuantity.reviewDispatchResult.textResult.payload.text.body -notlike "*$OrderConfirmationFallbackText*") "" $sandalsQuantityTimed.DurationMs
+Add-Check $group "sandals split sends CTA second" ($sandalsQuantity.dispatchResult.mode -eq "interactive" -and $sandalsQuantity.dispatchResult.interactiveResult.payload.interactive.body.text -eq "واش المعلومات كلها صحيحة؟") "" $sandalsQuantityTimed.DurationMs
+Add-Check $group "sandals CTA success does not send fallback text" ($sandalsQuantity.dispatchResult.fallbackUsed -ne $true -and $sandalsQuantity.dispatchResult.textResult -eq $null) "" $sandalsQuantityTimed.DurationMs
+Add-Check $group "sandals order confirmed in Phase 4" ($sandalsConfirm.meta.orderStateSummary.confirmed -eq $true -and $sandalsConfirm.reply -like "*رقم الطلب:*") "" $sandalsConfirmTimed.DurationMs
 Add-Check $group "sandals dry-run only" ($sandalsConfirm.dispatchResult.dryRun -eq $true) "" $sandalsConfirmTimed.DurationMs
 
 $group = "G Normal text unchanged"

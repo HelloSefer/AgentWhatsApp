@@ -10,8 +10,8 @@ import { buildLiveInteractiveReadiness } from "./cloud-live-interactive-readines
 import { cloudReplyDispatchService } from "./cloud-reply-dispatch.service";
 import {
   buildSimulatedIncomingWebhook,
-  buildCloudInteractiveFallbackText,
   checkSubscribedApps,
+  dispatchAgentResultThroughCloud,
   getCloudDiagnostics,
   processCloudWebhookBody,
   recordCloudWebhookVerify,
@@ -468,14 +468,12 @@ export async function testWhatsAppCloudAgentDispatchFlow(
       interactiveSendChannel: "whatsapp_cloud",
       interactiveEnabledOverride,
     });
-    const dispatchResult = await cloudReplyDispatchService.dispatchAgentReply({
+    const dispatchFlow = await dispatchAgentResultThroughCloud({
       to: customerPhone,
       phoneNumberId,
-      replyText: buildCloudInteractiveFallbackText(agentResult),
-      whatsappInteractivePreview:
-        agentResult.meta?.whatsappInteractivePreview ?? null,
-      interactiveSendDecision:
-        agentResult.meta?.interactiveSendDecision ?? null,
+      customerId: customerPhone,
+      userMessage: agentInputText,
+      result: agentResult,
       forceDryRun,
       interactiveLiveSendAllowedOverride,
       simulateNoProviderCall,
@@ -499,7 +497,17 @@ export async function testWhatsAppCloudAgentDispatchFlow(
       meta: agentResult.meta,
       ...(cloudNormalization ? { cloudNormalization } : {}),
       dispatchSafety,
-      dispatchResult,
+      dispatchResult: dispatchFlow.dispatchResult,
+      orderConfirmationSplit: dispatchFlow.orderConfirmationSplit,
+      ...(dispatchFlow.reviewDispatchResult
+        ? { reviewDispatchResult: dispatchFlow.reviewDispatchResult }
+        : {}),
+      ...(dispatchFlow.reviewFailureFallbackResult
+        ? {
+            reviewFailureFallbackResult:
+              dispatchFlow.reviewFailureFallbackResult,
+          }
+        : {}),
     });
   } catch (error) {
     return res.status(500).json({

@@ -87,6 +87,7 @@ export type SellerConfig = {
   };
   receipt: {
     enabled: boolean;
+    sendAfterConfirmation: boolean;
     showLogo?: boolean;
     footerText?: string;
   };

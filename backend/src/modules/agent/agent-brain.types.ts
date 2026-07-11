@@ -77,11 +77,15 @@ export interface ConversationMessage {
 }
 
 export interface ConversationOrderState {
+  orderCycleId?: string;
   collected: OrderEntities;
   missingFields: string[];
   isComplete: boolean;
   awaitingConfirmation: boolean;
   confirmed: boolean;
+  editField?:
+    | keyof OrderEntities
+    | "delivery_info";
   lastUpdatedAt: string;
 }
 

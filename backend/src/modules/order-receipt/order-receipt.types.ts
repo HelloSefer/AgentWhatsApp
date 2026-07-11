@@ -1,6 +1,11 @@
 import type { ConfirmedOrder } from "../agent/order/confirmed-order-store.service";
 
-export type ReceiptSendStatus = "SENT" | "FAILED" | "SKIPPED";
+export type ReceiptSendStatus =
+  | "NOT_REQUESTED"
+  | "PENDING"
+  | "SENT"
+  | "FAILED"
+  | "SKIPPED";
 
 export interface OrderReceiptRecord {
   orderId: string;

@@ -177,12 +177,17 @@ $medicalReady = Send-CloudFlow -SellerId "seller_demo_medical" -Phone $medicalCo
 Add-Check "medical ready before confirm is complete" ($medicalReady.meta.orderStateSummary.isComplete -eq $true)
 Add-Check "medical ready before confirm awaits confirmation" ($medicalReady.meta.orderStateSummary.awaitingConfirmation -eq $true)
 Add-Check "medical ready before confirm not confirmed" ($medicalReady.meta.orderStateSummary.confirmed -eq $false)
-Add-Check "medical ready has Phase 2A summary" ($medicalReady.reply -like "*الطلب واجد للمراجعة*")
-Add-Check "medical ready has no confirm button preview" ($null -eq $medicalReady.meta.whatsappInteractivePreview)
+Add-Check "medical ready has structured review" ($medicalReady.reply -like "*راجع تفاصيل الطلب ديالك قبل ما نأكدوه*" -and $medicalReady.reply -like "*`n*معلومات التوصيل*`n*")
+Add-Check "medical ready uses split confirmation presentation" ($medicalReady.meta.orderConfirmationPresentation.presentationMode -eq "split_order_review_and_confirmation" -and @($medicalReady.meta.orderConfirmationPresentation.messages).Count -eq 2)
+Add-Check "medical confirmation CTA is short" ($medicalReady.meta.orderConfirmationPresentation.messages[1].text -eq "واش المعلومات كلها صحيحة؟")
+Add-Check "medical ready has confirm button preview" ($medicalReady.meta.whatsappInteractivePreview.interactive.type -eq "button")
+Add-Check "medical ready buttons include confirm" (Has-PreviewButtonId -Result $medicalReady -Id "order:confirm")
+Add-Check "medical ready buttons include edit" (Has-PreviewButtonId -Result $medicalReady -Id "order:edit")
 $medicalConfirmed = Send-CloudFlow -SellerId "seller_demo_medical" -Phone $medicalConfirmPhone -CloudMessage (New-ButtonReply -Id "confirm:yes" -Title "نعم") -InputType "button"
 Add-Check "medical confirm click normalized to نعم" ($medicalConfirmed.cloudNormalization.normalizedText -eq "نعم")
-Add-Check "medical confirm click does not confirm in Phase 2A" ($medicalConfirmed.meta.orderStateSummary.confirmed -eq $false)
-Add-Check "medical confirm reply says Phase 4" ($medicalConfirmed.reply -like "*Phase 4*")
+Add-Check "medical confirm click confirms in Phase 4" ($medicalConfirmed.meta.orderStateSummary.confirmed -eq $true)
+Add-Check "medical confirm reply has order id" ($medicalConfirmed.reply -like "*رقم الطلب:*")
+Add-Check "medical confirm exposes public code only" ($medicalConfirmed.meta.publicOrderCode -match "^[A-Z0-9]{4}-[A-Z0-9]{4}$" -and -not ($medicalConfirmed.reply -match "[0-9a-f]{8}-[0-9a-f]{4}-"))
 Add-Check "medical confirm dispatch dry-run" ($medicalConfirmed.dispatchResult.dryRun -eq $true)
 
 $medicalEditPhone = "2126000C2C2B"
@@ -237,15 +242,56 @@ Add-Check "sandals color click normalized to أسود" ($sandalsColor.cloudNorma
 Add-Check "sandals color click collects color" ($sandalsColor.meta.orderStateSummary.collected.color -eq "أسود")
 Add-Check "sandals color click still missing quantity" (@($sandalsColor.meta.orderStateSummary.missingFields) -contains "quantity")
 Add-Check "sandals color click not complete before quantity" ($sandalsColor.meta.orderStateSummary.isComplete -eq $false)
-$sandalsQuantity = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -Message "1"
-Add-Check "sandals quantity text collects quantity" ([int]$sandalsQuantity.meta.orderStateSummary.collected.quantity -eq 1)
+$sandalsQuantity = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -Message "5"
+Add-Check "sandals quantity text collects quantity" ([int]$sandalsQuantity.meta.orderStateSummary.collected.quantity -eq 5)
 Add-Check "sandals quantity completes order" ($sandalsQuantity.meta.orderStateSummary.isComplete -eq $true)
 Add-Check "sandals quantity awaits review" ($sandalsQuantity.meta.orderStateSummary.awaitingConfirmation -eq $true)
-Add-Check "sandals quantity has Phase 2A summary" ($sandalsQuantity.reply -like "*الطلب واجد للمراجعة*")
-Add-Check "sandals quantity has no confirm button preview" ($null -eq $sandalsQuantity.meta.whatsappInteractivePreview)
+Add-Check "sandals quantity has structured review" ($sandalsQuantity.reply -like "*راجع تفاصيل الطلب ديالك قبل ما نأكدوه*" -and $sandalsQuantity.reply -like "*ثمن الوحدة: 199 درهم*" -and $sandalsQuantity.reply -like "*ثمن المنتجات: 995 درهم*" -and $sandalsQuantity.reply -like "*مصاريف التوصيل: غير محددة*" -and $sandalsQuantity.reply -like "*المجموع النهائي: يتحدد بعد تأكيد مصاريف التوصيل*")
+Add-Check "sandals review and CTA are separate" ($sandalsQuantity.meta.orderConfirmationPresentation.messages[0].kind -eq "text" -and $sandalsQuantity.meta.orderConfirmationPresentation.messages[1].kind -eq "interactive_buttons" -and $sandalsQuantity.meta.orderConfirmationPresentation.messages[1].text -eq "واش المعلومات كلها صحيحة؟")
+Add-Check "sandals quantity has confirm button preview" ($sandalsQuantity.meta.whatsappInteractivePreview.interactive.type -eq "button")
+Add-Check "sandals quantity buttons include confirm" (Has-PreviewButtonId -Result $sandalsQuantity -Id "order:confirm")
+Add-Check "sandals quantity buttons include edit" (Has-PreviewButtonId -Result $sandalsQuantity -Id "order:edit")
 $sandalsConfirmed = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -CloudMessage (New-ButtonReply -Id "confirm:yes" -Title "نعم") -InputType "button"
 Add-Check "sandals confirm click normalized to نعم" ($sandalsConfirmed.cloudNormalization.normalizedText -eq "نعم")
-Add-Check "sandals confirm click does not confirm in Phase 2A" ($sandalsConfirmed.meta.orderStateSummary.confirmed -eq $false)
+Add-Check "sandals confirm click confirms in Phase 4" ($sandalsConfirmed.meta.orderStateSummary.confirmed -eq $true)
+Add-Check "sandals confirm reply has order id" ($sandalsConfirmed.reply -like "*رقم الطلب:*")
+Add-Check "sandals confirm uses public order code" ($sandalsConfirmed.meta.publicOrderCode -match "^[A-Z0-9]{4}-[A-Z0-9]{4}$" -and $sandalsConfirmed.reply -like "*$($sandalsConfirmed.meta.publicOrderCode)*")
+$sandalsOrders = @((Invoke-RestMethod -Method GET -Uri ("{0}/api/agent/orders" -f $BaseUrl)).orders)
+$sandalsSavedOrder = @($sandalsOrders | Where-Object { $_.customerId -like "*$sandalsPhone" }) | Select-Object -First 1
+Add-Check "sandals saved order keeps internal and public ids" ($sandalsSavedOrder.id -match "^[0-9a-f-]{36}$" -and $sandalsSavedOrder.publicOrderCode -eq $sandalsConfirmed.meta.publicOrderCode)
+Add-Check "sandals saved totals are server calculated" ([decimal]$sandalsSavedOrder.unitPrice -eq 199 -and [decimal]$sandalsSavedOrder.subtotal -eq 995 -and [decimal]$sandalsSavedOrder.deliveryPrice -eq 0 -and [decimal]$sandalsSavedOrder.total -eq 995)
+$sandalsDuplicate = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -CloudMessage (New-ButtonReply -Id "order:confirm" -Title "نأكد الطلب") -InputType "button"
+$sandalsOrdersAfterDuplicate = @((Invoke-RestMethod -Method GET -Uri ("{0}/api/agent/orders" -f $BaseUrl)).orders | Where-Object { $_.customerId -like "*$sandalsPhone" })
+Add-Check "duplicate confirmation keeps one order and public code" ($sandalsOrdersAfterDuplicate.Count -eq 1 -and $sandalsDuplicate.reply -like "*$($sandalsConfirmed.meta.publicOrderCode)*")
+$sandalsThanks = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -Message "شكرا" -InputType "text"
+Add-Check "post-confirm thanks is conversational" ($sandalsThanks.reply -like "*العفو*" -and $sandalsThanks.reply -notlike "*رقم الطلب:*")
+$sandalsDeliveryQuestion = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -Message "فاش غادي يوصل؟" -InputType "text"
+Add-Check "post-confirm delivery question still works" ($sandalsDeliveryQuestion.reply -like "*توصيل*" -or $sandalsDeliveryQuestion.reply -like "*24*" -or $sandalsDeliveryQuestion.reply -like "*72*")
+$sandalsPriceQuestion = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -Message "شحال الثمن؟" -InputType "text"
+Add-Check "post-confirm price question still works" ($sandalsPriceQuestion.reply -like "*199*" -and $sandalsPriceQuestion.reply -notlike "*رقم الطلب:*")
+$sandalsStaleEdit = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -CloudMessage (New-ButtonReply -Id "order:edit" -Title "نبدل شي حاجة") -InputType "button"
+$sandalsOrderAfterStaleEdit = @((Invoke-RestMethod -Method GET -Uri ("{0}/api/agent/orders" -f $BaseUrl)).orders | Where-Object { $_.customerId -like "*$sandalsPhone" }) | Select-Object -First 1
+Add-Check "stale edit is blocked with public code" ($sandalsStaleEdit.reply -like "*تواصل مع المتجر قبل الشحن*" -and $sandalsStaleEdit.reply -like "*$($sandalsConfirmed.meta.publicOrderCode)*")
+Add-Check "stale edit does not mutate saved order" ([int]$sandalsOrderAfterStaleEdit.quantity -eq 5 -and $sandalsOrderAfterStaleEdit.size -eq "38" -and $sandalsOrderAfterStaleEdit.color -eq "أسود")
+$sandalsNewOrder = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -Message "بغيت نطلب واحد آخر" -InputType "text"
+$sandalsOrdersAfterNewDraft = @((Invoke-RestMethod -Method GET -Uri ("{0}/api/agent/orders" -f $BaseUrl)).orders | Where-Object { $_.customerId -like "*$sandalsPhone" })
+Add-Check "explicit new order starts fresh draft" ($sandalsNewOrder.reply -like "*طلب جديد*" -and $sandalsNewOrder.reply -notlike "*تمام ✅*" -and $sandalsNewOrder.meta.orderStateSummary.confirmed -eq $false -and @($sandalsNewOrder.meta.orderStateSummary.missingFields) -contains "size")
+Add-Check "explicit new order clears old collected fields" (@($sandalsNewOrder.meta.orderStateSummary.collected.PSObject.Properties).Count -eq 0)
+Add-Check "explicit new order keeps previous saved order only" ($sandalsOrdersAfterNewDraft.Count -eq 1 -and $sandalsOrdersAfterNewDraft[0].publicOrderCode -eq $sandalsConfirmed.meta.publicOrderCode)
+$sandalsSecondSize = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -CloudMessage (New-ListReply -Id "size:40" -Title "40") -InputType "list"
+Add-Check "second order size does not reuse old fields" ($sandalsSecondSize.meta.orderStateSummary.collected.size -eq "40" -and $null -eq $sandalsSecondSize.meta.orderStateSummary.collected.color -and $null -eq $sandalsSecondSize.meta.orderStateSummary.collected.fullName -and @($sandalsSecondSize.meta.orderStateSummary.missingFields) -contains "color" -and $sandalsSecondSize.reply -notlike "*راجع تفاصيل الطلب*")
+$sandalsSecondColor = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -CloudMessage (New-ListReply -Id "color:وردي" -Title "وردي") -InputType "list"
+$sandalsSecondQuantity = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -Message "5"
+$sandalsSecondInfo = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -Message "يوسف 0611111111 الرباط حي النصر"
+Add-Check "second order completes with new values" ($sandalsSecondInfo.meta.orderStateSummary.awaitingConfirmation -eq $true -and $sandalsSecondInfo.meta.orderStateSummary.collected.fullName -eq "يوسف" -and $sandalsSecondInfo.meta.orderStateSummary.collected.phone -eq "0611111111" -and $sandalsSecondInfo.meta.orderStateSummary.collected.city -eq "الرباط" -and $sandalsSecondInfo.meta.orderStateSummary.collected.address -eq "حي النصر" -and $sandalsSecondInfo.meta.orderStateSummary.collected.color -eq "وردي" -and [int]$sandalsSecondInfo.meta.orderStateSummary.collected.quantity -eq 5)
+$sandalsSecondConfirmed = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -CloudMessage (New-ButtonReply -Id "order:confirm" -Title "نأكد الطلب") -InputType "button"
+$sandalsOrdersAfterSecondConfirm = @((Invoke-RestMethod -Method GET -Uri ("{0}/api/agent/orders" -f $BaseUrl)).orders | Where-Object { $_.customerId -like "*$sandalsPhone" })
+$sandalsSecondSavedOrder = @($sandalsOrdersAfterSecondConfirm | Where-Object { $_.publicOrderCode -eq $sandalsSecondConfirmed.meta.publicOrderCode }) | Select-Object -First 1
+Add-Check "second confirmation creates second order" ($sandalsOrdersAfterSecondConfirm.Count -eq 2 -and $sandalsSecondConfirmed.meta.publicOrderCode -ne $sandalsConfirmed.meta.publicOrderCode)
+Add-Check "second saved order has separate identity and values" ($sandalsSecondSavedOrder.id -ne $sandalsSavedOrder.id -and $sandalsSecondSavedOrder.publicOrderCode -ne $sandalsSavedOrder.publicOrderCode -and $sandalsSecondSavedOrder.fullName -eq "يوسف" -and $sandalsSecondSavedOrder.phone -eq "0611111111" -and $sandalsSecondSavedOrder.city -eq "الرباط" -and $sandalsSecondSavedOrder.address -eq "حي النصر" -and $sandalsSecondSavedOrder.size -eq "40" -and $sandalsSecondSavedOrder.color -eq "وردي" -and [int]$sandalsSecondSavedOrder.quantity -eq 5)
+$sandalsSecondDuplicate = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $sandalsPhone -CloudMessage (New-ButtonReply -Id "order:confirm" -Title "نأكد الطلب") -InputType "button"
+$sandalsOrdersAfterSecondDuplicate = @((Invoke-RestMethod -Method GET -Uri ("{0}/api/agent/orders" -f $BaseUrl)).orders | Where-Object { $_.customerId -like "*$sandalsPhone" })
+Add-Check "second duplicate confirmation keeps two orders" ($sandalsOrdersAfterSecondDuplicate.Count -eq 2 -and $sandalsSecondDuplicate.reply -like "*$($sandalsSecondConfirmed.meta.publicOrderCode)*")
 Add-Check "sandals confirm dispatch dry-run" ($sandalsConfirmed.dispatchResult.dryRun -eq $true)
 
 $normalPhone = "2126000C2C2D"

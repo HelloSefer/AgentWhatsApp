@@ -7,6 +7,7 @@ export interface ProductImage {
 
 export interface ProductContext {
   businessName: string;
+  productId?: string;
   productName: string;
   category?: string;
   description?: string;
@@ -17,6 +18,8 @@ export interface ProductContext {
   variants?: string[];
   features?: string[];
   deliveryInfo?: string;
+  deliveryPrice?: number;
+  deliveryIsFree?: boolean;
   deliveryAreas?: string[];
   deliveryTime?: string;
   paymentMethods?: string[];

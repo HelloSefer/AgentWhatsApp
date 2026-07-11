@@ -70,8 +70,15 @@ export function getOrderReceiptOutputDir(): string {
   return resolveFromBackendRoot(env.orderReceiptOutputDir);
 }
 
-export function getOrderReceiptPdfPath(orderId: string): string {
-  return path.join(getOrderReceiptOutputDir(), `${orderId}.pdf`);
+export function getOrderReceiptPdfPath(
+  orderId: string,
+  publicOrderCode?: string,
+): string {
+  const filename = publicOrderCode
+    ? `وصل-الطلب-${publicOrderCode}.pdf`
+    : `${orderId}.pdf`;
+
+  return path.join(getOrderReceiptOutputDir(), filename);
 }
 
 export function getOrderReceiptRecord(orderId: string): OrderReceiptRecord | undefined {
@@ -130,13 +137,20 @@ export function recordOrderReceiptSkipped(input: {
   status?: ReceiptSendStatus;
 }) {
   diagnostics.totalOrderReceiptDuplicateSkipped += 1;
+  const existingRecord = receiptRecords.get(input.orderId);
   receiptRecords.set(input.orderId, {
     orderId: input.orderId,
-    pdfPath: input.pdfPath,
-    sendStatus: input.status || "SKIPPED",
-    localFileDeleted: receiptRecords.get(input.orderId)?.localFileDeleted,
-    localFileDeletedAt: receiptRecords.get(input.orderId)?.localFileDeletedAt,
-    localFileDeleteError: receiptRecords.get(input.orderId)?.localFileDeleteError,
+    pdfPath: input.pdfPath || existingRecord?.pdfPath,
+    mediaId: existingRecord?.mediaId,
+    sentAt: existingRecord?.sentAt,
+    sendStatus:
+      existingRecord?.sendStatus === "SENT"
+        ? "SENT"
+        : input.status || "SKIPPED",
+    lastError: existingRecord?.lastError,
+    localFileDeleted: existingRecord?.localFileDeleted,
+    localFileDeletedAt: existingRecord?.localFileDeletedAt,
+    localFileDeleteError: existingRecord?.localFileDeleteError,
   });
   logJson({
     event: "order_receipt.duplicate_skipped",
@@ -467,7 +481,7 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       <section class="meta">
         <div class="pill">
           <span class="label">رقم الطلب</span>
-          <span class="value">${escapeHtml(order.id)}</span>
+          <span class="value">${escapeHtml(order.publicOrderCode)}</span>
         </div>
         <div class="pill">
           <span class="label">تاريخ التأكيد</span>
@@ -524,7 +538,7 @@ export async function generateOrderReceiptPdf(
     };
   }
 
-  const pdfPath = getOrderReceiptPdfPath(order.id);
+  const pdfPath = getOrderReceiptPdfPath(order.id, order.publicOrderCode);
 
   try {
     await fs.mkdir(path.dirname(pdfPath), { recursive: true });
@@ -607,8 +621,11 @@ export async function generateOrderReceiptPdf(
 }
 
 export function buildSampleReceiptOrder(): OrderReceiptOrder {
+  const now = new Date().toISOString();
+
   return {
     id: `sample-${Date.now()}`,
+    publicOrderCode: `TEST-${String(Date.now()).slice(-4)}`,
     customerId: "sample-customer",
     productName: "صندالة نسائية",
     fullName: "سارة العلوي",
@@ -618,7 +635,14 @@ export function buildSampleReceiptOrder(): OrderReceiptOrder {
     size: "38",
     color: "أسود",
     quantity: 1,
+    unitPrice: 199,
+    subtotal: 199,
+    deliveryPrice: 0,
+    total: 199,
+    currency: "درهم",
     status: "CONFIRMED",
-    createdAt: new Date().toISOString(),
+    source: "agent",
+    createdAt: now,
+    updatedAt: now,
   };
 }

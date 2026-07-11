@@ -12,6 +12,7 @@ import type { WhatsAppInteractivePreview } from "../../agent/reply/whatsapp-inte
 import type { AgentIdentity } from "../../agent/identity/agent-identity.types";
 import { conversationKeyService } from "../../agent/identity/conversation-key.service";
 import { sellerResolverService } from "../../agent/identity/seller-resolver.service";
+import { sellerConfigService } from "../../agent/config/seller-config.service";
 import {
   buildFirstEntryLiveSmokeResult,
   markFirstEntryLiveSmokeShown,
@@ -24,7 +25,7 @@ import {
   recordReceiptSkippedInvalidOrderFields,
 } from "../../agent/order/order-field-validator.service";
 import {
-  listConfirmedOrders,
+  getConfirmedOrderById,
   updateConfirmedOrderReceipt,
   type ConfirmedOrder,
 } from "../../agent/order/confirmed-order-store.service";
@@ -1472,8 +1473,10 @@ export async function sendOrderReceiptDocumentForOrder(input: {
 
   if (
     !input.allowDuplicate &&
-    (existingReceipt?.sendStatus === "SENT" ||
-      input.order.receiptSendStatus === "SENT")
+    (["PENDING", "SENT", "FAILED"].includes(existingReceipt?.sendStatus || "") ||
+      ["PENDING", "SENT", "FAILED"].includes(
+        input.order.receiptSendStatus || "",
+      ))
   ) {
     recordOrderReceiptSkipped({
       orderId: input.order.id,
@@ -1562,6 +1565,11 @@ export async function sendOrderReceiptDocumentForOrder(input: {
     };
   }
 
+  updateConfirmedOrderReceipt(input.order.id, {
+    receiptSendStatus: "PENDING",
+    receiptError: undefined,
+  });
+
   const pdfResult = await generateOrderReceiptPdf(input.order);
 
   if (!pdfResult.ok || !pdfResult.pdfPath) {
@@ -1570,6 +1578,7 @@ export async function sendOrderReceiptDocumentForOrder(input: {
     updateConfirmedOrderReceipt(input.order.id, {
       receiptPdfPath: pdfResult.pdfPath,
       receiptSendStatus: "FAILED",
+      receiptError: errorMessage,
     });
     recordOrderReceiptDocumentFailed({
       orderId: input.order.id,
@@ -1594,8 +1603,8 @@ export async function sendOrderReceiptDocumentForOrder(input: {
     to: input.to,
     phoneNumberId: input.phoneNumberId,
     filePath: pdfResult.pdfPath,
-    filename: `وصل-الطلب-${input.order.id}.pdf`,
-    caption: "هذا وصل الطلب ديالك ✅",
+    filename: `وصل-الطلب-${input.order.publicOrderCode}.pdf`,
+    caption: "هذا هو وصل الطلب ديالك ✅\nاحتافظ به حتى يتأكد التوصيل.",
   });
 
   if (sendResult.success) {
@@ -1619,6 +1628,7 @@ export async function sendOrderReceiptDocumentForOrder(input: {
       receiptMediaId: sendResult.mediaId,
       receiptSentAt: new Date().toISOString(),
       receiptSendStatus: "SENT",
+      receiptError: undefined,
       receiptLocalFileDeleted: deleteResult.localFileDeleted,
       receiptLocalFileDeletedAt: deleteResult.localFileDeletedAt,
       receiptLocalFileDeleteError: deleteResult.localFileDeleteError,
@@ -1649,6 +1659,7 @@ export async function sendOrderReceiptDocumentForOrder(input: {
       receiptPdfPath: pdfResult.pdfPath,
       receiptMediaId: sendResult.mediaId,
       receiptSendStatus: "FAILED",
+      receiptError: sendResult.errorMessage || "Document send failed",
       receiptLocalFileDeleted: deleteResult.localFileDeleted,
       receiptLocalFileDeletedAt: deleteResult.localFileDeletedAt,
       receiptLocalFileDeleteError: deleteResult.localFileDeleteError,
@@ -2335,6 +2346,15 @@ function normalizeFallbackComparable(value: string): string {
 }
 
 export function buildCloudInteractiveFallbackText(result: AgentResult): string {
+  const orderConfirmation = result.meta?.orderConfirmationPresentation;
+
+  if (
+    orderConfirmation?.presentationMode ===
+    "split_order_review_and_confirmation"
+  ) {
+    return orderConfirmation.messages[1].fallbackText;
+  }
+
   const choiceListAction = result.actions.find(
     (action) => action.type === "choice_list",
   );
@@ -2372,6 +2392,9 @@ async function sendAgentCloudResult(input: {
   customerId: string;
   userMessage: string;
   result: AgentResult;
+  forceDryRun?: boolean;
+  interactiveLiveSendAllowedOverride?: boolean;
+  simulateNoProviderCall?: boolean;
 }): Promise<CloudReplyDispatchResult> {
   const dispatchResult = await cloudReplyDispatchService.dispatchAgentReply({
     to: input.to,
@@ -2381,7 +2404,9 @@ async function sendAgentCloudResult(input: {
       input.result.meta?.whatsappInteractivePreview ?? null,
     interactiveSendDecision:
       input.result.meta?.interactiveSendDecision ?? null,
-    forceDryRun: env.whatsappCloudDryRun,
+    forceDryRun: input.forceDryRun ?? env.whatsappCloudDryRun,
+    interactiveLiveSendAllowedOverride: input.interactiveLiveSendAllowedOverride,
+    simulateNoProviderCall: input.simulateNoProviderCall,
   });
 
   logJson({
@@ -2396,6 +2421,64 @@ async function sendAgentCloudResult(input: {
   });
 
   return dispatchResult;
+}
+
+export type CloudAgentDispatchFlowResult = {
+  dispatchResult: CloudReplyDispatchResult;
+  reviewDispatchResult?: CloudReplyDispatchResult;
+  reviewFailureFallbackResult?: CloudReplyDispatchResult;
+  orderConfirmationSplit: boolean;
+};
+
+export async function dispatchAgentResultThroughCloud(input: {
+  to: string;
+  phoneNumberId: string;
+  customerId: string;
+  userMessage: string;
+  result: AgentResult;
+  forceDryRun?: boolean;
+  interactiveLiveSendAllowedOverride?: boolean;
+  simulateNoProviderCall?: boolean;
+}): Promise<CloudAgentDispatchFlowResult> {
+  const orderConfirmationMessages = getOrderConfirmationMessages(input.result);
+
+  if (!orderConfirmationMessages) {
+    return {
+      dispatchResult: await sendAgentCloudResult(input),
+      orderConfirmationSplit: false,
+    };
+  }
+
+  const reviewDispatchResult = await sendAgentCloudResult({
+    ...input,
+    result: buildTextOnlyAgentResult(
+      input.result,
+      orderConfirmationMessages.review.text,
+    ),
+  });
+
+  if (!reviewDispatchResult.ok) {
+    const reviewFailureFallbackResult = await sendAgentCloudResult({
+      ...input,
+      result: buildOrderConfirmationCombinedFallbackResult(input.result),
+    });
+
+    return {
+      dispatchResult: reviewFailureFallbackResult,
+      reviewDispatchResult,
+      reviewFailureFallbackResult,
+      orderConfirmationSplit: true,
+    };
+  }
+
+  return {
+    dispatchResult: await sendAgentCloudResult({
+      ...input,
+      result: buildOrderConfirmationCtaResult(input.result),
+    }),
+    reviewDispatchResult,
+    orderConfirmationSplit: true,
+  };
 }
 
 function getFirstEntryLiveSmokeMessages(result: AgentResult):
@@ -2436,6 +2519,58 @@ function buildFirstEntryTextOnlyResult(
       interactiveSendDecision: undefined,
     },
   };
+}
+
+function getOrderConfirmationMessages(result: AgentResult) {
+  const presentation = result.meta?.orderConfirmationPresentation;
+
+  if (
+    presentation?.presentationMode !==
+      "split_order_review_and_confirmation" ||
+    presentation.messages.length !== 2
+  ) {
+    return undefined;
+  }
+
+  return {
+    review: presentation.messages[0],
+    confirmation: presentation.messages[1],
+  };
+}
+
+function buildTextOnlyAgentResult(result: AgentResult, text: string): AgentResult {
+  return {
+    ...result,
+    reply: text,
+    meta: {
+      ...result.meta,
+      replyUi: undefined,
+      whatsappInteractivePreview: null,
+      interactiveSendDecision: undefined,
+      orderConfirmationPresentation: undefined,
+    },
+  };
+}
+
+function buildOrderConfirmationCtaResult(result: AgentResult): AgentResult {
+  const confirmation =
+    result.meta?.orderConfirmationPresentation?.messages[1];
+
+  return {
+    ...result,
+    reply: confirmation?.text || result.reply,
+  };
+}
+
+function buildOrderConfirmationCombinedFallbackResult(result: AgentResult): AgentResult {
+  const presentation = result.meta?.orderConfirmationPresentation;
+  const reviewText = presentation?.messages[0]?.text || result.reply;
+  const fallbackText = presentation?.messages[1]?.fallbackText;
+  const combinedText = fallbackText
+    ? `${reviewText}\n\n${fallbackText}`
+    : reviewText;
+
+  return buildTextOnlyAgentResult(result, combinedText);
 }
 
 export async function processCloudWebhookBody(
@@ -2888,38 +3023,73 @@ export async function processCloudWebhookBody(
         orderStateSummary: result.meta?.orderStateSummary,
       });
 
-      const sendResult = await sendAgentCloudResult({
+      const dispatchFlow = await dispatchAgentResultThroughCloud({
         to: message.waId,
         phoneNumberId: message.phoneNumberId,
         customerId,
         userMessage: message.text,
         result,
       });
+      const sendResult = dispatchFlow.dispatchResult;
+
+      if (dispatchFlow.orderConfirmationSplit) {
+        logJson({
+          event: "order.confirmation.presentation.sent",
+          waId: maskPhone(message.waId),
+          presentationMode: "split_order_review_and_confirmation",
+          reviewSent: dispatchFlow.reviewDispatchResult?.ok === true,
+          confirmationCtaSent: sendResult.ok,
+          confirmationMode: sendResult.mode,
+          reviewFailureFallbackSent:
+            dispatchFlow.reviewFailureFallbackResult?.ok === true,
+        });
+      }
 
       processResult.handled = true;
       processResult.agentReplyPreview = previewText(result.reply);
       processResult.actionsCount = result.actions.length;
       processResult.sendAttempted = true;
-      processResult.sendSuccess = sendResult.ok;
+      processResult.sendSuccess = Boolean(
+        (dispatchFlow.reviewDispatchResult?.ok ?? true) && sendResult.ok,
+      );
 
-      if (result.meta?.orderStateSummary?.confirmed) {
-        const confirmedOrder = listConfirmedOrders({
-          customerId,
-        })[0];
+      if (
+        result.meta?.orderJustConfirmed &&
+        result.meta.confirmedOrderId &&
+        sendResult.ok
+      ) {
+        const confirmedOrder = getConfirmedOrderById(
+          result.meta.confirmedOrderId,
+        );
 
         if (confirmedOrder) {
-          sendOrderReceiptDocumentForOrder({
-            to: message.waId,
-            phoneNumberId: message.phoneNumberId,
-            order: confirmedOrder,
-          }).catch((error) => {
-            logJson({
-              event: "order_receipt.whatsapp.document_failed",
-              waId: maskPhone(message.waId),
-              errorMessage:
-                error instanceof Error ? error.message : "Unknown error",
+          const receiptConfig = sellerConfigService.getSellerConfig(
+            identity.sellerId,
+          ).receipt;
+
+          if (receiptConfig.enabled && receiptConfig.sendAfterConfirmation) {
+            sendOrderReceiptDocumentForOrder({
+              to: message.waId,
+              phoneNumberId: message.phoneNumberId,
+              order: confirmedOrder,
+            }).catch((error) => {
+              logJson({
+                event: "order_receipt.whatsapp.document_failed",
+                waId: maskPhone(message.waId),
+                errorMessage:
+                  error instanceof Error ? error.message : "Unknown error",
+              });
             });
-          });
+          } else {
+            updateConfirmedOrderReceipt(confirmedOrder.id, {
+              receiptSendStatus: "NOT_REQUESTED",
+            });
+            logJson({
+              event: "order_receipt.skipped_by_seller_config",
+              orderId: confirmedOrder.id,
+              sellerId: identity.sellerId,
+            });
+          }
         }
       }
     } catch (error) {

@@ -3,13 +3,17 @@ import type { RequiredOrderField } from "../config/required-fields.types";
 import type { ProductContext } from "../product-context.types";
 import { dynamicReplyRenderer } from "../reply/dynamic-reply-renderer.service";
 import type { RenderedAgentReply } from "../reply/reply-renderer.types";
+import {
+  calculateOrderTotals,
+  formatOrderMoney,
+} from "./order-pricing.service";
 
 const fieldLabels: Record<string, string> = {
   fullName: "الاسم الكامل",
   phone: "رقم الهاتف",
   city: "المدينة",
   address: "العنوان",
-  productName: "المنتوج",
+  productName: "المنتج",
   variant: "النوع",
   color: "اللون",
   size: "المقاس",
@@ -21,7 +25,7 @@ const summaryLabelOverrides: Record<string, string> = {
   phone: "الهاتف",
   city: "المدينة",
   address: "العنوان",
-  productName: "المنتوج",
+  productName: "المنتج",
   variant: "النوع",
   color: "اللون",
   size: "المقاس",
@@ -121,11 +125,8 @@ function buildPhase2AOrderSummary(input: {
   productContext: ProductContext;
   requiredFields?: RequiredOrderField[];
 }): RenderedAgentReply {
-  const lines: string[] = ["هذا ملخص الطلب ديالك:", ""];
+  const lines: string[] = ["راجع تفاصيل الطلب ديالك قبل ما نأكدوه 👇"];
   const productName = getProductName(input.productContext);
-  const price = getPriceText(input.productContext);
-  const delivery = buildDeliveryText(input.productContext);
-  const payment = buildPaymentText(input.productContext);
   const fields = input.requiredFields?.length
     ? [...input.requiredFields]
     : [
@@ -138,41 +139,78 @@ function buildPhase2AOrderSummary(input: {
         toRequiredField("address", 6),
       ];
 
-  if (productName) {
-    lines.push(`المنتج: ${productName}`);
-  }
+  const values = input.collected as Record<string, unknown>;
+  const fieldByKey = new Map(fields.map((field) => [field.key, field]));
+  const appendSection = (title: string, keys: string[]) => {
+    const sectionLines = keys.flatMap((key) => {
+      const value = key === "productName" ? productName : values[key];
+      const field = fieldByKey.get(key);
 
-  for (const field of fields) {
-    const value = (input.collected as Record<string, unknown>)[field.key];
+      if (!hasValue(value)) {
+        return [];
+      }
 
-    if (hasValue(value)) {
-      lines.push(`${summaryLabelOverrides[field.key] || field.label}: ${formatValue(value)}`);
+      return [`${summaryLabelOverrides[key] || field?.label || key}: ${formatValue(value)}`];
+    });
+
+    if (sectionLines.length) {
+      lines.push("", `*${title}*`, ...sectionLines);
     }
+  };
+
+  appendSection("الطلب", ["productName", "variant", "size", "color", "quantity"]);
+  appendSection("معلومات التوصيل", ["fullName", "phone", "city", "address"]);
+
+  const totals = calculateOrderTotals({
+    productContext: input.productContext,
+    quantity: input.collected.quantity,
+  });
+
+  if (totals.unitPrice > 0) {
+    lines.push(
+      "",
+      "*الحساب*",
+      `ثمن الوحدة: ${formatOrderMoney(totals.unitPrice)} ${totals.currency}`,
+      `ثمن المنتجات: ${formatOrderMoney(totals.subtotal)} ${totals.currency}`,
+      `مصاريف التوصيل: ${totals.deliveryPriceLabel}`,
+      totals.deliveryPriceKnown
+        ? `المجموع: ${formatOrderMoney(totals.total)} ${totals.currency}`
+        : "المجموع النهائي: يتحدد بعد تأكيد مصاريف التوصيل",
+    );
   }
 
-  if (price) {
-    lines.push("", `الثمن: ${price}`);
-  }
-
-  if (delivery) {
-    lines.push(`التوصيل: ${delivery}`);
-  }
-
-  if (payment) {
-    lines.push(`الدفع: ${payment}`);
-  }
-
-  lines.push(
-    "",
-    "الطلب واجد للمراجعة ✅",
-    "مرحلة التأكيد النهائي غادي تتفعل في المرحلة الجاية.",
-  );
+  const reviewText = lines.join("\n");
+  const ctaText = "واش المعلومات كلها صحيحة؟";
+  const fallbackText =
+    'كتب "نعم" باش نأكد الطلب، أو "تعديل" باش تبدل شي معلومة.';
+  const buttons = [
+    { id: "order:confirm" as const, label: "نأكد الطلب" },
+    { id: "order:edit" as const, label: "نبدل شي حاجة" },
+  ];
 
   return {
-    text: lines.join("\n"),
+    text: reviewText,
     ui: {
-      kind: "none",
+      kind: "buttons",
       purpose: "confirmation",
+      title: "تأكيد الطلب",
+      body: ctaText,
+      options: buttons.map((button) => ({
+        ...button,
+        value: button.id === "order:confirm" ? "نعم" : "تعديل",
+      })),
+    },
+    presentation: {
+      presentationMode: "split_order_review_and_confirmation",
+      messages: [
+        { kind: "text", text: reviewText },
+        {
+          kind: "interactive_buttons",
+          text: ctaText,
+          fallbackText,
+          buttons,
+        },
+      ],
     },
   };
 }

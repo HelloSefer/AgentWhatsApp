@@ -24,4 +24,21 @@ export type AgentReplyUiHint = {
 export type RenderedAgentReply = {
   text: string;
   ui?: AgentReplyUiHint;
+  presentation?: OrderConfirmationPresentation;
+};
+
+export type OrderConfirmationPresentation = {
+  presentationMode: "split_order_review_and_confirmation";
+  messages: [
+    { kind: "text"; text: string },
+    {
+      kind: "interactive_buttons";
+      text: string;
+      fallbackText: string;
+      buttons: Array<{
+        id: "order:confirm" | "order:edit";
+        label: string;
+      }>;
+    },
+  ];
 };

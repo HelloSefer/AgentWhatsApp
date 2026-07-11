@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { OrderEntities } from "../agent-brain.types";
 import type { ProductContext } from "../product-context.types";
+import { calculateOrderTotals } from "./order-pricing.service";
 
 export const orderStatuses = [
   "CONFIRMED",
@@ -12,14 +13,22 @@ export const orderStatuses = [
 ] as const;
 
 export type OrderStatus = (typeof orderStatuses)[number];
-export type OrderReceiptSendStatus = "SENT" | "FAILED" | "SKIPPED";
+export type OrderReceiptSendStatus =
+  | "NOT_REQUESTED"
+  | "PENDING"
+  | "SENT"
+  | "FAILED"
+  | "SKIPPED";
 
 export interface ConfirmedOrder {
   id: string;
+  publicOrderCode: string;
   customerId: string;
+  orderCycleId?: string;
   sellerId?: string;
   customerPhone?: string;
   conversationKey?: string;
+  productId?: string;
   productName: string;
   fullName: string;
   phone: string;
@@ -28,12 +37,20 @@ export interface ConfirmedOrder {
   size: string;
   color: string;
   quantity: number;
+  unitPrice: number;
+  subtotal: number;
+  deliveryPrice: number;
+  total: number;
+  currency: string;
   status: OrderStatus;
+  source: "agent" | "whatsapp_cloud";
   createdAt: string;
+  updatedAt: string;
   receiptPdfPath?: string;
   receiptSentAt?: string;
   receiptMediaId?: string;
   receiptSendStatus?: OrderReceiptSendStatus;
+  receiptError?: string;
   receiptLocalFileDeleted?: boolean;
   receiptLocalFileDeletedAt?: string;
   receiptLocalFileDeleteError?: string;
@@ -41,11 +58,13 @@ export interface ConfirmedOrder {
 
 type SaveConfirmedOrderInput = {
   customerId: string;
+  orderCycleId?: string;
   sellerId?: string;
   customerPhone?: string;
   conversationKey?: string;
   productContext: ProductContext;
   collected: OrderEntities;
+  source?: "agent" | "whatsapp_cloud";
 };
 
 type ListConfirmedOrdersFilters = {
@@ -55,7 +74,40 @@ type ListConfirmedOrdersFilters = {
   city?: string;
 };
 
-const confirmedOrdersByCustomerId = new Map<string, ConfirmedOrder>();
+const confirmedOrdersById = new Map<string, ConfirmedOrder>();
+const confirmedOrderIdsByOrderKey = new Map<string, string>();
+
+function getOrderKey(customerId: string, orderCycleId?: string): string {
+  return `${customerId}:${orderCycleId?.trim() || "default"}`;
+}
+
+const PUBLIC_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+function generatePublicOrderCode(): string {
+  const existingCodes = new Set(
+    Array.from(confirmedOrdersById.values()).map(
+      (order) => order.publicOrderCode,
+    ),
+  );
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const raw = randomUUID().replace(/-/g, "").toUpperCase();
+    let code = "";
+
+    for (let index = 0; index < 8; index += 1) {
+      const value = Number.parseInt(raw.slice(index * 2, index * 2 + 2), 16);
+      code += PUBLIC_CODE_ALPHABET[value % PUBLIC_CODE_ALPHABET.length];
+    }
+
+    const formatted = `${code.slice(0, 4)}-${code.slice(4)}`;
+
+    if (!existingCodes.has(formatted)) {
+      return formatted;
+    }
+  }
+
+  throw new Error("Unable to generate a unique public order code");
+}
 
 function getTextValue(value: string | undefined): string {
   return value?.trim() || "";
@@ -81,18 +133,30 @@ export function normalizeOrderStatus(value: string): OrderStatus {
 }
 
 export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrder {
-  const existingOrder = confirmedOrdersByCustomerId.get(input.customerId);
+  const orderKey = getOrderKey(input.customerId, input.orderCycleId);
+  const existingOrderId = confirmedOrderIdsByOrderKey.get(orderKey);
+  const existingOrder = existingOrderId
+    ? confirmedOrdersById.get(existingOrderId)
+    : undefined;
 
   if (existingOrder) {
     return existingOrder;
   }
 
+  const quantity = input.collected.quantity ?? 1;
+  const totals = calculateOrderTotals({
+    productContext: input.productContext,
+    quantity,
+  });
   const order: ConfirmedOrder = {
     id: randomUUID(),
+    publicOrderCode: generatePublicOrderCode(),
     customerId: input.customerId,
+    orderCycleId: input.orderCycleId,
     sellerId: input.sellerId,
     customerPhone: input.customerPhone,
     conversationKey: input.conversationKey,
+    productId: input.productContext.productId,
     productName: input.productContext.productName,
     fullName: getTextValue(input.collected.fullName),
     phone: getTextValue(input.collected.phone),
@@ -100,20 +164,46 @@ export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrd
     address: getTextValue(input.collected.address),
     size: getTextValue(input.collected.size),
     color: getTextValue(input.collected.color),
-    quantity: input.collected.quantity ?? 1,
+    quantity,
+    unitPrice: totals.unitPrice,
+    subtotal: totals.subtotal,
+    deliveryPrice: totals.deliveryPrice,
+    total: totals.total,
+    currency: totals.currency,
     status: "CONFIRMED",
+    source: input.source || "agent",
+    receiptSendStatus: "NOT_REQUESTED",
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 
-  confirmedOrdersByCustomerId.set(input.customerId, order);
+  confirmedOrdersById.set(order.id, order);
+  confirmedOrderIdsByOrderKey.set(orderKey, order.id);
 
   return order;
+}
+
+export function getConfirmedOrderByCustomerId(
+  customerId: string,
+  orderCycleId?: string,
+): ConfirmedOrder | undefined {
+  if (orderCycleId) {
+    const orderId = confirmedOrderIdsByOrderKey.get(
+      getOrderKey(customerId, orderCycleId),
+    );
+
+    return orderId ? confirmedOrdersById.get(orderId) : undefined;
+  }
+
+  return Array.from(confirmedOrdersById.values())
+    .filter((order) => order.customerId === customerId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
 export function listConfirmedOrders(
   filters: ListConfirmedOrdersFilters = {},
 ): ConfirmedOrder[] {
-  return Array.from(confirmedOrdersByCustomerId.values()).filter((order) => {
+  return Array.from(confirmedOrdersById.values()).filter((order) => {
     if (filters.status && order.status !== filters.status) {
       return false;
     }
@@ -127,9 +217,7 @@ export function listConfirmedOrders(
 }
 
 export function getConfirmedOrderById(id: string): ConfirmedOrder | undefined {
-  return Array.from(confirmedOrdersByCustomerId.values()).find(
-    (order) => order.id === id,
-  );
+  return confirmedOrdersById.get(id);
 }
 
 export function updateConfirmedOrderStatus(
@@ -143,6 +231,7 @@ export function updateConfirmedOrderStatus(
   }
 
   order.status = status;
+  order.updatedAt = new Date().toISOString();
 
   return order;
 }
@@ -154,6 +243,7 @@ export function updateConfirmedOrderReceipt(
     receiptSentAt?: string;
     receiptMediaId?: string;
     receiptSendStatus?: OrderReceiptSendStatus;
+    receiptError?: string;
     receiptLocalFileDeleted?: boolean;
     receiptLocalFileDeletedAt?: string;
     receiptLocalFileDeleteError?: string;
@@ -166,6 +256,7 @@ export function updateConfirmedOrderReceipt(
   }
 
   Object.assign(order, receipt);
+  order.updatedAt = new Date().toISOString();
 
   return order;
 }

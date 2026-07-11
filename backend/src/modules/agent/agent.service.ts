@@ -515,6 +515,7 @@ function toAgentProductContext(input: {
 
   return {
     businessName: input.sellerConfig.businessName,
+    productId: input.configProductContext.productId,
     productName: input.configProductContext.name,
     description: input.configProductContext.description,
     price: String(input.configProductContext.price),
@@ -525,6 +526,12 @@ function toAgentProductContext(input: {
     availableColors: colorGroup?.options,
     availableSizes: sizeGroup?.options,
     deliveryInfo: input.sellerConfig.delivery.text || undefined,
+    deliveryPrice:
+      input.sellerConfig.deliveryPolicy.deliveryPrice ??
+      input.sellerConfig.delivery.deliveryPrice,
+    deliveryIsFree:
+      input.sellerConfig.deliveryPolicy.isFree === true ||
+      input.sellerConfig.delivery.free === true,
     paymentMethods: input.sellerConfig.delivery.paymentText
       ? [input.sellerConfig.delivery.paymentText]
       : undefined,
@@ -617,6 +624,64 @@ function mightBeOrderMessage(message: string): boolean {
         "مقاس",
       ]))
   );
+}
+
+function isExplicitOrderStartRequest(message: string): boolean {
+  const hasWantCue = includesAny(message, [
+    "بغيت",
+    "باغي",
+    "باغية",
+    "عافاك",
+    "bghit",
+    "brayt",
+    " بغيت ",
+  ]);
+  const hasOrderCue = includesAny(message, [
+    "نكوموندي",
+    "نكومندي",
+    "نكوماند",
+    "نكوموند",
+    "كومند",
+    "كوموند",
+    "كوموندي",
+    "الطلب",
+    "commande",
+    "commander",
+    "order",
+    "ncommande",
+    "ncommandi",
+    "ncommander",
+    "nkomandi",
+  ]);
+
+  return hasWantCue && hasOrderCue || includesAny(message, [
+    "بغيت نكوموندي",
+    "بغيت نكومندي",
+    "بغيت نكوماند",
+    "بغيت نكوموند",
+    "بغيت كوموند",
+    "بغيت الطلب",
+    "دير ليا الطلب",
+    "وجد ليا الطلب",
+    "صوب ليا الطلب",
+    "صايب ليا الطلب",
+    "تصوب لي كومند",
+    "تصوب لي كوموند",
+    "تقدر تصوب لي كومند ديالي",
+    "واش تقدر تصوب لي كومند ديالي",
+    "اك تقد تصوب لي كومند ديالي",
+    "اقدر تصوب لي كومند ديالي",
+    "bghit ncommande",
+    "bghit ncommandi",
+    "bghit ncommander",
+    "bghit nkomandi",
+    "bghit commande",
+    "bghit order",
+    "dir lia commande",
+    "dir lia order",
+    "t9dr tsawb lia commande",
+    "tsawb lia commande dyali",
+  ]);
 }
 
 function shouldUseSmartRouterBeforeDirect(message: string): boolean {
@@ -967,6 +1032,7 @@ async function getOrderStateSummary(
     );
 
     return {
+      orderCycleId: session.orderState.orderCycleId,
       isComplete: session.orderState.isComplete,
       awaitingConfirmation: session.orderState.awaitingConfirmation,
       confirmed: session.orderState.confirmed,
@@ -1010,6 +1076,10 @@ async function buildOrderResultFromRouter(input: {
         source: "ai_router",
         meta: {
           replyUi: orderResult.replyUi,
+          orderConfirmationPresentation: orderResult.replyPresentation,
+          orderJustConfirmed: orderResult.orderJustConfirmed,
+          confirmedOrderId: orderResult.confirmedOrderId,
+          publicOrderCode: orderResult.publicOrderCode,
         },
       };
     }
@@ -1347,6 +1417,10 @@ async function buildOrderResultIfHandled(
       source: "direct",
       meta: {
         replyUi: orderResult.replyUi,
+        orderConfirmationPresentation: orderResult.replyPresentation,
+        orderJustConfirmed: orderResult.orderJustConfirmed,
+        confirmedOrderId: orderResult.confirmedOrderId,
+        publicOrderCode: orderResult.publicOrderCode,
       },
     };
   } catch (error) {
@@ -1377,20 +1451,32 @@ export async function generateAgentResult(
 
   await appendMessageToMemory(activeOptions, "customer", userMessage);
 
-  const softInfoSelectionResult = await buildSoftInfoSelectionResultIfHandled({
-    userMessage,
-    productContext: runtimeProductContext,
-    options: activeOptions,
-    infoMenuDisplayMode,
-  });
   const productInfoRequest = resolveProductInfoRequest(userMessage);
-  const orderRoutingMessage = normalizeInfoOrderMessage(userMessage);
+  const orderRoutingMessage = isExplicitOrderStartRequest(userMessage)
+    ? "first_entry:order_now"
+    : normalizeInfoOrderMessage(userMessage);
 
   if (isProductInfoContinueOrder(userMessage)) {
     await clearProductInfoPendingSelection(activeOptions);
   }
 
+  const orderStateFirstResult = await buildOrderResultIfHandled(
+    orderRoutingMessage,
+    runtimeProductContext,
+    activeOptions,
+    requiredFields,
+  );
+  const softInfoSelectionResult = orderStateFirstResult
+    ? null
+    : await buildSoftInfoSelectionResultIfHandled({
+        userMessage,
+        productContext: runtimeProductContext,
+        options: activeOptions,
+        infoMenuDisplayMode,
+      });
+
   const productInfoReply =
+    !orderStateFirstResult &&
     !softInfoSelectionResult &&
     productInfoRequest &&
     productInfoRequest.topic !== "order_now"
@@ -1403,7 +1489,11 @@ export async function generateAgentResult(
         })
       : undefined;
 
-  if (productInfoRequest && productInfoRequest.topic !== "order_now") {
+  if (
+    !orderStateFirstResult &&
+    productInfoRequest &&
+    productInfoRequest.topic !== "order_now"
+  ) {
     const selectedSize = matchAvailableInfoSize(
       productInfoRequest.requestedSize,
       runtimeProductContext,
@@ -1440,6 +1530,7 @@ export async function generateAgentResult(
   }
 
   const result =
+    orderStateFirstResult ||
     softInfoSelectionResult ||
     (productInfoReply
       ? {
@@ -1448,13 +1539,7 @@ export async function generateAgentResult(
           source: "direct" as const,
           meta: { replyUi: productInfoReply.ui },
         }
-      : (await buildOrderResultIfHandled(
-          orderRoutingMessage,
-          runtimeProductContext,
-          activeOptions,
-          requiredFields,
-        )) ||
-        (await buildAgentResult(
+      : (await buildAgentResult(
           orderRoutingMessage,
           runtimeProductContext,
           activeOptions,

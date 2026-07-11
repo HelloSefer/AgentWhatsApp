@@ -2,12 +2,16 @@ import type { ProductImage } from "./product-context.types";
 import type { OrderEntities } from "./agent-brain.types";
 import type { AgentIdentity } from "./identity/agent-identity.types";
 import type { InteractiveSendDecision } from "./reply/interactive-send-decision.types";
-import type { AgentReplyUiHint } from "./reply/reply-renderer.types";
+import type {
+  AgentReplyUiHint,
+  OrderConfirmationPresentation,
+} from "./reply/reply-renderer.types";
 import type { WhatsAppInteractivePreview } from "./reply/whatsapp-interactive.types";
 
 export type AgentActionType = "send_product_images" | "choice_list";
 
 export interface AgentOrderStateSummary {
+  orderCycleId?: string;
   isComplete: boolean;
   awaitingConfirmation: boolean;
   confirmed: boolean;
@@ -73,6 +77,10 @@ export interface AgentResult {
     replyUi?: AgentReplyUiHint;
     whatsappInteractivePreview?: WhatsAppInteractivePreview | null;
     interactiveSendDecision?: InteractiveSendDecision;
+    orderConfirmationPresentation?: OrderConfirmationPresentation;
+    orderJustConfirmed?: boolean;
+    confirmedOrderId?: string;
+    publicOrderCode?: string;
     firstEntryLiveSmoke?: {
       handledBy: "first_entry_live_smoke" | "first_entry_click_preview_blocked";
       readinessReady?: boolean;

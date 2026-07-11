@@ -118,9 +118,11 @@ export async function testSendOrderReceipt(req: Request, res: Response) {
 
 export async function downloadOrderReceipt(req: Request, res: Response) {
   const orderId = typeof req.params.orderId === "string" ? req.params.orderId.trim() : "";
-  const pdfPath = getOrderReceiptPdfPath(orderId);
   const order = getConfirmedOrderById(orderId);
   const receiptRecord = getOrderReceiptRecord(orderId);
+  const pdfPath =
+    receiptRecord?.pdfPath ||
+    getOrderReceiptPdfPath(orderId, order?.publicOrderCode);
 
   if (!(await exists(pdfPath))) {
     return res.status(404).json({

@@ -979,6 +979,53 @@ function isLowSignalUnknown(message: string): boolean {
   );
 }
 
+function isDeliveryTimingQuestion(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+  const hasTimingCue = [
+    "فاش",
+    "امتى",
+    "متى",
+    "وقتاش",
+    "fach",
+    "imta",
+    "w9tach",
+  ].some((cue) => normalizedMessage.includes(normalizeText(cue)));
+  const hasArrivalCue = [
+    "غادي",
+    "غدي",
+    "يوصل",
+    "وصل",
+    "يصل",
+    "ywsel",
+    "ywsal",
+    "aywsel",
+  ].some((cue) => normalizedMessage.includes(normalizeText(cue)));
+
+  return (
+    (hasTimingCue && hasArrivalCue) ||
+    includesAny(message, [
+    "فاش غادي يوصل",
+    "فاش غادي وصل",
+    "فاش غدي يوصل",
+    "فاش غدي وصل",
+    "امتى يوصل",
+    "إمتى يوصل",
+    "وقتاش يوصل",
+    "شحال كياخد التوصيل",
+    "شحال ديال الوقت",
+    "مدة التوصيل",
+    "متى يصل الطلب",
+    "fach ghadi ywsel",
+    "fach ghadi ywsal",
+    "fach aywsel",
+    "imta ywsel",
+    "w9tach ywsel",
+    "ch7al kayakhod livraison",
+    "modat livraison",
+    ])
+  );
+}
+
 function isPersonaQuestion(message: string): boolean {
   return includesAny(message, [
     "شنو سميتك",
@@ -1106,6 +1153,20 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
     ...preExtracted.entities,
   };
   const hasQuestion = hasQuestionCue(message);
+
+  if (isDeliveryTimingQuestion(message)) {
+    return {
+      intent: "delivery_question",
+      subIntent: "delivery_info",
+      language,
+      customerMood: "interested",
+      salesStage: "asking_info",
+      salesOpportunity: true,
+      shouldUseDirectAnswer: true,
+      shouldContinueOrderFlow: false,
+      confidence: 0.9,
+    };
+  }
 
   if (isLowSignalUnknown(message)) {
     return {
@@ -1695,10 +1756,30 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
       "توصيل",
       "توصلي",
       "توصلني",
+      "توصل",
+      "يوصل",
+      "يصل",
+      "فاش غادي يوصل",
+      "فاش غدي وصل",
+      "امتى يوصل",
+      "إمتى يوصل",
+      "وقتاش يوصل",
+      "شحال كياخد التوصيل",
+      "شحال ديال الوقت",
+      "مدة التوصيل",
+      "متى يصل الطلب",
       "livraison",
       "delivery",
+      "fach ghadi ywsel",
+      "fach ghadi ywsal",
+      "fach aywsel",
+      "imta ywsel",
+      "w9tach ywsel",
+      "ch7al kayakhod livraison",
+      "modat livraison",
       "مجاني",
-    ])
+    ]) ||
+      isDeliveryTimingQuestion(message)
   ) {
     const isDeliveryCost = includesAny(message, [
       "شحال",

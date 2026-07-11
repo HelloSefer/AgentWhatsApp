@@ -22,11 +22,15 @@ type AppendConversationMessageInput = SessionIdentity & {
 };
 
 type UpdateConversationOrderStateInput = SessionIdentity & {
+  orderCycleId?: string;
   collected?: Partial<OrderEntities>;
+  replaceCollected?: boolean;
   missingFields?: string[];
   isComplete?: boolean;
   awaitingConfirmation?: boolean;
   confirmed?: boolean;
+  editField?: ConversationSession["orderState"]["editField"] | null;
+  clearProductInfo?: boolean;
 };
 
 type UpdateConversationProductInfoStateInput = SessionIdentity & {
@@ -141,6 +145,7 @@ export function createEmptySession(input: SessionIdentity): ConversationSession 
     productId: identity.productId,
     messages: [],
     orderState: {
+      orderCycleId: undefined,
       collected: {},
       missingFields: [],
       isComplete: false,
@@ -253,17 +258,28 @@ export async function updateConversationOrderState(
 
   session.orderState = {
     ...session.orderState,
-    collected: {
-      ...session.orderState.collected,
-      ...(input.collected || {}),
-    },
+    ...(input.orderCycleId ? { orderCycleId: input.orderCycleId } : {}),
+    collected: input.replaceCollected
+      ? { ...(input.collected || {}) }
+      : {
+          ...session.orderState.collected,
+          ...(input.collected || {}),
+        },
     missingFields: input.missingFields ?? session.orderState.missingFields,
     isComplete: input.isComplete ?? session.orderState.isComplete,
     awaitingConfirmation:
       input.awaitingConfirmation ?? session.orderState.awaitingConfirmation ?? false,
     confirmed: input.confirmed ?? session.orderState.confirmed ?? false,
+    editField:
+      input.editField === null
+        ? undefined
+        : input.editField ?? session.orderState.editField,
     lastUpdatedAt: new Date().toISOString(),
   };
+
+  if (input.clearProductInfo) {
+    session.productInfo = undefined;
+  }
 
   await saveConversationSession(session);
 

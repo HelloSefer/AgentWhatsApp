@@ -77,6 +77,7 @@ export const demoSellerConfigs: SellerConfig[] = [
     },
     receipt: {
       enabled: true,
+      sendAfterConfirmation: true,
       showLogo: true,
       footerText: "شكراً على ثقتك.",
     },
@@ -157,6 +158,7 @@ export const demoSellerConfigs: SellerConfig[] = [
     },
     receipt: {
       enabled: true,
+      sendAfterConfirmation: true,
       showLogo: true,
       footerText: "شكراً على ثقتك.",
     },
@@ -227,6 +229,7 @@ export const demoSellerConfigs: SellerConfig[] = [
     },
     receipt: {
       enabled: false,
+      sendAfterConfirmation: false,
     },
     ai: {
       mode: "direct",
