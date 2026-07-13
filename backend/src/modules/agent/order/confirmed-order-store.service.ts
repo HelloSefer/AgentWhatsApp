@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { OrderEntities } from "../agent-brain.types";
 import type { ProductContext } from "../product-context.types";
+import { productContextService } from "../config/product-context.service";
+import { sellerConfigService } from "../config/seller-config.service";
 import { calculateOrderTotals } from "./order-pricing.service";
 
 export const orderStatuses = [
@@ -20,11 +22,35 @@ export type OrderReceiptSendStatus =
   | "FAILED"
   | "SKIPPED";
 
+export type ReceiptBrandingSnapshot = {
+  storeName: string;
+  slogan?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  accentColor?: string;
+  phone?: string;
+  whatsapp?: string;
+  email?: string;
+  website?: string;
+  address?: string;
+  instagram?: string;
+  facebook?: string;
+  tiktok?: string;
+  footerMessage?: string;
+  paymentMethodLabel?: string;
+};
+
+export type ReceiptProductSnapshot = {
+  imageRef?: string;
+  attributes: Array<{ label: string; value: string }>;
+};
+
 export interface ConfirmedOrder {
   id: string;
   publicOrderCode: string;
   customerId: string;
-  orderCycleId?: string;
+  orderCycleId: string;
   sellerId?: string;
   customerPhone?: string;
   conversationKey?: string;
@@ -40,10 +66,12 @@ export interface ConfirmedOrder {
   unitPrice: number;
   subtotal: number;
   deliveryPrice: number;
+  deliveryPriceKnown: boolean;
   total: number;
   currency: string;
   status: OrderStatus;
   source: "agent" | "whatsapp_cloud";
+  confirmedAt?: string;
   createdAt: string;
   updatedAt: string;
   receiptPdfPath?: string;
@@ -54,6 +82,8 @@ export interface ConfirmedOrder {
   receiptLocalFileDeleted?: boolean;
   receiptLocalFileDeletedAt?: string;
   receiptLocalFileDeleteError?: string;
+  receiptBranding?: ReceiptBrandingSnapshot;
+  receiptProduct?: ReceiptProductSnapshot;
 }
 
 type SaveConfirmedOrderInput = {
@@ -77,8 +107,8 @@ type ListConfirmedOrdersFilters = {
 const confirmedOrdersById = new Map<string, ConfirmedOrder>();
 const confirmedOrderIdsByOrderKey = new Map<string, string>();
 
-function getOrderKey(customerId: string, orderCycleId?: string): string {
-  return `${customerId}:${orderCycleId?.trim() || "default"}`;
+function getOrderKey(customerId: string, orderCycleId: string): string {
+  return `${customerId}:${orderCycleId}`;
 }
 
 const PUBLIC_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -113,6 +143,79 @@ function getTextValue(value: string | undefined): string {
   return value?.trim() || "";
 }
 
+function getReceiptAttributeLabel(key: string, configuredLabel: string): string {
+  const standardLabels: Record<string, string> = {
+    size: "Taille",
+    color: "Couleur",
+    variant: "Variante",
+    model: "Modèle",
+    perfume: "Parfum",
+    scent: "Parfum",
+    capacity: "Capacité",
+    volume: "Volume",
+    format: "Format",
+  };
+
+  return standardLabels[key.trim().toLowerCase()] || configuredLabel;
+}
+
+function buildReceiptSnapshots(input: SaveConfirmedOrderInput): {
+  branding: ReceiptBrandingSnapshot;
+  product: ReceiptProductSnapshot;
+} {
+  const sellerConfig = input.sellerId
+    ? sellerConfigService.getSellerConfig(input.sellerId)
+    : undefined;
+  const branding = sellerConfig?.receipt.branding;
+  const configProduct = input.productContext.productId
+    ? productContextService.getProductContextById(input.productContext.productId)
+    : undefined;
+  const configuredOptions = configProduct?.optionGroups || [];
+  const collected = input.collected as Record<string, unknown>;
+  const attributes = configuredOptions.flatMap((option) => {
+    const value = collected[option.key];
+
+    return typeof value === "string" && value.trim()
+      ? [{ label: getReceiptAttributeLabel(option.key, option.label), value: value.trim() }]
+      : typeof value === "number" && Number.isFinite(value)
+        ? [{ label: getReceiptAttributeLabel(option.key, option.label), value: String(value) }]
+        : [];
+  });
+
+  if (!attributes.some((attribute) => attribute.label === "Taille") && input.collected.size) {
+    attributes.push({ label: "Taille", value: input.collected.size });
+  }
+
+  if (!attributes.some((attribute) => attribute.label === "Couleur") && input.collected.color) {
+    attributes.push({ label: "Couleur", value: input.collected.color });
+  }
+
+  return {
+    branding: {
+      storeName: branding?.storeName || sellerConfig?.businessName || "Boutique",
+      slogan: branding?.slogan,
+      logoUrl: branding?.logoUrl,
+      primaryColor: branding?.primaryColor,
+      secondaryColor: branding?.secondaryColor,
+      accentColor: branding?.accentColor,
+      phone: branding?.phone,
+      whatsapp: branding?.whatsapp,
+      email: branding?.email,
+      website: branding?.website,
+      address: branding?.address,
+      instagram: branding?.instagram,
+      facebook: branding?.facebook,
+      tiktok: branding?.tiktok,
+      footerMessage: sellerConfig?.receipt.footerText,
+      paymentMethodLabel: sellerConfig?.receipt.paymentMethodLabel,
+    },
+    product: {
+      imageRef: configProduct?.images.find(Boolean),
+      attributes,
+    },
+  };
+}
+
 function matchesOptionalFilter(value: string, filter: string | undefined): boolean {
   if (!filter) {
     return true;
@@ -133,7 +236,17 @@ export function normalizeOrderStatus(value: string): OrderStatus {
 }
 
 export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrder {
-  const orderKey = getOrderKey(input.customerId, input.orderCycleId);
+  const orderCycleId = input.orderCycleId?.trim() || randomUUID();
+
+  if (!input.orderCycleId?.trim()) {
+    console.warn(JSON.stringify({
+      event: "order.confirmed.missing_order_cycle_id_generated",
+      customerId: input.customerId,
+      orderCycleId,
+    }));
+  }
+
+  const orderKey = getOrderKey(input.customerId, orderCycleId);
   const existingOrderId = confirmedOrderIdsByOrderKey.get(orderKey);
   const existingOrder = existingOrderId
     ? confirmedOrdersById.get(existingOrderId)
@@ -148,11 +261,13 @@ export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrd
     productContext: input.productContext,
     quantity,
   });
+  const receiptSnapshots = buildReceiptSnapshots(input);
+  const confirmedAt = new Date().toISOString();
   const order: ConfirmedOrder = {
     id: randomUUID(),
     publicOrderCode: generatePublicOrderCode(),
     customerId: input.customerId,
-    orderCycleId: input.orderCycleId,
+    orderCycleId,
     sellerId: input.sellerId,
     customerPhone: input.customerPhone,
     conversationKey: input.conversationKey,
@@ -168,13 +283,17 @@ export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrd
     unitPrice: totals.unitPrice,
     subtotal: totals.subtotal,
     deliveryPrice: totals.deliveryPrice,
+    deliveryPriceKnown: totals.deliveryPriceKnown,
     total: totals.total,
     currency: totals.currency,
     status: "CONFIRMED",
     source: input.source || "agent",
+    confirmedAt,
     receiptSendStatus: "NOT_REQUESTED",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    receiptBranding: receiptSnapshots.branding,
+    receiptProduct: receiptSnapshots.product,
+    createdAt: confirmedAt,
+    updatedAt: confirmedAt,
   };
 
   confirmedOrdersById.set(order.id, order);

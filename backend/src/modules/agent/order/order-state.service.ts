@@ -6,6 +6,7 @@ import { fastAnalyzeCustomerMessage } from "../fast-intent-analyzer.service";
 import type { ProductContext } from "../product-context.types";
 import {
   isValidOrderField,
+  isValidCity,
   recordInvalidCandidateRejected,
   recordInvalidExistingCleared,
   recordOrderConfirmationBlockedInvalidFields,
@@ -983,6 +984,64 @@ function findCity(message: string): string | undefined {
   )?.city;
 }
 
+function findContextualCity(message: string): string | undefined {
+  const knownCity = findCity(message);
+
+  if (knownCity) {
+    return knownCity;
+  }
+
+  const normalizedMessage = normalizeText(message);
+  const labeledCityMatch = message.match(
+    /^(?:المدينة|مدينه|city|ville)\s*(?:هي|هو|:)?\s*(.+)$/i,
+  );
+  const labeledCity = labeledCityMatch?.[1]
+    ? normalizeText(labeledCityMatch[1])
+    : undefined;
+  const rawCandidate = (
+    labeledCityMatch?.[1] || message
+  )
+    .replace(/^(?:في|ف|لل|الى|إلى)\s+/i, "")
+    .replace(/[؟?!،,.;:]+$/g, "")
+    .trim();
+  const candidate = (labeledCity || normalizedMessage)
+    .replace(/^(?:في|ف|لل|الى|إلى)\s+/i, "")
+    .trim();
+
+  if (!candidate || candidate.length < 2 || candidate.length > 80) {
+    return undefined;
+  }
+
+  if (
+    /[؟?!]/.test(message) ||
+    includesAny(candidate, [
+      "شنو",
+      "واش",
+      "اش",
+      "فين",
+      "علاش",
+      "كيفاش",
+      "العنوان",
+      "address",
+      "adresse",
+      "اللون",
+      "لون",
+      "المقاس",
+      "قياس",
+      "الكمية",
+      "quantity",
+    ]) ||
+    findColor(candidate) ||
+    findSize(candidate) ||
+    isQuantityOnlyMessage(candidate) ||
+    !isValidCity(candidate)
+  ) {
+    return undefined;
+  }
+
+  return rawCandidate || candidate;
+}
+
 function findColor(message: string): string | undefined {
   const normalizedMessage = normalizeText(message);
   const normalizedCompactMessage = normalizedMessage.replace(/\s+/g, "");
@@ -1065,6 +1124,8 @@ function findQuantity(message: string): number | undefined {
       "wahed",
       "wahd",
       "واحدة",
+      "واحده",
+      "واحداة",
       "وحدة",
       "واحد",
     ])
@@ -1095,6 +1156,8 @@ function shouldCollectOptionalQuantity(message: string): boolean {
         "wahed",
         "wahd",
         "واحدة",
+        "واحده",
+        "واحداة",
         "وحدة",
         "واحد",
         "jouj",
@@ -1198,7 +1261,7 @@ function stripKnownOrderTokensFromAddress(text: string): string {
   return cleaned
     .replace(/(^|\s)(3[6-9]|4[0-5])(?=\s|$)/g, " ")
     .replace(
-      /(^|\s)(wa7da|wahda|w7da|wahed|wahd|واحدة|وحدة|واحد|jouj|jooj|جوج|زوج)(?=\s|$)/g,
+      /(^|\s)(wa7da|wahda|w7da|wahed|wahd|واحدة|واحده|واحداة|وحدة|واحد|jouj|jooj|جوج|زوج)(?=\s|$)/g,
       " ",
     )
     .replace(/\s+/g, " ")
@@ -1339,6 +1402,29 @@ function isSimpleArabicName(message: string): boolean {
   );
 }
 
+function isQuantityOnlyMessage(message: string): boolean {
+  const normalizedMessage = normalizeText(message);
+
+  return [
+    "1",
+    "واحدة",
+    "واحده",
+    "واحداة",
+    "وحدة",
+    "واحد",
+    "2",
+    "جوج",
+    "زوج",
+    "jouj",
+    "jooj",
+    "wa7da",
+    "wahda",
+    "w7da",
+    "wahed",
+    "wahd",
+  ].some((value) => normalizedMessage === normalizeText(value));
+}
+
 function extractStandaloneEntities(
   message: string,
   missingFields: string[],
@@ -1362,7 +1448,7 @@ function extractStandaloneEntities(
   }
 
   if (missingFields.includes("city")) {
-    entities.city = findCity(message);
+    entities.city = findContextualCity(message);
   }
 
   if (missingFields.includes("size")) {
@@ -1408,7 +1494,9 @@ function extractStandaloneEntities(
   }
 
   if (!entities.fullName && missingFields.includes("fullName") && isSimpleArabicName(message)) {
-    entities.fullName = normalizeText(message);
+    if (!isQuantityOnlyMessage(message)) {
+      entities.fullName = normalizeText(message);
+    }
   }
 
   return cleanEntities(entities as OrderEntities);
@@ -1494,6 +1582,10 @@ function isOrderStartMessage(message: string): boolean {
     (hasDarijaWantVerb && hasOrderWord) ||
     [
       "first_entry:order_now",
+      "info:order_now",
+      "info:continue_order",
+      "order:start",
+      "order:continue",
       "الطلب",
       "طلب",
       "commande",
@@ -1714,17 +1806,20 @@ function extractEditFieldEntities(
   } else if (field === "quantity") {
     entities.quantity = findQuantity(message);
   } else if (field === "fullName") {
-    entities.fullName =
-      findLabeledValue(message, [
-        "الاسم الكامل",
-        "الإسم الكامل",
-        "الاسم",
-        "الإسم",
-        "السميه",
-        "السمية",
-        "name",
-        "nom",
-      ]) || normalizeText(message);
+    const labeledName = findLabeledValue(message, [
+      "الاسم الكامل",
+      "الإسم الكامل",
+      "الاسم",
+      "الإسم",
+      "السميه",
+      "السمية",
+      "name",
+      "nom",
+    ]);
+
+    if (labeledName || !isQuantityOnlyMessage(message)) {
+      entities.fullName = labeledName || normalizeText(message);
+    }
   } else if (field === "phone") {
     entities.phone = findPhone(message);
   } else if (field === "city") {
@@ -1911,9 +2006,19 @@ async function processConfirmationTurn(input: {
       };
     }
 
+    const orderCycleId = input.session.orderState.orderCycleId || randomUUID();
+
+    if (!input.session.orderState.orderCycleId) {
+      console.warn(JSON.stringify({
+        event: "order.confirmation.missing_order_cycle_id_generated",
+        customerId: input.customerId,
+        orderCycleId,
+      }));
+    }
+
     const order = saveConfirmedOrder({
       customerId: input.customerId,
-      orderCycleId: input.session.orderState.orderCycleId,
+      orderCycleId,
       sellerId: input.sellerId,
       customerPhone: input.customerPhone,
       conversationKey: input.session.conversationKey || input.customerId,
@@ -1927,7 +2032,7 @@ async function processConfirmationTurn(input: {
       customerPhone: input.customerPhone,
       sellerId: input.sellerId,
       productId: input.productId,
-      orderCycleId: input.session.orderState.orderCycleId,
+      orderCycleId,
       collected: input.session.orderState.collected,
       missingFields: [],
       isComplete: true,
@@ -2005,7 +2110,16 @@ async function processConfirmedOrderTurn(input: {
   productContext: ProductContext;
   requiredFields?: RequiredOrderField[];
 }): Promise<ProcessOrderTurnResult> {
-  const orderCycleId = input.session.orderState.orderCycleId;
+  const orderCycleId = input.session.orderState.orderCycleId || randomUUID();
+
+  if (!input.session.orderState.orderCycleId) {
+    console.warn(JSON.stringify({
+      event: "order.confirmed.missing_order_cycle_id_generated",
+      customerId: input.customerId,
+      orderCycleId,
+    }));
+  }
+
   const existingOrder =
     getConfirmedOrderByCustomerId(input.customerId, orderCycleId) ||
     getConfirmedOrderByCustomerId(input.customerId) ||
@@ -2234,6 +2348,27 @@ export async function processOrderTurn(
     activeRequiredFields,
   );
 
+  const hasActiveDraft =
+    session.orderState.missingFields.length > 0 ||
+    hasCollectedOrderData(session.orderState.collected);
+  const orderCycleId = session.orderState.orderCycleId ||
+    (shouldHandle || hasActiveDraft ? randomUUID() : undefined);
+
+  if (orderCycleId && !session.orderState.orderCycleId && validatedIncomingEntities.reply) {
+    await updateConversationOrderState({
+      customerId: input.customerId,
+      customerPhone: input.customerPhone,
+      sellerId: input.sellerId,
+      productId: input.productId,
+      orderCycleId,
+      collected: session.orderState.collected,
+      missingFields: currentMissingFields,
+      isComplete: false,
+      awaitingConfirmation: false,
+      confirmed: false,
+    });
+  }
+
   if (validatedIncomingEntities.reply) {
     return {
       handled: true,
@@ -2273,6 +2408,7 @@ export async function processOrderTurn(
     customerPhone: input.customerPhone,
     sellerId: input.sellerId,
     productId: input.productId,
+    orderCycleId,
     collected,
     missingFields,
     isComplete,

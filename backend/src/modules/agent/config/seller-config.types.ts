@@ -90,6 +90,25 @@ export type SellerConfig = {
     sendAfterConfirmation: boolean;
     showLogo?: boolean;
     footerText?: string;
+    locale?: "fr";
+    currency?: string;
+    paymentMethodLabel?: string;
+    branding?: {
+      storeName?: string;
+      slogan?: string;
+      logoUrl?: string;
+      primaryColor?: string;
+      secondaryColor?: string;
+      accentColor?: string;
+      phone?: string;
+      whatsapp?: string;
+      email?: string;
+      website?: string;
+      address?: string;
+      instagram?: string;
+      facebook?: string;
+      tiktok?: string;
+    };
   };
   ai: {
     mode: "direct" | "hybrid" | "ai";

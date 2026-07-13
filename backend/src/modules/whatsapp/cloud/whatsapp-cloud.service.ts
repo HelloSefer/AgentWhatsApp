@@ -1603,8 +1603,13 @@ export async function sendOrderReceiptDocumentForOrder(input: {
     to: input.to,
     phoneNumberId: input.phoneNumberId,
     filePath: pdfResult.pdfPath,
-    filename: `وصل-الطلب-${input.order.publicOrderCode}.pdf`,
-    caption: "هذا هو وصل الطلب ديالك ✅\nاحتافظ به حتى يتأكد التوصيل.",
+    filename: `recu-commande-${input.order.publicOrderCode}.pdf`,
+    caption: [
+      "Votre reçu de commande est prêt ✅",
+      `Commande N° : ${input.order.publicOrderCode}`,
+      "",
+      "Conservez ce document jusqu’à la confirmation de la livraison.",
+    ].join("\n"),
   });
 
   if (sendResult.success) {

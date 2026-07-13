@@ -6,4 +6,5 @@ backend/.env.local
 .env.local
 backend/auth/
 backend/*.log
+backend/storage/receipts/
 .DS_Store

@@ -9,7 +9,7 @@ export const demoProductContexts: ProductContext[] = [
     price: 199,
     currency: "MAD",
     active: true,
-    images: [],
+    images: ["src/modules/order-receipt/fixtures/demo-sandal-product-cropped.png"],
     benefits: [
       "تصميم عملي",
       "متوفرة بعدة مقاسات",
