@@ -38,6 +38,7 @@ const knownReplyIdMappings: Record<string, string> = {
   "info:order_now": "info:order_now",
   "info:continue_order": "info:continue_order",
   "info:menu": "info:menu",
+  "info:more_info": "info:more_info",
   "order:continue": "order:continue",
   "order:confirm": "order:confirm",
   "order:edit": "order:edit",
@@ -78,6 +79,13 @@ function normalizeReplyId(input: {
   if (mapped) {
     return {
       normalizedText: mapped,
+      normalizedSource: "known_id_mapping",
+    };
+  }
+
+  if (/^field:skip:[a-zA-Z][a-zA-Z0-9_]*$/u.test(input.replyId)) {
+    return {
+      normalizedText: input.replyId,
       normalizedSource: "known_id_mapping",
     };
   }

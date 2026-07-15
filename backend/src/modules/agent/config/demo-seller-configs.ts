@@ -103,6 +103,8 @@ export const demoSellerConfigs: SellerConfig[] = [
         required: true,
         enabled: true,
         askOrder: 7,
+        captureMode: "ADDRESS",
+        allowMultipleMessages: true,
       },
       {
         key: "quantity",

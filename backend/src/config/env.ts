@@ -11,6 +11,10 @@ export const env = {
   appName: process.env.APP_NAME || "Moroccan Darija WhatsApp AI Sales Agent",
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
   ollamaModel: process.env.OLLAMA_MODEL || "qwen2.5:7b",
+  informationalAiEnabled:
+    process.env.INFORMATIONAL_AI_ENABLED !== "false",
+  informationalAiTimeoutMs:
+    Number(process.env.INFORMATIONAL_AI_TIMEOUT_MS) || 1500,
   naturalReplyEnabled: process.env.NATURAL_REPLY_ENABLED === "true",
   naturalReplyModel: process.env.NATURAL_REPLY_MODEL || "qwen2.5:3b",
   naturalReplyTimeoutMs: Number(process.env.NATURAL_REPLY_TIMEOUT_MS) || 1500,

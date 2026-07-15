@@ -33,9 +33,28 @@ import {
   type DeliveryQuote,
   type ResolvedDeliveryQuote,
 } from "./delivery-pricing.service";
+import {
+  understandContextualOrderMessage,
+} from "../order-understanding/contextual-order-understanding.service";
+import { buildFieldClarification } from "../order-understanding/order-dialogue-policy.service";
+import { buildOrderUnderstandingContext, isFieldEffectivelyRequired } from "../order-understanding/understanding-context.builder";
+import type { FieldCandidate } from "../order-understanding/order-understanding.types";
+import { classifyOrderMessageDisposition } from "../order-understanding/message-disposition.service";
+import { applyUnderstandingDecision } from "../order-understanding/order-draft-mutation.service";
+import { validateCandidateForField } from "../order-understanding/contextual-field-validator.service";
+import { validateOrderDraftIntegrity } from "../order-understanding/order-draft-integrity.service";
+import {
+  buildOptionalFieldPrompt,
+  getNextOptionalField,
+  getOptionalFieldDialogueState,
+  markOptionalFieldPrompted,
+  parseOptionalFieldSkipAction,
+  reconcileOptionalFieldDialogue,
+  skipOptionalField,
+} from "../order-understanding/optional-field-dialogue.service";
 
 type OrderField = keyof OrderEntities;
-type EditableOrderField = OrderField | "delivery_info";
+type EditableOrderField = string;
 
 type ProcessOrderTurnInput = {
   customerId: string;
@@ -46,7 +65,6 @@ type ProcessOrderTurnInput = {
   productContext: ProductContext;
   analysis?: {
     intent?: string;
-    entities?: OrderEntities;
   };
   requiredFields?: RequiredOrderField[];
 };
@@ -81,6 +99,7 @@ const defaultRequiredOrderFields: RequiredOrderField[] = [
     enabled: true,
     source: "customerField",
     askOrder: 1,
+    captureMode: "OPEN_TEXT",
   },
   {
     key: "phone",
@@ -89,6 +108,7 @@ const defaultRequiredOrderFields: RequiredOrderField[] = [
     enabled: true,
     source: "customerField",
     askOrder: 2,
+    captureMode: "PHONE",
   },
   {
     key: "city",
@@ -97,6 +117,7 @@ const defaultRequiredOrderFields: RequiredOrderField[] = [
     enabled: true,
     source: "customerField",
     askOrder: 3,
+    captureMode: "LOCATION",
   },
   {
     key: "address",
@@ -105,6 +126,7 @@ const defaultRequiredOrderFields: RequiredOrderField[] = [
     enabled: true,
     source: "customerField",
     askOrder: 4,
+    captureMode: "ADDRESS",
   },
 ];
 
@@ -389,7 +411,34 @@ function stripOrderStartIntro(text: string): string {
     .trim();
 }
 
-function buildEditChoiceReply(prefix = "شنو بغيتي تبدل في الطلب؟"): {
+function getConfiguredEditOptions(
+  requiredFields?: RequiredOrderField[],
+): typeof editOptions {
+  const options = [...editOptions];
+
+  for (const field of requiredFields || []) {
+    if (
+      !field.enabled ||
+      field.requirement === "DISABLED" ||
+      options.some((option) => option.field === field.key)
+    ) {
+      continue;
+    }
+
+    options.push({
+      field: field.key,
+      id: `edit:${field.key}`,
+      label: field.label,
+    });
+  }
+
+  return options;
+}
+
+function buildEditChoiceReply(
+  prefix = "شنو بغيتي تبدل في الطلب؟",
+  requiredFields?: RequiredOrderField[],
+): {
   text: string;
   ui: AgentReplyUiHint;
 } {
@@ -400,7 +449,7 @@ function buildEditChoiceReply(prefix = "شنو بغيتي تبدل في الطل
       purpose: "confirmation",
       title: "تعديل الطلب",
       body: prefix,
-      options: editOptions.map((option) => ({
+      options: getConfiguredEditOptions(requiredFields).map((option) => ({
         id: option.id,
         label: option.label,
         value: option.label,
@@ -409,9 +458,13 @@ function buildEditChoiceReply(prefix = "شنو بغيتي تبدل في الطل
   };
 }
 
-function getEditFieldFromMessage(message: string): EditableOrderField | undefined {
+function getEditFieldFromMessage(
+  message: string,
+  requiredFields?: RequiredOrderField[],
+): EditableOrderField | undefined {
   const normalizedMessage = normalizeText(message);
-  const directMatch = editOptions.find(
+  const configuredOptions = getConfiguredEditOptions(requiredFields);
+  const directMatch = configuredOptions.find(
     (option) => normalizeText(option.id) === normalizedMessage,
   );
 
@@ -423,9 +476,19 @@ function getEditFieldFromMessage(message: string): EditableOrderField | undefine
     return "delivery_info";
   }
 
-  return editOptions.find((option) =>
-    normalizedMessage === normalizeText(option.label),
-  )?.field;
+  return configuredOptions.find((option) => {
+    const field = requiredFields?.find((candidate) => candidate.key === option.field);
+    const terms = [option.label, option.field, ...(field?.aliases || [])]
+      .map(normalizeText)
+      .filter(Boolean);
+
+    return terms.some((term) =>
+      normalizedMessage === term ||
+      normalizedMessage === `بدل ${term}` ||
+      normalizedMessage === `نبدل ${term}` ||
+      normalizedMessage === `بغيت نبدل ${term}`,
+    );
+  })?.field;
 }
 
 function buildEditFieldPrompt(
@@ -442,37 +505,26 @@ function buildEditFieldPrompt(
     };
   }
 
-  if (field === "size" && configuredField?.options?.length) {
-    const text = "اختار المقاس الجديد.";
-
-    return {
-      text,
-      ui: {
-        kind: "list",
-        purpose: "field_options",
-        title: "اختار المقاس",
-        body: text,
-        options: configuredField.options.map((option) => ({
-          id: `size:${option}`,
-          label: option,
-          value: option,
-        })),
-      },
-    };
-  }
-
-  if (field === "color" && configuredField?.options?.length) {
-    const text = "اختار اللون الجديد.";
+  if (configuredField?.options?.length) {
+    const text = field === "size"
+      ? "اختار المقاس الجديد."
+      : field === "color"
+        ? "اختار اللون الجديد."
+        : `اختار ${configuredField.label} الجديد.`;
 
     return {
       text,
       ui: {
         kind: configuredField.options.length <= 3 ? "buttons" : "list",
         purpose: "field_options",
-        title: "اختار اللون",
+        title: field === "size"
+          ? "اختار المقاس"
+          : field === "color"
+            ? "اختار اللون"
+            : `اختار ${configuredField.label}`,
         body: text,
         options: configuredField.options.map((option) => ({
-          id: `color:${option}`,
+          id: `${field}:${option}`,
           label: option,
           value: option,
         })),
@@ -547,12 +599,6 @@ function hasValue(value: unknown): boolean {
   }
 
   return typeof value === "string" ? Boolean(value.trim()) : Boolean(value);
-}
-
-function cleanEntities(entities: OrderEntities): Partial<OrderEntities> {
-  return Object.fromEntries(
-    Object.entries(entities).filter(([, value]) => hasValue(value)),
-  ) as Partial<OrderEntities>;
 }
 
 function getAvailableColors(productContext: ProductContext): string[] {
@@ -846,7 +892,9 @@ function getActiveRequiredFields(
   requiredFields?: RequiredOrderField[],
 ): RequiredOrderField[] {
   if (requiredFields?.length) {
-    return requiredFields.filter((field) => field.required && field.enabled);
+    return requiredFields.filter(
+      (field) => field.enabled && field.requirement !== "DISABLED",
+    );
   }
 
   const mappedFields = (productContext.requiredOrderFields || [])
@@ -900,7 +948,8 @@ function computeMissingFields(
   productContext: ProductContext,
   requiredFields?: RequiredOrderField[],
 ): string[] {
-  const activeRequiredFields = getActiveRequiredFields(productContext, requiredFields);
+  const activeRequiredFields = getActiveRequiredFields(productContext, requiredFields)
+    .filter((field) => isFieldEffectivelyRequired(field, collected as Record<string, unknown>));
   const collectedRecord = collected as Record<string, unknown>;
 
   return requiredFieldsService
@@ -1485,125 +1534,51 @@ function isQuantityOnlyMessage(message: string): boolean {
   ].some((value) => normalizedMessage === normalizeText(value));
 }
 
-function extractStandaloneEntities(
-  message: string,
-  missingFields: string[],
-  requiredFields?: RequiredOrderField[],
-): Partial<OrderEntities> {
-  const entities = {} as Record<string, unknown>;
-  const phone = findPhone(message);
+function buildUnderstandingState(input: {
+  session: ConversationSession;
+  candidates: FieldCandidate[];
+  rejected: Array<{ fieldKey: string; value: string | number; reason: string }>;
+  clarificationReason?: string;
+  awaitedFieldKey?: string;
+  collected?: OrderEntities;
+  missingFields?: string[];
+  provenance?: NonNullable<ConversationSession["orderState"]["understanding"]>["provenance"];
+}) {
+  const existing = input.session.orderState.understanding || { fields: {} };
+  const fields = { ...existing.fields };
 
-  if (phone && missingFields.includes("phone")) {
-    entities.phone = phone;
+  for (const candidate of input.candidates) {
+    fields[candidate.fieldKey] = {
+      ...(fields[candidate.fieldKey] || { retryCount: 0 }),
+      pendingCandidate: undefined,
+      lastRejectedValue: undefined,
+    };
   }
 
-  if (phone && missingFields.includes("fullName")) {
-    entities.fullName = findNameBeforePhone(message, phone);
+  for (const rejected of input.rejected) {
+    const previous = fields[rejected.fieldKey] || { retryCount: 0 };
+    fields[rejected.fieldKey] = {
+      ...previous,
+      retryCount: previous.retryCount + 1,
+      lastClarificationReason: rejected.reason,
+      lastRejectedValue: rejected.value,
+    };
   }
 
-  if (phone && missingFields.includes("address")) {
-    entities.address =
-      findAddressAfterDetectedPhone(message) ||
-      findAddressAfterPhone(message, phone);
-  }
-
-  if (missingFields.includes("city")) {
-    entities.city = findContextualCity(message);
-  }
-
-  if (missingFields.includes("size")) {
-    entities.size = findSize(message);
-  }
-
-  if (missingFields.includes("color")) {
-    entities.color = findColor(message);
-  }
-
-  const isStandaloneMissingSizeSelection =
-    missingFields.includes("size") &&
-    typeof entities.size === "string" &&
-    isStandaloneSizeSelection(message, entities.size);
-
-  if (
-    !isStandaloneMissingSizeSelection &&
-    (missingFields.includes("quantity") ||
-      shouldCollectOptionalQuantity(message))
-  ) {
-    entities.quantity = findQuantity(message);
-  }
-
-  for (const field of requiredFields || []) {
-    if (
-      field.source !== "productOption" ||
-      !field.options?.length ||
-      !missingFields.includes(field.key) ||
-      hasValue(entities[field.key])
-    ) {
-      continue;
-    }
-
-    const configuredOption = findConfiguredOption(message, field.options);
-
-    if (configuredOption) {
-      entities[field.key] = configuredOption;
-    }
-  }
-
-  if (!entities.address && missingFields.includes("address")) {
-    entities.address = findAddress(message);
-  }
-
-  if (!entities.fullName && missingFields.includes("fullName") && isSimpleArabicName(message)) {
-    if (!isQuantityOnlyMessage(message)) {
-      entities.fullName = normalizeText(message);
-    }
-  }
-
-  return cleanEntities(entities as OrderEntities);
-}
-
-function mergeEntities(
-  existing: OrderEntities,
-  incoming: Partial<OrderEntities>,
-): OrderEntities {
-  const merged: OrderEntities = { ...existing };
-
-  for (const [key, value] of Object.entries(incoming) as Array<[
-    keyof OrderEntities,
-    OrderEntities[keyof OrderEntities],
-  ]>) {
-    if (hasValue(value) && !hasValue(merged[key])) {
-      (merged[key] as typeof value) = value;
-    }
-  }
-
-  return merged;
-}
-
-function mergeCorrectedEntities(
-  existing: OrderEntities,
-  incoming: Partial<OrderEntities>,
-): OrderEntities {
-  const merged: OrderEntities = { ...existing };
-
-  for (const [key, value] of Object.entries(incoming) as Array<[
-    keyof OrderEntities,
-    OrderEntities[keyof OrderEntities],
-  ]>) {
-    if (hasValue(value)) {
-      (merged[key] as typeof value) = value;
-    }
-  }
-
-  return merged;
-}
-
-function isStandaloneSizeSelection(message: string, size?: string): boolean {
-  if (!size) {
-    return false;
-  }
-
-  return normalizeText(message) === normalizeText(size);
+  return {
+    fields,
+    provenance: input.provenance || existing.provenance,
+    addressParts: typeof (input.collected || input.session.orderState.collected).address === "string"
+      ? (input.collected || input.session.orderState.collected).address!.split(/[،,]/).map((part) => part.trim()).filter(Boolean)
+      : existing.addressParts,
+    lastBotQuestion: (input.awaitedFieldKey || input.missingFields?.[0])
+      ? {
+          fieldKey: input.awaitedFieldKey || input.missingFields![0],
+          reason: input.clarificationReason,
+          askedAt: new Date().toISOString(),
+        }
+      : existing.lastBotQuestion,
+  };
 }
 
 function hasCollectedOrderData(collected: OrderEntities): boolean {
@@ -1727,173 +1702,6 @@ function hasCorrectionOrRejectionIntent(message: string): boolean {
   );
 }
 
-function hasFieldKeyword(normalizedMessage: string, labels: string[]): boolean {
-  return includesAny(normalizedMessage, labels);
-}
-
-function extractCorrectionEntities(message: string): Partial<OrderEntities> {
-  const normalizedMessage = normalizeText(message);
-  const corrections: Partial<OrderEntities> = {};
-  const wantsChange = includesAny(normalizedMessage, correctionKeywords);
-  const phone = findPhone(message);
-  const hasPhoneKeyword = hasFieldKeyword(normalizedMessage, [
-    "رقم الهاتف",
-    "الهاتف",
-    "التلفون",
-    "تلفون",
-    "رقم",
-    "phone",
-    "tel",
-  ]);
-  const hasCityKeyword = hasFieldKeyword(normalizedMessage, [
-    "المدينة",
-    "مدينه",
-    "ville",
-    "city",
-  ]);
-  const hasAddressKeyword = hasFieldKeyword(normalizedMessage, [
-    "العنوان",
-    "address",
-    "adresse",
-  ]);
-  const hasSizeKeyword = hasFieldKeyword(normalizedMessage, [
-    "المقاس",
-    "قياس",
-    "size",
-    "taille",
-  ]);
-  const hasColorKeyword = hasFieldKeyword(normalizedMessage, [
-    "اللون",
-    "لون",
-    "color",
-    "couleur",
-  ]);
-  const hasQuantityKeyword = hasFieldKeyword(normalizedMessage, [
-    "الكمية",
-    "كمية",
-    "quantity",
-    "qte",
-  ]);
-
-  const fullName = findLabeledValue(message, [
-    "الاسم الكامل",
-    "الإسم الكامل",
-    "الاسم",
-    "الإسم",
-    "السميه",
-    "السمية",
-    "name",
-    "nom",
-  ]);
-
-  if (fullName) {
-    corrections.fullName = fullName;
-  }
-
-  if (phone && (hasPhoneKeyword || wantsChange || normalizedMessage === phone)) {
-    corrections.phone = phone;
-
-    if (!corrections.fullName) {
-      corrections.fullName = findNameBeforePhone(message, phone);
-    }
-  }
-
-  const city = findCity(message);
-
-  if (city && (hasCityKeyword || wantsChange || isKnownCityOnly(message))) {
-    corrections.city = city;
-  }
-
-  const labeledAddress = findLabeledValue(message, [
-    "العنوان",
-    "address",
-    "adresse",
-  ]);
-  const address =
-    labeledAddress ||
-    (phone ? findAddressAfterPhone(message, phone) : undefined) ||
-    (hasAddressKeyword ||
-    wantsChange ||
-    /^(حي|شارع|زنقة|رقم)\b/.test(normalizedMessage)
-      ? findAddress(message)
-      : undefined);
-
-  if (address && looksLikeAddressText(address)) {
-    corrections.address = address;
-  }
-
-  const size = findSize(message);
-
-  if (size && (hasSizeKeyword || wantsChange)) {
-    corrections.size = size;
-  }
-
-  const color = findColor(message);
-
-  if (color && (hasColorKeyword || wantsChange || isKnownColorOnly(message))) {
-    corrections.color = color;
-  }
-
-  const quantity = findQuantity(message);
-
-  if (quantity && (hasQuantityKeyword || wantsChange)) {
-    corrections.quantity = quantity;
-  }
-
-  return cleanEntities(corrections);
-}
-
-function extractEditFieldEntities(
-  message: string,
-  field: EditableOrderField,
-  requiredFields?: RequiredOrderField[],
-): Partial<OrderEntities> {
-  if (field === "delivery_info") {
-    return extractStandaloneEntities(message, [
-      "fullName",
-      "phone",
-      "city",
-      "address",
-    ], requiredFields);
-  }
-
-  const entities: Partial<OrderEntities> = {};
-
-  if (field === "size") {
-    entities.size = findSize(message);
-  } else if (field === "color") {
-    entities.color = findColor(message);
-  } else if (field === "quantity") {
-    entities.quantity = findQuantity(message);
-  } else if (field === "fullName") {
-    const labeledName = findLabeledValue(message, [
-      "الاسم الكامل",
-      "الإسم الكامل",
-      "الاسم",
-      "الإسم",
-      "السميه",
-      "السمية",
-      "name",
-      "nom",
-    ]);
-
-    if (labeledName || !isQuantityOnlyMessage(message)) {
-      entities.fullName = labeledName || normalizeText(message);
-    }
-  } else if (field === "phone") {
-    entities.phone = findPhone(message);
-  } else if (field === "city") {
-    entities.city = findCity(message) || normalizeText(message);
-  } else if (field === "address") {
-    entities.address =
-      findLabeledValue(message, ["العنوان", "address", "adresse"]) ||
-      findAddress(message) ||
-      normalizeText(message);
-  }
-
-  return cleanEntities(entities as OrderEntities);
-}
-
 function buildUnavailableDeliveryReply(quote: DeliveryQuote): string {
   if (quote.status === "UNAVAILABLE" && quote.reason === "CONFIG_INVALID") {
     return "سمح ليا، ما قدرناش نحددو مصاريف التوصيل دابا. تواصل مع صاحب المتجر باش يأكدها لك.";
@@ -1910,16 +1718,24 @@ function resolveFinalOrderState(input: {
   collected: OrderEntities;
   productContext: ProductContext;
   requiredFields?: RequiredOrderField[];
+  understanding?: ConversationSession["orderState"]["understanding"];
 }): FinalOrderState {
+  const fields = getActiveRequiredFields(input.productContext, input.requiredFields);
+  const integrity = validateOrderDraftIntegrity({
+    collected: input.collected,
+    productContext: input.productContext,
+    fields,
+    understanding: input.understanding,
+  });
   const missingFields = computeMissingFields(
-    input.collected,
+    integrity.collected,
     input.productContext,
-    input.requiredFields,
+    fields,
   );
 
   if (missingFields.length > 0) {
     return {
-      collected: input.collected,
+      collected: integrity.collected,
       missingFields,
       isComplete: false,
       awaitingConfirmation: false,
@@ -1927,13 +1743,13 @@ function resolveFinalOrderState(input: {
   }
 
   const deliveryQuote = resolveProductDeliveryQuote({
-    city: input.collected.city || "",
+    city: integrity.collected.city || "",
     productContext: input.productContext,
   });
 
   if (deliveryQuote.status === "RESOLVED") {
     return {
-      collected: input.collected,
+      collected: integrity.collected,
       missingFields: [],
       isComplete: true,
       awaitingConfirmation: true,
@@ -1943,7 +1759,7 @@ function resolveFinalOrderState(input: {
 
   if (deliveryQuote.reason === "CONFIG_INVALID") {
     return {
-      collected: input.collected,
+      collected: integrity.collected,
       missingFields: [],
       isComplete: false,
       awaitingConfirmation: false,
@@ -1952,7 +1768,7 @@ function resolveFinalOrderState(input: {
     };
   }
 
-  const collected = { ...input.collected };
+  const collected = { ...integrity.collected };
   delete collected.city;
 
   return {
@@ -2000,14 +1816,36 @@ async function updateOrderDraftAndRenderSummary(input: {
     };
   }
 
-  const mergedCollected = mergeCorrectedEntities(
-    input.session.orderState.collected,
-    validatedEntities.entities,
+  const candidates: FieldCandidate[] = Object.entries(validatedEntities.entities).flatMap(
+    ([fieldKey, value]) => hasValue(value)
+      ? [{
+          fieldKey,
+          value: value as string | number,
+          operation: "REPLACE" as const,
+          confidence: 0.96,
+          source: "deterministic_contextual" as const,
+        }]
+      : [],
   );
+  const mutation = applyUnderstandingDecision({
+    activeDraft: input.session.orderState.collected,
+    candidates,
+    disposition: "FIELD_CORRECTION",
+    orderCycleId: input.session.orderState.orderCycleId,
+    existingProvenance: input.session.orderState.understanding?.provenance,
+  });
+  const understanding = buildUnderstandingState({
+    session: input.session,
+    candidates,
+    rejected: [],
+    collected: mutation.collected,
+    provenance: mutation.provenance,
+  });
   const finalState = resolveFinalOrderState({
-    collected: mergedCollected,
+    collected: mutation.collected,
     productContext: input.productContext,
     requiredFields: input.requiredFields,
+    understanding,
   });
 
   await updateConversationOrderState({
@@ -2023,6 +1861,7 @@ async function updateOrderDraftAndRenderSummary(input: {
     confirmed: false,
     deliveryQuote: finalState.deliveryQuote ?? null,
     editField: null,
+    understanding,
   });
 
   if (finalState.blockedReply) {
@@ -2068,11 +1907,33 @@ async function processConfirmationTurn(input: {
   const pendingEditField = input.session.orderState.editField;
 
   if (pendingEditField) {
-    const entities = extractEditFieldEntities(
-      input.message,
-      pendingEditField,
-      input.requiredFields,
-    );
+    const editableKeys = pendingEditField === "delivery_info"
+      ? ["fullName", "phone", "city", "address"]
+      : [pendingEditField];
+    const collectedForEdit = { ...input.session.orderState.collected } as Record<string, unknown>;
+    editableKeys.forEach((fieldKey) => delete collectedForEdit[fieldKey]);
+    const editSession: ConversationSession = {
+      ...input.session,
+      orderState: {
+        ...input.session.orderState,
+        collected: collectedForEdit as OrderEntities,
+        missingFields: editableKeys,
+        isComplete: false,
+        awaitingConfirmation: false,
+      },
+    };
+    const editDecision = await understandContextualOrderMessage({
+      customerId: input.customerId,
+      message: input.message,
+      productContext: input.productContext,
+      session: editSession,
+      fields: input.requiredFields,
+    });
+    const entities = Object.fromEntries(
+      editDecision.candidates
+        .filter((candidate) => editableKeys.includes(candidate.fieldKey as EditableOrderField))
+        .map((candidate) => [candidate.fieldKey, candidate.value]),
+    ) as Partial<OrderEntities>;
 
     if (Object.keys(entities).length === 0) {
       const prompt = buildEditFieldPrompt(pendingEditField, input.requiredFields);
@@ -2098,7 +1959,134 @@ async function processConfirmationTurn(input: {
     });
   }
 
-  const selectedEditField = getEditFieldFromMessage(input.message);
+  if (isConfirmationMessage(input.message)) {
+    const finalState = resolveFinalOrderState({
+      collected: input.session.orderState.collected,
+      productContext: input.productContext,
+      requiredFields: input.requiredFields,
+      understanding: input.session.orderState.understanding,
+    });
+
+    if (!finalState.isComplete || !isResolvedDeliveryQuote(finalState.deliveryQuote)) {
+      await updateConversationOrderState({
+        customerId: input.customerId,
+        customerPhone: input.customerPhone,
+        sellerId: input.sellerId,
+        productId: input.productId,
+        collected: finalState.collected,
+        replaceCollected: true,
+        missingFields: finalState.missingFields,
+        isComplete: false,
+        awaitingConfirmation: false,
+        confirmed: false,
+        deliveryQuote: null,
+      });
+      recordOrderConfirmationBlockedInvalidFields({
+        invalidFields: finalState.missingFields,
+      });
+
+      if (finalState.blockedReply) {
+        return {
+          handled: true,
+          reply: finalState.blockedReply,
+          isComplete: false,
+          missingFields: finalState.missingFields,
+        };
+      }
+
+      const renderedReply = renderOrderProgressReply({
+        collected: finalState.collected,
+        missingFields: finalState.missingFields,
+        isComplete: false,
+        productContext: input.productContext,
+        requiredFields: input.requiredFields,
+      });
+
+      return {
+        handled: true,
+        reply: renderedReply.text,
+        replyUi: renderedReply.ui,
+        isComplete: false,
+        missingFields: finalState.missingFields,
+      };
+    }
+
+    const orderCycleId = input.session.orderState.orderCycleId || randomUUID();
+
+    if (!input.session.orderState.orderCycleId) {
+      console.warn(JSON.stringify({
+        event: "order.confirmation.missing_order_cycle_id_generated",
+        customerId: input.customerId,
+        orderCycleId,
+      }));
+    }
+
+    const order = saveConfirmedOrder({
+      customerId: input.customerId,
+      orderCycleId,
+      sellerId: input.sellerId,
+      customerPhone: input.customerPhone,
+      conversationKey: input.session.conversationKey || input.customerId,
+      productContext: input.productContext,
+      collected: finalState.collected,
+      deliveryQuote: finalState.deliveryQuote,
+      source: "agent",
+    });
+
+    await updateConversationOrderState({
+      customerId: input.customerId,
+      customerPhone: input.customerPhone,
+      sellerId: input.sellerId,
+      productId: input.productId,
+      orderCycleId,
+      collected: finalState.collected,
+      missingFields: [],
+      isComplete: true,
+      awaitingConfirmation: false,
+      confirmed: true,
+      deliveryQuote: finalState.deliveryQuote,
+      editField: null,
+    });
+
+    return {
+      handled: true,
+      reply: buildConfirmedReply(order.publicOrderCode),
+      orderJustConfirmed: true,
+      confirmedOrderId: order.id,
+      publicOrderCode: order.publicOrderCode,
+      isComplete: true,
+      missingFields: [],
+    };
+  }
+
+  const correctionDecision = await understandContextualOrderMessage({
+    customerId: input.customerId,
+    message: input.message,
+    productContext: input.productContext,
+    session: input.session,
+    fields: input.requiredFields,
+  });
+  const corrections = Object.fromEntries(
+    correctionDecision.candidates.map((candidate) => [candidate.fieldKey, candidate.value]),
+  ) as Partial<OrderEntities>;
+
+  if (Object.keys(corrections).length > 0) {
+    return updateOrderDraftAndRenderSummary({
+      session: input.session,
+      customerId: input.customerId,
+      customerPhone: input.customerPhone,
+      sellerId: input.sellerId,
+      productId: input.productId,
+      incomingEntities: corrections,
+      productContext: input.productContext,
+      requiredFields: input.requiredFields,
+    });
+  }
+
+  const selectedEditField = getEditFieldFromMessage(
+    input.message,
+    input.requiredFields,
+  );
 
   if (selectedEditField) {
     const prompt = buildEditFieldPrompt(selectedEditField, input.requiredFields);
@@ -2120,123 +2108,6 @@ async function processConfirmationTurn(input: {
     };
   }
 
-  if (isConfirmationMessage(input.message)) {
-    const missingFields = computeMissingFields(
-      input.session.orderState.collected,
-      input.productContext,
-      input.requiredFields,
-    );
-
-    if (missingFields.length > 0) {
-      await updateConversationOrderState({
-        customerId: input.customerId,
-        customerPhone: input.customerPhone,
-        sellerId: input.sellerId,
-        productId: input.productId,
-        collected: input.session.orderState.collected,
-        missingFields,
-        isComplete: false,
-        awaitingConfirmation: false,
-        confirmed: false,
-        deliveryQuote: null,
-      });
-      recordOrderConfirmationBlockedInvalidFields({
-        invalidFields: missingFields,
-      });
-
-      const renderedReply = renderOrderProgressReply({
-        collected: input.session.orderState.collected,
-        missingFields,
-        isComplete: false,
-        productContext: input.productContext,
-        requiredFields: input.requiredFields,
-      });
-
-      return {
-        handled: true,
-        reply: renderedReply.text,
-        replyUi: renderedReply.ui,
-        isComplete: false,
-        missingFields,
-      };
-    }
-
-    if (!isResolvedDeliveryQuote(input.session.orderState.deliveryQuote)) {
-      return updateOrderDraftAndRenderSummary({
-        session: input.session,
-        customerId: input.customerId,
-        customerPhone: input.customerPhone,
-        sellerId: input.sellerId,
-        productId: input.productId,
-        incomingEntities: {},
-        productContext: input.productContext,
-        requiredFields: input.requiredFields,
-      });
-    }
-
-    const orderCycleId = input.session.orderState.orderCycleId || randomUUID();
-
-    if (!input.session.orderState.orderCycleId) {
-      console.warn(JSON.stringify({
-        event: "order.confirmation.missing_order_cycle_id_generated",
-        customerId: input.customerId,
-        orderCycleId,
-      }));
-    }
-
-    const order = saveConfirmedOrder({
-      customerId: input.customerId,
-      orderCycleId,
-      sellerId: input.sellerId,
-      customerPhone: input.customerPhone,
-      conversationKey: input.session.conversationKey || input.customerId,
-      productContext: input.productContext,
-      collected: input.session.orderState.collected,
-      deliveryQuote: input.session.orderState.deliveryQuote,
-      source: "agent",
-    });
-
-    await updateConversationOrderState({
-      customerId: input.customerId,
-      customerPhone: input.customerPhone,
-      sellerId: input.sellerId,
-      productId: input.productId,
-      orderCycleId,
-      collected: input.session.orderState.collected,
-      missingFields: [],
-      isComplete: true,
-      awaitingConfirmation: false,
-      confirmed: true,
-      deliveryQuote: input.session.orderState.deliveryQuote,
-      editField: null,
-    });
-
-    return {
-      handled: true,
-      reply: buildConfirmedReply(order.publicOrderCode),
-      orderJustConfirmed: true,
-      confirmedOrderId: order.id,
-      publicOrderCode: order.publicOrderCode,
-      isComplete: true,
-      missingFields: [],
-    };
-  }
-
-  const corrections = extractCorrectionEntities(input.message);
-
-  if (Object.keys(corrections).length > 0) {
-    return updateOrderDraftAndRenderSummary({
-      session: input.session,
-      customerId: input.customerId,
-      customerPhone: input.customerPhone,
-      sellerId: input.sellerId,
-      productId: input.productId,
-      incomingEntities: corrections,
-      productContext: input.productContext,
-      requiredFields: input.requiredFields,
-    });
-  }
-
   if (
     hasRejectionIntent(normalizeText(input.message)) ||
     hasCorrectionOrRejectionIntent(input.message) ||
@@ -2246,6 +2117,7 @@ async function processConfirmationTurn(input: {
       hasRejectionIntent(normalizeText(input.message))
         ? "ماشي مشكل. شنو بغيتي تبدل في الطلب؟"
         : "شنو بغيتي تبدل في الطلب؟",
+      input.requiredFields,
     );
 
     return {
@@ -2259,6 +2131,7 @@ async function processConfirmationTurn(input: {
 
   const editReply = buildEditChoiceReply(
     "ما فهمتش واش نأكد الطلب ولا بغيتي تبدل شي معلومة. شنو بغيتي تبدل؟",
+    input.requiredFields,
   );
 
   return {
@@ -2295,19 +2168,43 @@ async function processConfirmedOrderTurn(input: {
     getConfirmedOrderByCustomerId(input.customerId);
 
   if (!existingOrder) {
-    const deliveryQuote = isResolvedDeliveryQuote(input.session.orderState.deliveryQuote)
-      ? input.session.orderState.deliveryQuote
-      : resolveProductDeliveryQuote({
-          city: input.session.orderState.collected.city || "",
-          productContext: input.productContext,
-        });
+    const finalState = resolveFinalOrderState({
+      collected: input.session.orderState.collected,
+      productContext: input.productContext,
+      requiredFields: input.requiredFields,
+      understanding: input.session.orderState.understanding,
+    });
 
-    if (!isResolvedDeliveryQuote(deliveryQuote)) {
+    if (!finalState.isComplete || !isResolvedDeliveryQuote(finalState.deliveryQuote)) {
+      await updateConversationOrderState({
+        customerId: input.customerId,
+        customerPhone: input.customerPhone,
+        sellerId: input.sellerId,
+        productId: input.productId,
+        collected: finalState.collected,
+        replaceCollected: true,
+        missingFields: finalState.missingFields,
+        isComplete: false,
+        awaitingConfirmation: false,
+        confirmed: false,
+        deliveryQuote: null,
+      });
+      const rendered = finalState.blockedReply
+        ? undefined
+        : renderOrderProgressReply({
+            collected: finalState.collected,
+            missingFields: finalState.missingFields,
+            isComplete: false,
+            productContext: input.productContext,
+            requiredFields: input.requiredFields,
+          });
+
       return {
         handled: true,
-        reply: buildUnavailableDeliveryReply(deliveryQuote),
+        reply: finalState.blockedReply || rendered?.text || "عافاك صيفط ليا المعلومات الصحيحة باش نكملو الطلب.",
+        replyUi: rendered?.ui,
         isComplete: false,
-        missingFields: input.session.orderState.missingFields,
+        missingFields: finalState.missingFields,
       };
     }
 
@@ -2318,8 +2215,8 @@ async function processConfirmedOrderTurn(input: {
       customerPhone: input.customerPhone,
       conversationKey: input.session.conversationKey || input.customerId,
       productContext: input.productContext,
-      collected: input.session.orderState.collected,
-      deliveryQuote,
+      collected: finalState.collected,
+      deliveryQuote: finalState.deliveryQuote,
       source: "agent",
     });
   }
@@ -2350,6 +2247,8 @@ async function processConfirmedOrderTurn(input: {
       confirmed: false,
       deliveryQuote: null,
       editField: null,
+      understanding: null,
+      optionalFieldDialogue: null,
       clearProductInfo: true,
     });
 
@@ -2372,7 +2271,7 @@ async function processConfirmedOrderTurn(input: {
 
   if (
     hasCorrectionOrRejectionIntent(input.message) ||
-    getEditFieldFromMessage(input.message)
+    getEditFieldFromMessage(input.message, input.requiredFields)
   ) {
     return {
       handled: true,
@@ -2426,9 +2325,14 @@ function shouldTreatAsOrderFlow(input: {
   intent?: string;
   existingCollected: OrderEntities;
   currentMissingFields: string[];
-  standaloneEntities: Partial<OrderEntities>;
+  acceptedCandidateCount: number;
+  disposition: string;
   hasActiveOrderFlow: boolean;
+  hasActiveOptionalPrompt?: boolean;
 }): boolean {
+  if (input.hasActiveOptionalPrompt) {
+    return true;
+  }
   if (
     input.intent === "order_intent" ||
     input.intent === "order_info_provided" ||
@@ -2438,12 +2342,12 @@ function shouldTreatAsOrderFlow(input: {
     return true;
   }
 
+  if (input.disposition === "NEW_ORDER" || input.acceptedCandidateCount > 0) {
+    return true;
+  }
+
   if (!hasCollectedOrderData(input.existingCollected)) {
-    return (
-      input.hasActiveOrderFlow &&
-      input.currentMissingFields.length > 0 &&
-      hasCollectedOrderData(input.standaloneEntities)
-    );
+    return input.hasActiveOrderFlow && input.currentMissingFields.length > 0;
   }
 
   return input.currentMissingFields.length > 0;
@@ -2456,7 +2360,7 @@ export async function processOrderTurn(
     input.productContext,
     input.requiredFields,
   );
-  const session = await sanitizeStoredOrderState(
+  let session = await sanitizeStoredOrderState(
     await getConversationSession(
       input.customerId,
       input.sellerId,
@@ -2516,6 +2420,8 @@ export async function processOrderTurn(
       confirmed: false,
       deliveryQuote: null,
       editField: null,
+      understanding: null,
+      optionalFieldDialogue: null,
       clearProductInfo: true,
     });
 
@@ -2531,10 +2437,70 @@ export async function processOrderTurn(
   const fallbackOrderStartAnalysis = isOrderStartMessage(input.message)
     ? ({
         intent: "order_intent",
-        entities: {},
       } satisfies ProcessOrderTurnInput["analysis"])
     : undefined;
   const analysis = input.analysis || fastAnalysis || fallbackOrderStartAnalysis;
+  const dispositionDecision = classifyOrderMessageDisposition(input.message);
+
+  if (dispositionDecision.disposition === "NEW_ORDER") {
+    const orderCycleId = randomUUID();
+    const pendingSelections = session.productInfo?.pendingOrderSelections || {};
+    const pendingCandidates = (["size", "color"] as const)
+      .map((fieldKey): FieldCandidate | undefined => {
+        const value = pendingSelections[fieldKey];
+        const field = activeRequiredFields.find((entry) => entry.key === fieldKey);
+
+        if (!value || !field) return undefined;
+
+        return validateCandidateForField(
+          {
+            fieldKey,
+            value,
+            operation: "SET",
+            confidence: 1,
+            source: "interactive",
+          },
+          field,
+          input.productContext,
+        ).candidate;
+      })
+      .filter((candidate): candidate is FieldCandidate => Boolean(candidate));
+    const pendingMutation = applyUnderstandingDecision({
+      activeDraft: {},
+      candidates: pendingCandidates,
+      // The cycle starts now, but these values were selected earlier in a
+      // deterministic info interaction, not extracted from the NEW_ORDER text.
+      disposition: "FIELD_INFORMATION",
+      orderCycleId,
+    });
+    const missingFields = computeMissingFields(
+      pendingMutation.collected,
+      input.productContext,
+      activeRequiredFields,
+    );
+
+    session = await updateConversationOrderState({
+      customerId: input.customerId,
+      customerPhone: input.customerPhone,
+      sellerId: input.sellerId,
+      productId: input.productId,
+      orderCycleId,
+      collected: pendingMutation.collected,
+      replaceCollected: true,
+      missingFields,
+      isComplete: false,
+      awaitingConfirmation: false,
+      confirmed: false,
+      deliveryQuote: null,
+      editField: null,
+      understanding: pendingCandidates.length
+        ? { fields: {}, provenance: pendingMutation.provenance }
+        : null,
+      optionalFieldDialogue: null,
+      clearProductInfo: true,
+    });
+  }
+
   const currentMissingFields =
     session.orderState.missingFields.length > 0
       ? session.orderState.missingFields
@@ -2543,17 +2509,146 @@ export async function processOrderTurn(
           input.productContext,
           activeRequiredFields,
         );
-  const standaloneEntities = extractStandaloneEntities(
-    input.message,
-    currentMissingFields,
-    activeRequiredFields,
-  );
+  const optionalDialogue = reconcileOptionalFieldDialogue({
+    dialogue: getOptionalFieldDialogueState({
+      orderCycleId: session.orderState.orderCycleId,
+      existing: session.orderState.optionalFieldDialogue,
+    }),
+    collected: session.orderState.collected as Record<string, unknown>,
+    fields: activeRequiredFields,
+  });
+  const skipFieldKey = parseOptionalFieldSkipAction(input.message);
+
+  if (skipFieldKey) {
+    const skipResult = skipOptionalField({
+      fieldKey: skipFieldKey,
+      fields: activeRequiredFields,
+      collected: session.orderState.collected as Record<string, unknown>,
+      dialogue: optionalDialogue,
+    });
+
+    if (!skipResult.accepted) {
+      return {
+        handled: true,
+        reply: "ما نقدرش نتخطاو هاد المعلومة دابا. صيفطها ليا باش نكملو الطلب.",
+        isComplete: session.orderState.isComplete,
+        missingFields: currentMissingFields,
+      };
+    }
+
+    const finalState = resolveFinalOrderState({
+      collected: session.orderState.collected,
+      productContext: input.productContext,
+      requiredFields: activeRequiredFields,
+      understanding: session.orderState.understanding,
+    });
+    const nextOptionalField = finalState.isComplete
+      ? getNextOptionalField({
+          fields: activeRequiredFields,
+          collected: finalState.collected as Record<string, unknown>,
+          dialogue: skipResult.dialogue,
+        })
+      : undefined;
+    const nextDialogue = nextOptionalField
+      ? markOptionalFieldPrompted({
+          dialogue: skipResult.dialogue,
+          fieldKey: nextOptionalField.key,
+        })
+      : skipResult.dialogue;
+
+    await updateConversationOrderState({
+      customerId: input.customerId,
+      customerPhone: input.customerPhone,
+      sellerId: input.sellerId,
+      productId: input.productId,
+      collected: finalState.collected,
+      replaceCollected: true,
+      missingFields: finalState.missingFields,
+      isComplete: finalState.isComplete,
+      awaitingConfirmation: nextOptionalField ? false : finalState.awaitingConfirmation,
+      confirmed: false,
+      deliveryQuote: finalState.deliveryQuote ?? null,
+      optionalFieldDialogue: nextDialogue,
+    });
+
+    if (nextOptionalField) {
+      const prompt = buildOptionalFieldPrompt(nextOptionalField);
+
+      return {
+        handled: true,
+        reply: prompt.text,
+        replyUi: prompt.ui,
+        isComplete: finalState.isComplete,
+        missingFields: finalState.missingFields,
+      };
+    }
+
+    const renderedReply = renderOrderProgressReply({
+      collected: finalState.collected,
+      missingFields: finalState.missingFields,
+      isComplete: finalState.isComplete,
+      productContext: input.productContext,
+      requiredFields: activeRequiredFields,
+      deliveryQuote: isResolvedDeliveryQuote(finalState.deliveryQuote)
+        ? finalState.deliveryQuote
+        : undefined,
+    });
+
+    return {
+      handled: true,
+      reply: renderedReply.text,
+      replyUi: renderedReply.ui,
+      replyPresentation: renderedReply.presentation,
+      isComplete: finalState.isComplete,
+      missingFields: finalState.missingFields,
+    };
+  }
+  const understanding = await understandContextualOrderMessage({
+    customerId: input.customerId,
+    message: input.message,
+    productContext: input.productContext,
+    session,
+    fields: activeRequiredFields,
+  });
+
+  if (understanding.sideQuestion) {
+    return {
+      handled: false,
+      isComplete: session.orderState.isComplete,
+      missingFields: currentMissingFields,
+    };
+  }
+
+  if (
+    (understanding.disposition === "GREETING" || understanding.disposition === "THANKS") &&
+    (currentMissingFields.length > 0 || hasCollectedOrderData(session.orderState.collected))
+  ) {
+    const rendered = renderOrderProgressReply({
+      collected: session.orderState.collected,
+      missingFields: currentMissingFields,
+      isComplete: false,
+      productContext: input.productContext,
+      requiredFields: activeRequiredFields,
+    });
+    const prefix = understanding.disposition === "GREETING" ? "وعليكم السلام، مرحبا بك." : "العفو، مرحبا بك.";
+
+    return {
+      handled: true,
+      reply: `${prefix}\n\n${rendered.text}`,
+      replyUi: rendered.ui,
+      isComplete: false,
+      missingFields: currentMissingFields,
+    };
+  }
+
   const shouldHandle = shouldTreatAsOrderFlow({
     intent: analysis?.intent,
     existingCollected: session.orderState.collected,
     currentMissingFields,
-    standaloneEntities,
+    acceptedCandidateCount: understanding.candidates.length,
+    disposition: understanding.disposition,
     hasActiveOrderFlow: session.orderState.missingFields.length > 0,
+    hasActiveOptionalPrompt: Boolean(optionalDialogue.activeOptionalFieldKey),
   });
 
   if (!shouldHandle) {
@@ -2564,15 +2659,91 @@ export async function processOrderTurn(
     };
   }
 
-  const incomingEntities = {
-    ...cleanEntities(analysis?.entities || {}),
-    ...standaloneEntities,
-  };
-  const validatedIncomingEntities = validateIncomingOrderEntities(
-    incomingEntities,
-    input.productContext,
-    activeRequiredFields,
-  );
+  if (
+    understanding.needsClarification &&
+    understanding.candidates.length === 0
+  ) {
+    const context = buildOrderUnderstandingContext({
+      customerId: input.customerId,
+      message: input.message,
+      productContext: input.productContext,
+      session,
+      fields: activeRequiredFields,
+    });
+    const understandingState = buildUnderstandingState({
+      session,
+      candidates: [],
+      rejected: understanding.rejectedCandidates,
+      clarificationReason: understanding.clarificationReason,
+      awaitedFieldKey: understanding.awaitedFieldKey,
+    });
+
+    await updateConversationOrderState({
+      customerId: input.customerId,
+      customerPhone: input.customerPhone,
+      sellerId: input.sellerId,
+      productId: input.productId,
+      understanding: understandingState,
+    });
+    const clarificationPrompt = renderOrderProgressReply({
+      collected: session.orderState.collected,
+      missingFields: currentMissingFields,
+      isComplete: false,
+      productContext: input.productContext,
+      requiredFields: activeRequiredFields,
+    });
+
+    return {
+      handled: true,
+      reply: buildFieldClarification(context, understanding.clarificationReason),
+      replyUi: clarificationPrompt.ui,
+      isComplete: session.orderState.isComplete,
+      missingFields: currentMissingFields,
+    };
+  }
+
+  if (
+    optionalDialogue.activeOptionalFieldKey &&
+    understanding.candidates.length === 0
+  ) {
+    const activeOptionalField = activeRequiredFields.find(
+      (field) => field.key === optionalDialogue.activeOptionalFieldKey,
+    );
+
+    if (activeOptionalField) {
+      const prompt = buildOptionalFieldPrompt(activeOptionalField);
+      const context = buildOrderUnderstandingContext({
+        customerId: input.customerId,
+        message: input.message,
+        productContext: input.productContext,
+        session,
+        fields: activeRequiredFields,
+      });
+
+      await updateConversationOrderState({
+        customerId: input.customerId,
+        customerPhone: input.customerPhone,
+        sellerId: input.sellerId,
+        productId: input.productId,
+        understanding: buildUnderstandingState({
+          session,
+          candidates: [],
+          rejected: understanding.rejectedCandidates,
+          clarificationReason: understanding.clarificationReason || "optional_value_needed",
+          awaitedFieldKey: activeOptionalField.key,
+        }),
+        optionalFieldDialogue: optionalDialogue,
+      });
+
+      return {
+        handled: true,
+        reply: `${buildFieldClarification(context, understanding.clarificationReason)}\n${prompt.text}`,
+        replyUi: prompt.ui,
+        isComplete: session.orderState.isComplete,
+        missingFields: currentMissingFields,
+      };
+    }
+  }
 
   const hasActiveDraft =
     session.orderState.missingFields.length > 0 ||
@@ -2580,52 +2751,50 @@ export async function processOrderTurn(
   const orderCycleId = session.orderState.orderCycleId ||
     (shouldHandle || hasActiveDraft ? randomUUID() : undefined);
 
-  if (orderCycleId && !session.orderState.orderCycleId && validatedIncomingEntities.reply) {
-    await updateConversationOrderState({
-      customerId: input.customerId,
-      customerPhone: input.customerPhone,
-      sellerId: input.sellerId,
-      productId: input.productId,
-      orderCycleId,
-      collected: session.orderState.collected,
-      missingFields: currentMissingFields,
-      isComplete: false,
-      awaitingConfirmation: false,
-      confirmed: false,
-    });
-  }
-
-  if (validatedIncomingEntities.reply) {
-    return {
-      handled: true,
-      reply: validatedIncomingEntities.reply,
-      isComplete: session.orderState.isComplete,
-      missingFields: currentMissingFields,
-    };
-  }
-
-  const shouldUpdateSelectedSize =
-    session.orderState.missingFields.length > 0 &&
-    isStandaloneSizeSelection(input.message, validatedIncomingEntities.entities.size);
-  const collected = shouldUpdateSelectedSize
-    ? mergeEntities(
-        mergeCorrectedEntities(session.orderState.collected, {
-          size: validatedIncomingEntities.entities.size,
-        }),
-        {
-          ...validatedIncomingEntities.entities,
-          size: undefined,
-        },
-      )
-    : mergeEntities(
-        session.orderState.collected,
-        validatedIncomingEntities.entities,
-      );
+  const mutation = applyUnderstandingDecision({
+    activeDraft: session.orderState.collected,
+    candidates: understanding.candidates,
+    disposition: understanding.disposition,
+    orderCycleId,
+    residualExtractionUsed: understanding.residualExtractionUsed,
+    existingProvenance: session.orderState.understanding?.provenance,
+  });
+  const understandingState = buildUnderstandingState({
+    session,
+    candidates: understanding.candidates,
+    rejected: understanding.rejectedCandidates,
+    clarificationReason: understanding.clarificationReason,
+    awaitedFieldKey: understanding.awaitedFieldKey,
+    collected: mutation.collected,
+    provenance: mutation.provenance,
+  });
   const finalState = resolveFinalOrderState({
-    collected,
+    collected: mutation.collected,
     productContext: input.productContext,
     requiredFields: activeRequiredFields,
+    understanding: understandingState,
   });
+  const resolvedOptionalDialogue = reconcileOptionalFieldDialogue({
+    dialogue: getOptionalFieldDialogueState({
+      orderCycleId,
+      existing: optionalDialogue,
+    }),
+    collected: finalState.collected as Record<string, unknown>,
+    fields: activeRequiredFields,
+  });
+  const nextOptionalField = finalState.isComplete && !finalState.blockedReply
+    ? getNextOptionalField({
+        fields: activeRequiredFields,
+        collected: finalState.collected as Record<string, unknown>,
+        dialogue: resolvedOptionalDialogue,
+      })
+    : undefined;
+  const nextOptionalDialogue = nextOptionalField
+    ? markOptionalFieldPrompted({
+        dialogue: resolvedOptionalDialogue,
+        fieldKey: nextOptionalField.key,
+      })
+    : resolvedOptionalDialogue;
 
   await updateConversationOrderState({
     customerId: input.customerId,
@@ -2637,9 +2806,20 @@ export async function processOrderTurn(
     replaceCollected: true,
     missingFields: finalState.missingFields,
     isComplete: finalState.isComplete,
-    awaitingConfirmation: finalState.awaitingConfirmation,
+    awaitingConfirmation: nextOptionalField ? false : finalState.awaitingConfirmation,
     confirmed: false,
     deliveryQuote: finalState.deliveryQuote ?? null,
+    understanding: {
+      ...understandingState,
+      lastBotQuestion: finalState.missingFields[0]
+        ? {
+            fieldKey: finalState.missingFields[0],
+            askedAt: new Date().toISOString(),
+          }
+        : understandingState.lastBotQuestion,
+    },
+    optionalFieldDialogue: nextOptionalDialogue,
+    clearProductInfo: dispositionDecision.disposition === "NEW_ORDER",
   });
 
   if (finalState.blockedReply) {
@@ -2647,6 +2827,18 @@ export async function processOrderTurn(
       handled: true,
       reply: finalState.blockedReply,
       isComplete: false,
+      missingFields: finalState.missingFields,
+    };
+  }
+
+  if (nextOptionalField) {
+    const prompt = buildOptionalFieldPrompt(nextOptionalField);
+
+    return {
+      handled: true,
+      reply: prompt.text,
+      replyUi: prompt.ui,
+      isComplete: finalState.isComplete,
       missingFields: finalState.missingFields,
     };
   }

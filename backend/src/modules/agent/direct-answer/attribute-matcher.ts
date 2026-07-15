@@ -86,6 +86,13 @@ export function getAttributeReply(
   message: string,
   productContext: ProductContext,
 ): string | null {
+  return getAttributeReplyResult(message, productContext)?.reply || null;
+}
+
+export function getAttributeReplyResult(
+  message: string,
+  productContext: ProductContext,
+): { reply: string; grounded: boolean } | null {
   const definition = attributeDefinitions.find((attributeDefinition) =>
     includesAny(message, attributeDefinition.messageKeywords),
   );
@@ -97,10 +104,13 @@ export function getAttributeReply(
   const value = findAttributeValue(definition, productContext);
 
   if (!value) {
-    return definition.missingReply;
+    return { reply: definition.missingReply, grounded: false };
   }
 
   const prefix = definition.kind === "longevity" ? "نعم، " : "";
 
-  return `${prefix}${definition.label}: ${value}.`;
+  return {
+    reply: `${prefix}${definition.label}: ${value}.`,
+    grounded: true,
+  };
 }

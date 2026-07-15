@@ -115,6 +115,8 @@ type AnalyzeAIIntentInput = {
   productContext?: ProductContext;
   sessionContext?: ConversationSession;
   orderState?: ConversationOrderState;
+  /** Order lifecycle and field collection callers must disable Ollama. */
+  aiMode?: "informational_only" | "disabled";
 };
 
 type DeterministicPreExtraction = {
@@ -140,6 +142,26 @@ const orderFlowIntents: AIIntentRouterIntent[] = [
   "order_confirmation",
   "order_correction",
 ];
+
+function enforceInformationalAiBoundary(
+  analysis: AIIntentRouterAnalysis,
+): AIIntentRouterAnalysis {
+  const aiIntentIsOrderLifecycle = orderFlowIntents.includes(analysis.intent);
+
+  return {
+    ...analysis,
+    intent: aiIntentIsOrderLifecycle ? "unknown" : analysis.intent,
+    subIntent: aiIntentIsOrderLifecycle ? null : analysis.subIntent,
+    entities: { ...fallbackAnalysis.entities },
+    shouldContinueOrderFlow: false,
+    shouldUseDirectAnswer: aiIntentIsOrderLifecycle
+      ? false
+      : analysis.shouldUseDirectAnswer,
+    confidence: aiIntentIsOrderLifecycle
+      ? 0
+      : analysis.confidence,
+  };
+}
 
 const fallbackAnalysis: AIIntentRouterAnalysis = safeFallbackIntentAnalysis;
 
@@ -379,17 +401,14 @@ function compactProductContext(productContext: ProductContext): Record<string, u
     deliveryTime: productContext.deliveryTime,
     paymentMethods: productContext.paymentMethods,
     offer: productContext.offer,
-    requiredOrderFields: productContext.requiredOrderFields,
   };
 }
 
 function compactSessionContext(
   sessionContext?: ConversationSession,
-  orderState?: ConversationOrderState,
 ): Record<string, unknown> {
   return {
     recentMessages: sessionContext?.messages.slice(-8),
-    orderState: orderState || sessionContext?.orderState || null,
   };
 }
 
@@ -397,7 +416,6 @@ function buildAIIntentRouterPrompt(input: {
   message: string;
   productContext: ProductContext;
   sessionContext?: ConversationSession;
-  orderState?: ConversationOrderState;
 }): string {
   return `
 You are a JSON-only AI intent router for a Moroccan WhatsApp sales agent.
@@ -406,6 +424,7 @@ Return one valid JSON object only, with no markdown and no explanation.
 
 Languages to understand: Moroccan Darija, Arabic, Arabizi, French, English, and mixed messages.
 Do not invent product facts. Do not save orders. Do not trigger notifications.
+You are an informational fallback only. Never extract, set, replace, confirm, edit, or cancel order fields.
 
 Supported intents:
 ${aiIntentRouterIntents.join(", ")}
@@ -420,15 +439,9 @@ Supported salesStage:
 ${aiIntentRouterSalesStages.join(", ")}
 
 Rules:
-- If current orderState is incomplete, set shouldContinueOrderFlow true.
-- If current orderState.awaitingConfirmation is true, classify confirmation/correction before product questions.
-- If current orderState.confirmed is true, salesStage must be confirmed.
 - Clear product fact questions can set shouldUseDirectAnswer true.
-- Flexible, mixed, unclear, objection, negotiation, trust, and order messages shouldUseDirectAnswer false.
-- If customer asks to buy/order, use order_start.
-- If customer gives missing order info during active flow, use order_followup.
-- If customer says yes/ok/confirm after summary, use order_confirmation.
-- If customer wants to change order info, use order_correction.
+- Flexible, mixed, unclear, objection, negotiation, and trust messages shouldUseDirectAnswer false.
+- Never return order_start, order_followup, order_confirmation, or order_correction. Those are handled deterministically before this fallback.
 - If customer asks COD/payment on delivery, use payment_question.
 - If customer asks delivery timing/availability, use delivery_question.
 - If customer distrusts seller or asks if this is scam, use objection_trust.
@@ -436,16 +449,9 @@ Rules:
 - If unsure, use unknown with confidence below 0.5.
 
 Entity rules:
-- Extract only values present in the customer message.
-- Use null for missing entity fields.
-- quantity must be a number or null.
-- Preserve explicit numeric sizes exactly. Never convert 36, 37, 38, 39, 40, 41, 42, 43, 44, or 45 to S/M/L/XL.
-- Keep customer-provided city spelling when clear, for example "casa" stays "casa".
+- Return null for every entity field. Deterministic services own all field extraction.
 
 Examples:
-Message: "salam bghit ncommande wa7da 38 f casa"
-JSON: {"intent":"order_start","subIntent":"provide_order_info","entities":{"size":"38","color":null,"city":"casa","quantity":1,"phone":null,"fullName":null,"address":null},"language":"arabizi","customerMood":"ready_to_order","salesStage":"ready_to_order","salesOpportunity":true,"shouldUseDirectAnswer":false,"shouldContinueOrderFlow":true,"confidence":0.91}
-
 Message: "wach taman akhor? ghali chwiya"
 JSON: {"intent":"objection_price","subIntent":"price_negotiation","entities":{"size":null,"color":null,"city":null,"quantity":null,"phone":null,"fullName":null,"address":null},"language":"arabizi","customerMood":"price_sensitive","salesStage":"comparing","salesOpportunity":true,"shouldUseDirectAnswer":false,"shouldContinueOrderFlow":false,"confidence":0.9}
 
@@ -455,9 +461,6 @@ JSON: {"intent":"objection_trust","subIntent":"trust_concern","entities":{"size"
 Message: "send me pictures"
 JSON: {"intent":"image_request","subIntent":"request_product_images","entities":{"size":null,"color":null,"city":null,"quantity":null,"phone":null,"fullName":null,"address":null},"language":"english","customerMood":"interested","salesStage":"asking_info","salesOpportunity":true,"shouldUseDirectAnswer":true,"shouldContinueOrderFlow":false,"confidence":0.9}
 
-Message: "بغيت نبدل المقاس 39"
-JSON: {"intent":"order_correction","subIntent":"change_size","entities":{"size":"39","color":null,"city":null,"quantity":null,"phone":null,"fullName":null,"address":null},"language":"darija","customerMood":"interested","salesStage":"awaiting_confirmation","salesOpportunity":true,"shouldUseDirectAnswer":false,"shouldContinueOrderFlow":true,"confidence":0.9}
-
 Message: "كاين الدفع عند الاستلام؟"
 JSON: {"intent":"payment_question","subIntent":"cash_on_delivery","entities":{"size":null,"color":null,"city":null,"quantity":null,"phone":null,"fullName":null,"address":null},"language":"darija","customerMood":"interested","salesStage":"asking_info","salesOpportunity":true,"shouldUseDirectAnswer":true,"shouldContinueOrderFlow":false,"confidence":0.9}
 
@@ -465,7 +468,7 @@ Product context:
 ${JSON.stringify(compactProductContext(input.productContext))}
 
 Session context:
-${JSON.stringify(compactSessionContext(input.sessionContext, input.orderState))}
+${JSON.stringify(compactSessionContext(input.sessionContext))}
 
 Customer message:
 ${JSON.stringify(input.message)}
@@ -981,6 +984,7 @@ function isLowSignalUnknown(message: string): boolean {
 
 function isDeliveryTimingQuestion(message: string): boolean {
   const normalizedMessage = normalizeText(message);
+  const tokens = normalizedMessage.split(/\s+/);
   const hasTimingCue = [
     "فاش",
     "امتى",
@@ -989,7 +993,7 @@ function isDeliveryTimingQuestion(message: string): boolean {
     "fach",
     "imta",
     "w9tach",
-  ].some((cue) => normalizedMessage.includes(normalizeText(cue)));
+  ].some((cue) => tokens.includes(normalizeText(cue)));
   const hasArrivalCue = [
     "غادي",
     "غدي",
@@ -1153,6 +1157,110 @@ function inferDeterministicHints(message: string): Partial<AIIntentRouterAnalysi
     ...preExtracted.entities,
   };
   const hasQuestion = hasQuestionCue(message);
+  const internalId = message.trim().toLowerCase();
+  const internalBase = {
+    language,
+    customerMood: "neutral" as const,
+    salesOpportunity: true,
+    confidence: 1,
+  };
+
+  if (["first_entry:more_info", "info:menu", "info:more_info"].includes(internalId)) {
+    return {
+      ...internalBase,
+      intent: "product_info_question",
+      subIntent: "info_menu",
+      salesStage: "asking_info",
+      shouldUseDirectAnswer: true,
+      shouldContinueOrderFlow: false,
+    };
+  }
+
+  if (internalId === "info:sizes") {
+    return {
+      ...internalBase,
+      intent: "size_question",
+      subIntent: "available_sizes",
+      salesStage: "asking_info",
+      shouldUseDirectAnswer: true,
+      shouldContinueOrderFlow: false,
+    };
+  }
+
+  if (internalId === "info:colors") {
+    return {
+      ...internalBase,
+      intent: "color_question",
+      subIntent: "available_colors",
+      salesStage: "asking_info",
+      shouldUseDirectAnswer: true,
+      shouldContinueOrderFlow: false,
+    };
+  }
+
+  if (["info:price", "info:delivery_payment", "info:availability", "info:how_to_order"].includes(internalId)) {
+    const intent = internalId === "info:price"
+      ? "price_question"
+      : internalId === "info:delivery_payment"
+        ? "delivery_question"
+        : "product_info_question";
+
+    return {
+      ...internalBase,
+      intent,
+      subIntent: internalId.slice("info:".length),
+      salesStage: "asking_info",
+      shouldUseDirectAnswer: true,
+      shouldContinueOrderFlow: false,
+    };
+  }
+
+  if (["first_entry:order_now", "info:order_now", "info:continue_order", "order:start", "order:continue"].includes(internalId)) {
+    return {
+      ...internalBase,
+      intent: "order_start",
+      subIntent: "interactive_order_start",
+      customerMood: "ready_to_order",
+      salesStage: "ready_to_order",
+      shouldUseDirectAnswer: false,
+      shouldContinueOrderFlow: true,
+    };
+  }
+
+  if (/^(?:size:|color:|field:skip:)/i.test(message.trim())) {
+    return {
+      ...internalBase,
+      intent: "order_followup",
+      subIntent: "interactive_order_value",
+      customerMood: "ready_to_order",
+      salesStage: "giving_order_info",
+      shouldUseDirectAnswer: false,
+      shouldContinueOrderFlow: true,
+    };
+  }
+
+  if (["order:confirm", "confirm:yes"].includes(internalId)) {
+    return {
+      ...internalBase,
+      intent: "order_confirmation",
+      subIntent: "interactive_confirmation",
+      customerMood: "ready_to_order",
+      salesStage: "awaiting_confirmation",
+      shouldUseDirectAnswer: false,
+      shouldContinueOrderFlow: true,
+    };
+  }
+
+  if (/^(?:order:edit|confirm:edit|edit:)/i.test(message.trim())) {
+    return {
+      ...internalBase,
+      intent: "order_correction",
+      subIntent: "interactive_correction",
+      salesStage: "awaiting_confirmation",
+      shouldUseDirectAnswer: false,
+      shouldContinueOrderFlow: true,
+    };
+  }
 
   if (isDeliveryTimingQuestion(message)) {
     return {
@@ -1989,6 +2097,15 @@ export async function analyzeAIIntentWithMeta(
 
   const productContext = input.productContext || DEFAULT_PRODUCT_CONTEXT;
   const orderState = input.orderState || input.sessionContext?.orderState;
+  const orderContextRequiresDeterministicRouting = Boolean(
+    orderState &&
+    (
+      orderState.confirmed ||
+      orderState.awaitingConfirmation ||
+      orderState.missingFields.length > 0 ||
+      Object.keys(orderState.collected || {}).length > 0
+    ),
+  );
   const preExtractStartedAt = Date.now();
   const preExtraction = preExtractDeterministicEntities(userMessage);
   const preExtractDurationMs = Date.now() - preExtractStartedAt;
@@ -2026,11 +2143,31 @@ export async function analyzeAIIntentWithMeta(
       return { intentAnalysis, meta };
     }
 
+    if (input.aiMode === "disabled" || orderContextRequiresDeterministicRouting) {
+      const validated = validateAIIntentRouterAnalysis(
+        applySessionState(fallbackAnalysis, orderState),
+      );
+      intentAnalysis = validated.analysis;
+      validationFailed = validated.validationFailed;
+
+      const meta = buildMeta({
+        totalStartedAt,
+        preExtractDurationMs,
+        aiDurationMs,
+        parseDurationMs,
+        usedAI,
+        timedOut,
+        validationFailed,
+      });
+      logTiming(meta);
+
+      return { intentAnalysis, meta };
+    }
+
     const prompt = buildAIIntentRouterPrompt({
       message: userMessage,
       productContext,
       sessionContext: input.sessionContext,
-      orderState,
     });
     usedAI = true;
     aiStartedAt = Date.now();
@@ -2045,7 +2182,9 @@ export async function analyzeAIIntentWithMeta(
 
     const parseStartedAt = Date.now();
     const parsed = parseRouterJson(aiReply);
-    const sanitizedAnalysis = sanitizeAnalysis(parsed);
+    const sanitizedAnalysis = enforceInformationalAiBoundary(
+      sanitizeAnalysis(parsed),
+    );
     const finalAnalysis = finalizeAnalysis(
       sanitizedAnalysis,
       userMessage,

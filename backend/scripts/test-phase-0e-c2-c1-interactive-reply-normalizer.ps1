@@ -127,6 +127,18 @@ $infoMenu = Invoke-Normalize -Message @{
 }
 Add-Check "info menu keeps stable id" ($infoMenu.normalized.normalizedText -eq "info:menu" -and $infoMenu.normalized.normalizedSource -eq "known_id_mapping")
 
+$infoMore = Invoke-Normalize -Message @{
+  type = "interactive"
+  interactive = @{
+    type = "button_reply"
+    button_reply = @{
+      id = "info:more_info"
+      title = "معلومات أخرى"
+    }
+  }
+}
+Add-Check "info more keeps stable id" ($infoMore.normalized.normalizedText -eq "info:more_info" -and $infoMore.normalized.normalizedSource -eq "known_id_mapping")
+
 $customList = Invoke-Normalize -Message @{
   type = "interactive"
   interactive = @{

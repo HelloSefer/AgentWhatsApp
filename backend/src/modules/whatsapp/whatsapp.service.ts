@@ -72,6 +72,9 @@ function getCustomerPhoneFromJid(jid: string): string {
 
 function normalizeSelectedChoiceText(text: string): string {
   const trimmed = text.trim();
+  if (/^field:skip:[a-zA-Z][a-zA-Z0-9_]*$/u.test(trimmed)) {
+    return trimmed;
+  }
   const sizeMatch = trimmed.match(/^size:(.+)$/i);
 
   return sizeMatch?.[1]?.trim() || trimmed;

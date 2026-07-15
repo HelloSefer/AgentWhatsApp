@@ -20,6 +20,12 @@ export interface AgentOrderStateSummary {
   requiredFields?: string[];
   requiredFieldKeys?: string[];
   collected?: OrderEntities;
+  optionalFieldDialogue?: {
+    orderCycleId?: string;
+    askedFieldKeys: string[];
+    skippedFieldKeys: string[];
+    activeOptionalFieldKey?: string;
+  };
 }
 
 export interface SendProductImagesAction {
@@ -74,6 +80,15 @@ export interface AgentResult {
     intentRouterUsedAI?: boolean;
     intentRouterTimedOut?: boolean;
     intentRouterDurationMs?: number;
+    aiUsed?: boolean;
+    informationalAIEligible?: boolean;
+    informationalAIUsed?: boolean;
+    informationalAITimedOut?: boolean;
+    informationalAIValidationFailed?: boolean;
+    informationalAICannotAnswer?: boolean;
+    informationalAIDurationMs?: number;
+    informationalAISkippedReason?: string;
+    stateChangedFieldKeys?: string[];
     identity?: AgentIdentity;
     replyUi?: AgentReplyUiHint;
     whatsappInteractivePreview?: WhatsAppInteractivePreview | null;

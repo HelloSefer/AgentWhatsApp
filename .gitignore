@@ -8,3 +8,4 @@ backend/auth/
 backend/*.log
 backend/storage/receipts/
 .DS_Store
+

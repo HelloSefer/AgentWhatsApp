@@ -84,9 +84,31 @@ export interface ConversationOrderState {
   awaitingConfirmation: boolean;
   confirmed: boolean;
   deliveryQuote?: import("./order/delivery-pricing.service").DeliveryQuote;
-  editField?:
-    | keyof OrderEntities
-    | "delivery_info";
+  /** Config-driven field key currently being edited, or the grouped delivery shortcut. */
+  editField?: string;
+  understanding?: {
+    fields: Record<string, {
+      retryCount: number;
+      lastClarificationReason?: string;
+      pendingCandidate?: string | number;
+      lastRejectedValue?: string | number;
+      explicitlySkipped?: boolean;
+    }>;
+    provenance?: Record<string, import("./order-understanding/order-understanding.types").OrderFieldProvenance>;
+    addressParts?: string[];
+    lastBotQuestion?: {
+      fieldKey: string;
+      reason?: string;
+      askedAt: string;
+    };
+  };
+  optionalFieldDialogue?: {
+    /** Kept with the draft so a new order cycle starts with a clean dialogue. */
+    orderCycleId?: string;
+    askedFieldKeys: string[];
+    skippedFieldKeys: string[];
+    activeOptionalFieldKey?: string;
+  };
   lastUpdatedAt: string;
 }
 
@@ -113,6 +135,8 @@ export interface ConversationSession {
   productInfo?: {
     lastTopic?: "menu" | "price" | "sizes" | "colors" | "delivery_payment" | "availability" | "how_to_order";
     pendingSelection?: "size" | "color";
+    /** Browsing preferences are not order fields until Continue Order is selected. */
+    pendingOrderSelections?: Pick<OrderEntities, "size" | "color">;
     lastUpdatedAt?: string;
   };
   createdAt: string;

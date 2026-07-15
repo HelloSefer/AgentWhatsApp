@@ -4,10 +4,7 @@ import type { ProductContext } from "../product-context.types";
 import { productContextService } from "../config/product-context.service";
 import { sellerConfigService } from "../config/seller-config.service";
 import { calculateOrderTotals } from "./order-pricing.service";
-import {
-  resolveProductDeliveryQuote,
-  type ResolvedDeliveryQuote,
-} from "./delivery-pricing.service";
+import type { ResolvedDeliveryQuote } from "./delivery-pricing.service";
 
 export const orderStatuses = [
   "CONFIRMED",
@@ -118,7 +115,7 @@ type SaveConfirmedOrderInput = {
   conversationKey?: string;
   productContext: ProductContext;
   collected: OrderEntities;
-  deliveryQuote?: ResolvedDeliveryQuote;
+  deliveryQuote: ResolvedDeliveryQuote;
   source?: "agent" | "whatsapp_cloud";
 };
 
@@ -318,16 +315,7 @@ export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrd
   }
 
   const quantity = input.collected.quantity ?? 1;
-  const deliveryQuote = input.deliveryQuote || resolveProductDeliveryQuote({
-    city: getTextValue(input.collected.city),
-    productContext: input.productContext,
-  });
-
-  if (deliveryQuote.status !== "RESOLVED") {
-    throw new Error(
-      `Cannot save confirmed order without a resolved delivery quote (${deliveryQuote.reason}).`,
-    );
-  }
+  const deliveryQuote = input.deliveryQuote;
 
   const totals = calculateOrderTotals({
     productContext: input.productContext,

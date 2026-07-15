@@ -23,6 +23,7 @@ export type ProductInfoRequest = {
 const menuMessages = [
   "first_entry:more_info",
   "info:menu",
+  "info:more_info",
   "المزيد من المعلومات",
   "معلومات أخرى",
   "معلومات اخرى",

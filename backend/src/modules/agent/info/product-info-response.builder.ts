@@ -86,6 +86,28 @@ function getPaymentLine(productContext: ProductContext): string | undefined {
   return ensureSentence(/متوفر/.test(payment) ? payment : `${payment} متوفر`);
 }
 
+function getDeliveryCostAnswer(message: string, productContext: ProductContext): string | undefined {
+  const asksCostOrFree = /(?:مجاني|فابور|gratuite|gratuit|free|شحال|بكم|combien|cost|prix)/i.test(message);
+
+  if (!asksCostOrFree) {
+    return undefined;
+  }
+
+  if (productContext.deliveryIsFree === true || productContext.deliveryPricing?.mode === "ALL_FREE") {
+    return "التوصيل مجاني.";
+  }
+
+  if (typeof productContext.deliveryPrice === "number") {
+    return `ثمن التوصيل هو ${productContext.deliveryPrice} ${productContext.currency === "MAD" ? "درهم" : productContext.currency || ""}.`.replace(/\s+\./, ".");
+  }
+
+  if (productContext.deliveryIsFree === false || productContext.deliveryPricing?.enabled) {
+    return "التوصيل ماشي مجاني فكل المدن، والثمن كيتحدد حسب المدينة.";
+  }
+
+  return undefined;
+}
+
 function hasMenuFact(
   fact: (typeof infoMenuOptions)[number]["fact"],
   productContext: ProductContext,
@@ -124,7 +146,7 @@ function getTextFallback(options: Array<{ label: string }>): string {
 function buildMenuReply(input: ProductInfoReplyInput): RenderedAgentReply {
   const options = getMenuOptions(input.productContext);
   const heading =
-    input.message.trim() === "info:menu" || input.message.includes("معلومات")
+    ["info:menu", "info:more_info"].includes(input.message.trim()) || input.message.includes("معلومات")
       ? "اختار المعلومة اللي بغيتي 👇"
       : "أكيد 👌\nشنو بغيتي تعرف على المنتج؟";
   const textMode = input.infoMenuDisplayMode === "text";
@@ -238,6 +260,7 @@ function buildTopicText(input: ProductInfoReplyInput): string {
 
   if (input.request.topic === "delivery_payment") {
     const lines = [
+      getDeliveryCostAnswer(input.message, input.productContext),
       getDeliveryLine(input.productContext),
       getPaymentLine(input.productContext),
     ].filter((line): line is string => Boolean(line));

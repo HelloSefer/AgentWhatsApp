@@ -221,6 +221,26 @@ Add-Check "first entry info click has list preview" ($firstEntryInfo.meta.whatsa
 Add-Check "first entry info menu includes price" (Has-PreviewListRowId -Result $firstEntryInfo -Id "info:price")
 Add-Check "first entry info menu includes order" (Has-PreviewListRowId -Result $firstEntryInfo -Id "info:order_now")
 Add-Check "first entry info click does not start order" (@($firstEntryInfo.meta.orderStateSummary.missingFields).Count -eq 0)
+$firstEntrySizes = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $firstEntryInfoPhone -CloudMessage (New-ListReply -Id "info:sizes" -Title "المقاسات") -InputType "list"
+Add-Check "info sizes click stays deterministic" ($firstEntrySizes.meta.aiUsed -eq $false)
+Add-Check "info sizes click shows configured size list" ($firstEntrySizes.meta.whatsappInteractivePreview.interactive.type -eq "list" -and (Has-PreviewListRowId -Result $firstEntrySizes -Id "size:37"))
+$firstEntrySizeSelection = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $firstEntryInfoPhone -CloudMessage (New-ListReply -Id "size:37" -Title "37") -InputType "list"
+$firstEntryInfoSessionUri = "{0}/api/agent/session/{1}?sellerId={2}" -f $BaseUrl, $firstEntryInfoPhone, "seller_demo_sandals"
+$firstEntryInfoSession = Invoke-RestMethod -Method GET -Uri $firstEntryInfoSessionUri
+Add-Check "info size selection does not create order cycle" ([string]::IsNullOrWhiteSpace([string]$firstEntryInfoSession.orderState.orderCycleId))
+Add-Check "info size selection does not mutate order draft" ($null -eq $firstEntryInfoSession.orderState.collected.size)
+Add-Check "info size selection stores pending size separately" ($firstEntryInfoSession.productInfo.pendingOrderSelections.size -eq "37")
+Add-Check "info size selection offers continue order" (Has-PreviewButtonId -Result $firstEntrySizeSelection -Id "info:continue_order")
+Add-Check "info size selection offers more information" (Has-PreviewButtonId -Result $firstEntrySizeSelection -Id "info:menu")
+$firstEntryMoreInfo = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $firstEntryInfoPhone -CloudMessage (New-ButtonReply -Id "info:more_info" -Title "معلومات أخرى") -InputType "button"
+$firstEntryAfterMoreInfo = Invoke-RestMethod -Method GET -Uri $firstEntryInfoSessionUri
+Add-Check "more information returns to info menu" ($firstEntryMoreInfo.meta.whatsappInteractivePreview.interactive.type -eq "list" -and $firstEntryMoreInfo.reply -like "*اختار المعلومة*")
+Add-Check "more information preserves pending size" ($firstEntryAfterMoreInfo.productInfo.pendingOrderSelections.size -eq "37" -and [string]::IsNullOrWhiteSpace([string]$firstEntryAfterMoreInfo.orderState.orderCycleId))
+$firstEntryContinue = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $firstEntryInfoPhone -CloudMessage (New-ButtonReply -Id "info:continue_order" -Title "نكمل الطلب") -InputType "button"
+Add-Check "continue order starts fresh cycle" (-not [string]::IsNullOrWhiteSpace([string]$firstEntryContinue.meta.orderStateSummary.orderCycleId))
+Add-Check "continue order seeds pending size" ($firstEntryContinue.meta.orderStateSummary.collected.size -eq "37")
+Add-Check "continue order asks next missing color" (@($firstEntryContinue.meta.orderStateSummary.missingFields)[0] -eq "color" -and $firstEntryContinue.reply -like "*اللون*")
+Add-Check "continue order consumes info pending state" ($null -eq (Invoke-RestMethod -Method GET -Uri $firstEntryInfoSessionUri).productInfo)
 
 $infoOrderPhone = "2126000C2C2FE3"
 Clear-Session -SellerId "seller_demo_sandals" -Phone $infoOrderPhone
@@ -349,12 +369,46 @@ Clear-Session -SellerId "seller_demo_sandals" -Phone $secondUnseenCityPhone
 $unseenCityTwo = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $secondUnseenCityPhone -Message "منطقة الأمل الشرقية"
 Add-Check "unseen locality two is accepted generically" ($unseenCityTwo.meta.orderStateSummary.collected.city -eq "منطقة الأمل الشرقية" -and @($unseenCityTwo.meta.orderStateSummary.missingFields) -notcontains "city")
 
+$singleWriterPhone = "2126000C2C2SW"
+Clear-Session -SellerId "seller_demo_sandals" -Phone $singleWriterPhone
+$singleWriterStart = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $singleWriterPhone -Message "بغيت ندير طلب"
+Add-Check "single-writer new-order starts a clean cycle" (-not [string]::IsNullOrWhiteSpace([string]$singleWriterStart.meta.orderStateSummary.orderCycleId) -and @($singleWriterStart.meta.orderStateSummary.collected.PSObject.Properties).Count -eq 0)
+Add-Check "single-writer new-order command is not city or name" ($null -eq $singleWriterStart.meta.orderStateSummary.collected.city -and $null -eq $singleWriterStart.meta.orderStateSummary.collected.fullName)
+$singleWriterSize = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $singleWriterPhone -CloudMessage (New-ListReply -Id "size:38" -Title "38") -InputType "list"
+$singleWriterBeforeSide = $singleWriterSize.meta.orderStateSummary.collected | ConvertTo-Json -Compress -Depth 20
+$singleWriterSide = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $singleWriterPhone -Message "وش التوصيل مجاني"
+$singleWriterAfterSide = $singleWriterSide.meta.orderStateSummary.collected | ConvertTo-Json -Compress -Depth 20
+Add-Check "delivery interruption preserves draft exactly" ($singleWriterBeforeSide -eq $singleWriterAfterSide -and $singleWriterSide.meta.orderStateSummary.collected.size -eq "38")
+Add-Check "delivery interruption never fills name or city" ($null -eq $singleWriterSide.meta.orderStateSummary.collected.fullName -and $null -eq $singleWriterSide.meta.orderStateSummary.collected.city)
+Add-Check "delivery interruption answers then resumes color" (($singleWriterSide.reply -like "*التوصيل*") -and ($singleWriterSide.reply -like "*اختار اللون*") -and @($singleWriterSide.meta.orderStateSummary.missingFields) -contains "color")
+Add-Check "delivery interruption preserves color choices" ($singleWriterSide.meta.whatsappInteractivePreview.interactive.type -eq "button" -and (Has-PreviewButtonId -Result $singleWriterSide -Id "color:أسود"))
+
+$residualOrderPhone = "2126000C2C2SR"
+Clear-Session -SellerId "seller_demo_sandals" -Phone $residualOrderPhone
+$residualOrder = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $residualOrderPhone -Message "بغيت ندير طلب فمراكش"
+Add-Check "new-order residual extracts only city" ($residualOrder.meta.orderStateSummary.collected.city -eq "مراكش" -and $null -eq $residualOrder.meta.orderStateSummary.collected.fullName -and $residualOrder.meta.orderStateSummary.collected.city -notlike "*طلب*")
+
+$cityFirewallPhone = "2126000C2C2SF"
+Clear-Session -SellerId "seller_demo_sandals" -Phone $cityFirewallPhone
+[void](Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $cityFirewallPhone -Message "بغيت نكوموندي")
+[void](Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $cityFirewallPhone -CloudMessage (New-ListReply -Id "size:38" -Title "38") -InputType "list")
+[void](Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $cityFirewallPhone -CloudMessage (New-ListReply -Id "color:أسود" -Title "أسود") -InputType "list")
+[void](Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $cityFirewallPhone -Message "1")
+[void](Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $cityFirewallPhone -Message "عبد الرحمان العلوي 0612345678 حي السلام")
+$cityFirewallQuestion = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $cityFirewallPhone -Message "وش التوصيل مجاني"
+Add-Check "question while awaiting city is not accepted as city" ($null -eq $cityFirewallQuestion.meta.orderStateSummary.collected.city -and @($cityFirewallQuestion.meta.orderStateSummary.missingFields) -contains "city")
+
 $normalPhone = "2126000C2C2D"
 Clear-Session -SellerId "seller_demo_medical" -Phone $normalPhone
 $normalText = Send-CloudFlow -SellerId "seller_demo_medical" -Phone $normalPhone -Message "سلام" -InputType "text"
 Add-Check "normal text flow has no cloud normalization metadata" ($null -eq $normalText.cloudNormalization)
 Add-Check "normal text flow replies normally" ($normalText.reply.Length -gt 0)
 Add-Check "normal text flow dry-run only" ($normalText.dispatchResult.dryRun -eq $true)
+
+$optionalSkipNormalization = Invoke-TimedJson -Method POST -Uri ("{0}/api/whatsapp/cloud/test-normalize-interactive-reply" -f $BaseUrl) -Body @{
+  message = New-ButtonReply -Id "field:skip:customerNote" -Title "تخطي"
+}
+Add-Check "generic optional skip click preserves its stable action id" ($optionalSkipNormalization.Response.normalized.normalizedText -eq "field:skip:customerNote")
 
 $failed = @($checks | Where-Object { -not $_.Passed })
 

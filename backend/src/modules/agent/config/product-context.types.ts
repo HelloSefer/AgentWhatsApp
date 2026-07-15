@@ -1,4 +1,10 @@
-import type { DisplayMode } from "./seller-config.types";
+import type {
+  DisplayMode,
+  OptionalFieldAskPolicy,
+  OrderFieldCaptureMode,
+  OrderFieldCondition,
+  OrderFieldRequirement,
+} from "./seller-config.types";
 
 export type ProductOptionGroup = {
   key: string;
@@ -8,6 +14,13 @@ export type ProductOptionGroup = {
   options: string[];
   display: DisplayMode;
   askOrder?: number;
+  requirement?: OrderFieldRequirement;
+  captureMode?: OrderFieldCaptureMode;
+  semanticType?: string;
+  aliases?: string[];
+  allowMultipleMessages?: boolean;
+  askPolicy?: OptionalFieldAskPolicy;
+  condition?: OrderFieldCondition;
 };
 
 export type ProductInfoMenuItem =

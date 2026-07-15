@@ -34,12 +34,18 @@ function sortRequiredFields(fields: RequiredOrderField[]): RequiredOrderField[] 
 }
 
 export class RequiredFieldsService {
-  getRequiredOrderFields(input: RequiredFieldsInput): RequiredOrderField[] {
+  getOrderFields(input: RequiredFieldsInput): RequiredOrderField[] {
     const fields = new Map<string, RequiredOrderField>();
 
     input.sellerConfig.customerFields
-      .filter((field) => field.enabled && field.required)
+      .filter((field) => field.enabled || field.requirement === "DISABLED")
       .forEach((field, index) => {
+        const requirement = field.requirement || (field.enabled
+          ? field.required
+            ? "REQUIRED"
+            : "OPTIONAL"
+          : "DISABLED");
+
         fields.set(field.key, {
           key: field.key,
           label: field.label,
@@ -51,11 +57,17 @@ export class RequiredFieldsService {
           minValue: field.minValue,
           maxValue: field.maxValue,
           defaultValue: field.defaultValue,
+          requirement,
+          captureMode: field.captureMode,
+          semanticType: field.semanticType,
+          aliases: field.aliases,
+          allowMultipleMessages: field.allowMultipleMessages,
+          askPolicy: field.askPolicy,
+          condition: field.condition,
         });
       });
 
     input.productContext.optionGroups
-      .filter((group) => group.required)
       .forEach((group, index) => {
         if (fields.has(group.key)) {
           return;
@@ -71,10 +83,26 @@ export class RequiredFieldsService {
           askOrder: group.askOrder ?? index + 1,
           display: group.display,
           options: [...group.options],
+          requirement: group.requirement || (group.required ? "REQUIRED" : "OPTIONAL"),
+          captureMode: group.captureMode || "CONFIGURED_ENUM",
+          semanticType: group.semanticType,
+          aliases: group.aliases,
+          allowMultipleMessages: group.allowMultipleMessages,
+          askPolicy: group.askPolicy,
+          condition: group.condition,
         });
       });
 
     return sortRequiredFields(Array.from(fields.values()));
+  }
+
+  getRequiredOrderFields(input: RequiredFieldsInput): RequiredOrderField[] {
+    return this.getOrderFields(input).filter(
+      (field) => {
+        const requirement = field.requirement || (field.required ? "REQUIRED" : "OPTIONAL");
+        return field.enabled && requirement !== "DISABLED" && requirement !== "OPTIONAL";
+      },
+    );
   }
 
   getMissingRequiredFields(input: {

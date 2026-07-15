@@ -80,6 +80,34 @@ const productOnlyWords = [
   "صندالة",
 ];
 
+const nonValueIntentTerms = [
+  "بغيت ندير طلب",
+  "بغيت نطلب",
+  "بغيت نكومندي",
+  "بغيت نكوموندي",
+  "طلب جديد",
+  "دير ليا الطلب",
+  "التوصيل",
+  "livraison",
+  "delivery",
+  "الدفع",
+  "payment",
+  "paiement",
+  "الثمن",
+  "السعر",
+  "price",
+  "prix",
+  "واش متوفر",
+  "واش كاين",
+  "شنو كتبيع",
+  "شنو عندكم",
+];
+
+const questionOpeners = [
+  "واش", "وش", "اش", "شنو", "شحال", "كيفاش", "علاش", "فين", "هل", "كم",
+  "wach", "chno", "ch7al", "combien", "comment", "how", "what", "where",
+];
+
 const colorAliases = [
   "أسود",
   "اسود",
@@ -126,6 +154,14 @@ function previewValue(value: unknown, field?: keyof OrderEntities): unknown {
     return maskPhone(value);
   }
 
+  if (
+    typeof value === "string" &&
+    field &&
+    ["fullName", "city", "address", "notes"].includes(field)
+  ) {
+    return `[redacted:${value.trim().length}]`;
+  }
+
   if (typeof value !== "string") {
     return value;
   }
@@ -147,6 +183,21 @@ function includesTerm(value: string, terms: string[]): boolean {
   const normalized = normalizeText(value);
 
   return terms.some((term) => normalized.includes(normalizeText(term)));
+}
+
+function looksLikeQuestionOrControl(value: string): boolean {
+  const normalized = normalizeText(value);
+  const firstToken = normalized.split(/\s+/)[0];
+  const exactLowValueControl = [
+    "سلام", "السلام عليكم", "شكرا", "شكراً", "merci", "thanks", "نعم", "لا", "yes", "no", "ok",
+  ].some((term) => normalized === normalizeText(term));
+
+  return (
+    exactLowValueControl ||
+    /[؟?]/.test(value) ||
+    questionOpeners.some((term) => firstToken === normalizeText(term)) ||
+    includesTerm(value, nonValueIntentTerms)
+  );
 }
 
 export function isActionPhrase(text: string): boolean {
@@ -196,7 +247,12 @@ export function isValidFullName(value: string): boolean {
     return false;
   }
 
-  if (isActionPhrase(trimmed) || isPhoneLike(trimmed) || isPureNumber(trimmed)) {
+  if (
+    isActionPhrase(trimmed) ||
+    looksLikeQuestionOrControl(trimmed) ||
+    isPhoneLike(trimmed) ||
+    isPureNumber(trimmed)
+  ) {
     return false;
   }
 
@@ -210,7 +266,7 @@ export function isValidFullName(value: string): boolean {
 export function isValidAddress(value: string): boolean {
   const trimmed = value.trim();
 
-  if (trimmed.length < 4 || isActionPhrase(trimmed)) {
+  if (trimmed.length < 4 || isActionPhrase(trimmed) || looksLikeQuestionOrControl(trimmed)) {
     return false;
   }
 
@@ -228,7 +284,12 @@ export function isValidAddress(value: string): boolean {
 export function isValidCity(value: string): boolean {
   const trimmed = value.trim();
 
-  if (trimmed.length < 2 || isActionPhrase(trimmed)) {
+  if (
+    trimmed.length < 2 ||
+    trimmed.length > 90 ||
+    isActionPhrase(trimmed) ||
+    looksLikeQuestionOrControl(trimmed)
+  ) {
     return false;
   }
 
@@ -236,7 +297,13 @@ export function isValidCity(value: string): boolean {
     return false;
   }
 
-  return /^[\p{Script=Arabic}a-zA-ZÀ-ÿ\s'-]+$/u.test(trimmed);
+  const tokenCount = trimmed.split(/\s+/).length;
+
+  return (
+    tokenCount <= 8 &&
+    /[\p{Script=Arabic}a-zA-ZÀ-ÿ]/u.test(trimmed) &&
+    /^[\p{Script=Arabic}a-zA-ZÀ-ÿ\d\s'-]+$/u.test(trimmed)
+  );
 }
 
 export function isValidSize(value: string): boolean {

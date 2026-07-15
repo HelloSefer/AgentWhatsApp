@@ -4,7 +4,6 @@ import type {
   AgentIntent,
   CustomerLanguage,
   CustomerMood,
-  OrderEntities,
   ProductQuestionEntities,
 } from "./agent-brain.types";
 import { DEFAULT_PRODUCT_CONTEXT } from "./default-product-context";
@@ -32,6 +31,14 @@ const allowedIntents: AgentIntent[] = [
   "human_handoff_request",
   "unknown",
 ];
+
+const informationalAiIntents: AgentIntent[] = allowedIntents.filter(
+  (intent) => ![
+    "order_intent",
+    "order_info_provided",
+    "order_confirmation",
+  ].includes(intent),
+);
 
 const allowedLanguages: CustomerLanguage[] = [
   "darija_arabic",
@@ -69,7 +76,7 @@ const agentBrainAnalysisSchema = {
   properties: {
     intent: {
       type: "string",
-      enum: allowedIntents,
+      enum: informationalAiIntents,
     },
     confidence: {
       type: "number",
@@ -167,30 +174,6 @@ function sanitizeString(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-function sanitizeOrderEntities(value: unknown): OrderEntities {
-  if (!isObject(value)) {
-    return {};
-  }
-
-  const quantity =
-    typeof value.quantity === "number"
-      ? value.quantity
-      : Number(value.quantity);
-
-  return {
-    fullName: sanitizeString(value.fullName),
-    phone: sanitizeString(value.phone),
-    city: sanitizeString(value.city),
-    address: sanitizeString(value.address),
-    productName: sanitizeString(value.productName),
-    variant: sanitizeString(value.variant),
-    color: sanitizeString(value.color),
-    size: sanitizeString(value.size),
-    quantity: Number.isFinite(quantity) ? quantity : undefined,
-    notes: sanitizeString(value.notes),
-  };
-}
-
 function sanitizeProductQuestion(value: unknown): ProductQuestionEntities | undefined {
   if (!isObject(value)) {
     return undefined;
@@ -206,14 +189,6 @@ function sanitizeProductQuestion(value: unknown): ProductQuestionEntities | unde
   return Object.values(productQuestion).some(Boolean)
     ? productQuestion
     : undefined;
-}
-
-function sanitizeStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value
-        .map((item) => sanitizeString(item))
-        .filter((item): item is string => Boolean(item))
-    : [];
 }
 
 function extractFirstJsonObject(text: string): string | null {
@@ -281,13 +256,13 @@ function sanitizeAnalysis(value: unknown): AgentBrainAnalysis {
   }
 
   return {
-    intent: sanitizeEnum(value.intent, allowedIntents, "unknown"),
+    intent: sanitizeEnum(value.intent, informationalAiIntents, "unknown"),
     confidence: clampConfidence(value.confidence),
     language: sanitizeEnum(value.language, allowedLanguages, "unknown"),
     mood: sanitizeEnum(value.mood, allowedMoods, "unknown"),
-    entities: sanitizeOrderEntities(value.entities),
+    entities: {},
     productQuestion: sanitizeProductQuestion(value.productQuestion),
-    missingOrderFields: sanitizeStringArray(value.missingOrderFields),
+    missingOrderFields: [],
     needsHuman: typeof value.needsHuman === "boolean" ? value.needsHuman : false,
     reasoningNote: sanitizeString(value.reasoningNote)?.slice(0, 180),
   };

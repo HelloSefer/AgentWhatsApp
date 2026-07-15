@@ -1,5 +1,5 @@
 import type { ProductContext } from "./product-context.types";
-import { getAttributeReply } from "./direct-answer/attribute-matcher";
+import { getAttributeReplyResult } from "./direct-answer/attribute-matcher";
 import type { DirectAgentResult } from "./direct-answer/direct-answer.types";
 import {
   isColorQuestion,
@@ -92,7 +92,13 @@ export function getDirectAgentReply(
     };
   }
 
-  const attributeReply = getAttributeReply(userMessage, productContext);
+  const attributeReply = getAttributeReplyResult(userMessage, productContext);
 
-  return attributeReply ? { reply: attributeReply, actions: [] } : null;
+  return attributeReply
+    ? {
+        reply: attributeReply.reply,
+        actions: [],
+        grounded: attributeReply.grounded,
+      }
+    : null;
 }

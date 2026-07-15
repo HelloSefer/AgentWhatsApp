@@ -31,12 +31,15 @@ type UpdateConversationOrderStateInput = SessionIdentity & {
   confirmed?: boolean;
   deliveryQuote?: ConversationSession["orderState"]["deliveryQuote"] | null;
   editField?: ConversationSession["orderState"]["editField"] | null;
+  understanding?: ConversationSession["orderState"]["understanding"] | null;
+  optionalFieldDialogue?: ConversationSession["orderState"]["optionalFieldDialogue"] | null;
   clearProductInfo?: boolean;
 };
 
 type UpdateConversationProductInfoStateInput = SessionIdentity & {
   lastTopic?: NonNullable<ConversationSession["productInfo"]>["lastTopic"];
   pendingSelection?: NonNullable<ConversationSession["productInfo"]>["pendingSelection"];
+  pendingOrderSelections?: NonNullable<ConversationSession["productInfo"]>["pendingOrderSelections"];
 };
 
 const MAX_SESSION_MESSAGES = 20;
@@ -283,6 +286,14 @@ export async function updateConversationOrderState(
       input.editField === null
         ? undefined
         : input.editField ?? session.orderState.editField,
+    understanding:
+      input.understanding === null
+        ? undefined
+        : input.understanding ?? session.orderState.understanding,
+    optionalFieldDialogue:
+      input.optionalFieldDialogue === null
+        ? undefined
+        : input.optionalFieldDialogue ?? session.orderState.optionalFieldDialogue,
     lastUpdatedAt: new Date().toISOString(),
   };
 
@@ -309,6 +320,14 @@ export async function updateConversationProductInfoState(
     ...(session.productInfo || {}),
     ...(input.lastTopic ? { lastTopic: input.lastTopic } : {}),
     pendingSelection: input.pendingSelection,
+    ...(input.pendingOrderSelections
+      ? {
+          pendingOrderSelections: {
+            ...(session.productInfo?.pendingOrderSelections || {}),
+            ...input.pendingOrderSelections,
+          },
+        }
+      : {}),
     lastUpdatedAt: new Date().toISOString(),
   };
 

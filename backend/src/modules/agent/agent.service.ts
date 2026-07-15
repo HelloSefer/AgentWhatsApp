@@ -28,7 +28,6 @@ import {
   appendSellerBrainReplyKey,
   clearConversationProductInfoSelection,
   getConversationSession,
-  updateConversationOrderState,
   updateConversationProductInfoState,
 } from "./session/conversation-session.service";
 import type { AgentIdentity } from "./identity/agent-identity.types";
@@ -48,8 +47,18 @@ import {
   resolveProductInfoRequest,
 } from "./info/product-info.service";
 import { buildProductInfoReply } from "./info/product-info-response.builder";
-import type { OrderEntities } from "./agent-brain.types";
+import {
+  answerInformationalQuestion,
+  isInformationalAIEligible,
+} from "./info/informational-ai-answer.service";
+import type { InformationalAIAnswerDependencies } from "./info/informational-ai-answer.types";
 import type { ProductContext } from "./product-context.types";
+import { buildOptionalFieldPrompt } from "./order-understanding/optional-field-dialogue.service";
+import { renderOrderProgressReply } from "./order/order-response.builder";
+import {
+  classifyOrderMessageDisposition,
+  isSideQuestionDisposition,
+} from "./order-understanding/message-disposition.service";
 
 export type GenerateAgentOptions = {
   customerId?: string;
@@ -61,6 +70,10 @@ export type GenerateAgentOptions = {
   useMemory?: boolean;
   interactiveSendChannel?: InteractiveSendChannel;
   interactiveEnabledOverride?: boolean;
+};
+
+export type GenerateAgentDependencies = {
+  informationalAI?: InformationalAIAnswerDependencies;
 };
 
 const MAX_REPLY_LENGTH = 280;
@@ -280,18 +293,6 @@ async function appendMessageToMemory(
   }
 }
 
-function toOrderEntities(analysis: AIIntentRouterAnalysis): OrderEntities {
-  return Object.fromEntries(
-    Object.entries(analysis.entities).filter(([, value]) => {
-      if (typeof value === "number") {
-        return Number.isFinite(value) && value > 0;
-      }
-
-      return typeof value === "string" ? Boolean(value.trim()) : false;
-    }),
-  ) as OrderEntities;
-}
-
 function getRuntimeRequiredOrderFields(
   options?: GenerateAgentOptions,
 ): RequiredOrderField[] | undefined {
@@ -305,7 +306,7 @@ function getRuntimeRequiredOrderFields(
       options.sellerId,
     );
 
-    return requiredFieldsService.getRequiredOrderFields({
+    return requiredFieldsService.getOrderFields({
       sellerConfig,
       productContext: configProductContext,
     });
@@ -401,19 +402,34 @@ async function saveSoftInfoPreference(input: {
     return;
   }
 
-  await updateConversationOrderState({
+  const session = await getConversationSession(
+    input.options.customerId,
+    input.options.sellerId,
+    input.options.productId,
+    input.options.customerPhone,
+  );
+
+  const hasHardOrderFlow = Boolean(
+    session.orderState.orderCycleId ||
+      session.orderState.confirmed ||
+      session.orderState.awaitingConfirmation ||
+      session.orderState.missingFields.length > 0 ||
+      Object.keys(session.orderState.collected).length > 0,
+  );
+
+  if (hasHardOrderFlow) {
+    return;
+  }
+
+  await updateConversationProductInfoState({
     customerId: input.options.customerId,
     customerPhone: input.options.customerPhone,
     conversationKey: input.options.conversationKey,
     sellerId: input.options.sellerId,
     productId: input.options.productId,
-    collected: {
+    pendingOrderSelections: {
       [input.field]: input.value,
     },
-    missingFields: [],
-    isComplete: false,
-    awaitingConfirmation: false,
-    confirmed: false,
   });
 }
 
@@ -625,6 +641,65 @@ function mightBeOrderMessage(message: string): boolean {
         "مقاس",
       ]))
   );
+}
+
+function mustKeepRouterDeterministic(message: string): boolean {
+  const disposition = classifyOrderMessageDisposition(message).disposition;
+
+  return (
+    [
+      "NEW_ORDER",
+      "CONFIRM",
+      "EDIT",
+      "CANCEL",
+      "FIELD_INFORMATION",
+      "FIELD_CORRECTION",
+    ].includes(disposition) ||
+    mightBeOrderMessage(message) ||
+    /^(?:first_entry:|field:|edit:|order:|confirm:|info:|size:|color:)/i.test(message.trim())
+  );
+}
+
+async function buildInformationalAIResult(input: {
+  userMessage: string;
+  productContext: ProductContext;
+  directAnswerGrounded?: boolean;
+  dependencies?: GenerateAgentDependencies;
+}): Promise<AgentResult | null> {
+  const eligible =
+    !mustKeepRouterDeterministic(input.userMessage) &&
+    isInformationalAIEligible(input.userMessage, {
+      directAnswerGrounded: input.directAnswerGrounded,
+    });
+
+  if (!eligible) {
+    return null;
+  }
+
+  const informational = await answerInformationalQuestion(
+    {
+      message: input.userMessage,
+      productContext: input.productContext,
+      eligible: true,
+    },
+    input.dependencies?.informationalAI,
+  );
+
+  return {
+    reply: cleanAgentReply(informational.reply),
+    actions: [],
+    source: "ai_fallback",
+    meta: {
+      informationalAIEligible: true,
+      informationalAIUsed: informational.meta.usedAI,
+      informationalAITimedOut: informational.meta.timedOut,
+      informationalAIValidationFailed: informational.meta.validationFailed,
+      informationalAICannotAnswer: informational.meta.cannotAnswer,
+      informationalAIDurationMs: informational.meta.durationMs,
+      informationalAISkippedReason: informational.meta.skippedReason,
+      stateChangedFieldKeys: [],
+    },
+  };
 }
 
 function isExplicitOrderStartRequest(message: string): boolean {
@@ -1042,6 +1117,7 @@ async function getOrderStateSummary(
       requiredFields: requiredFields?.map((field) => field.key),
       requiredFieldKeys: requiredFields?.map((field) => field.key),
       collected: session.orderState.collected,
+      optionalFieldDialogue: session.orderState.optionalFieldDialogue,
     };
   } catch (error) {
     console.error("❌ Order state summary read failed", error);
@@ -1067,7 +1143,6 @@ async function buildOrderResultFromRouter(input: {
       requiredFields: input.requiredFields,
       analysis: {
         intent: input.analysis.intent,
-        entities: toOrderEntities(input.analysis),
       },
     });
 
@@ -1109,6 +1184,7 @@ async function buildSmartOrderResultIfLikely(
     const { intentAnalysis, meta: routerMeta } = await analyzeAIIntentWithMeta({
       message: userMessage,
       productContext,
+      aiMode: "disabled",
     });
 
     if (
@@ -1146,17 +1222,27 @@ async function buildSmartRouterResult(
   productContext: ProductContext,
   options?: GenerateAgentOptions,
   requiredFields?: RequiredOrderField[],
+  aiMode: "informational_only" | "disabled" = "informational_only",
 ): Promise<AgentResult | null> {
   try {
     const { intentAnalysis, meta: routerMeta } = await analyzeAIIntentWithMeta({
       message: userMessage,
       productContext,
+      aiMode,
     });
 
     if (
       intentAnalysis.intent === "order_start" ||
       intentAnalysis.intent === "order_followup"
     ) {
+      if (routerMeta.usedAI) {
+        console.warn(JSON.stringify({
+          event: "agent.ai_order_lifecycle_blocked",
+          intent: intentAnalysis.intent,
+        }));
+        return null;
+      }
+
       const orderResult = await buildOrderResultFromRouter({
         userMessage,
         productContext,
@@ -1250,6 +1336,7 @@ async function buildSalesResultForDirectReply(input: {
     const { intentAnalysis, meta: routerMeta } = await analyzeAIIntentWithMeta({
       message: input.userMessage,
       productContext: input.productContext,
+      aiMode: "disabled",
     });
 
     if (
@@ -1326,13 +1413,20 @@ async function buildAgentResult(
   productContext: ProductContext,
   options?: GenerateAgentOptions,
   requiredFields?: RequiredOrderField[],
+  dependencies?: GenerateAgentDependencies,
 ): Promise<AgentResult> {
-  if (shouldUseSmartRouterBeforeDirect(userMessage)) {
+  const directReply = getDirectAgentReply(userMessage, productContext);
+
+  if (
+    shouldUseSmartRouterBeforeDirect(userMessage) &&
+    directReply?.grounded !== true
+  ) {
     const routerReply = await buildSmartRouterResult(
       userMessage,
       productContext,
       options,
       requiredFields,
+      "disabled",
     );
 
     if (routerReply) {
@@ -1340,9 +1434,18 @@ async function buildAgentResult(
     }
   }
 
-  const directReply = getDirectAgentReply(userMessage, productContext);
-
   if (directReply) {
+    const informationalReply = await buildInformationalAIResult({
+      userMessage,
+      productContext,
+      directAnswerGrounded: directReply.grounded,
+      dependencies,
+    });
+
+    if (informationalReply) {
+      return informationalReply;
+    }
+
     const smartOrderResult = await buildSmartOrderResultIfLikely(
       userMessage,
       productContext,
@@ -1371,11 +1474,22 @@ async function buildAgentResult(
     };
   }
 
+  const informationalReply = await buildInformationalAIResult({
+    userMessage,
+    productContext,
+    dependencies,
+  });
+
+  if (informationalReply) {
+    return informationalReply;
+  }
+
   const routerReply = await buildSmartRouterResult(
     userMessage,
     productContext,
     options,
     requiredFields,
+    "disabled",
   );
 
   if (routerReply) {
@@ -1437,6 +1551,7 @@ export async function generateAgentResult(
   message: string,
   productContext: ProductContext = DEFAULT_PRODUCT_CONTEXT,
   options?: GenerateAgentOptions,
+  dependencies: GenerateAgentDependencies = {},
 ): Promise<AgentResult> {
   const startedAt = Date.now();
   const userMessage = message.trim();
@@ -1456,28 +1571,31 @@ export async function generateAgentResult(
   await appendMessageToMemory(activeOptions, "customer", userMessage);
 
   const productInfoRequest = resolveProductInfoRequest(userMessage);
-  const orderRoutingMessage = isExplicitOrderStartRequest(userMessage)
-    ? "first_entry:order_now"
-    : normalizeInfoOrderMessage(userMessage);
+  const orderDisposition = classifyOrderMessageDisposition(userMessage);
+  const orderRoutingMessage = orderDisposition.disposition === "NEW_ORDER"
+    ? userMessage
+    : isExplicitOrderStartRequest(userMessage)
+      ? "first_entry:order_now"
+      : normalizeInfoOrderMessage(userMessage);
 
   if (isProductInfoContinueOrder(userMessage)) {
     await clearProductInfoPendingSelection(activeOptions);
   }
 
-  const orderStateFirstResult = await buildOrderResultIfHandled(
-    orderRoutingMessage,
-    runtimeProductContext,
-    activeOptions,
-    requiredFields,
-  );
-  const softInfoSelectionResult = orderStateFirstResult
+  const softInfoSelectionResult = await buildSoftInfoSelectionResultIfHandled({
+    userMessage,
+    productContext: runtimeProductContext,
+    options: activeOptions,
+    infoMenuDisplayMode,
+  });
+  const orderStateFirstResult = softInfoSelectionResult
     ? null
-    : await buildSoftInfoSelectionResultIfHandled({
-        userMessage,
-        productContext: runtimeProductContext,
-        options: activeOptions,
-        infoMenuDisplayMode,
-      });
+    : await buildOrderResultIfHandled(
+        orderRoutingMessage,
+        runtimeProductContext,
+        activeOptions,
+        requiredFields,
+      );
 
   const productInfoReply =
     !orderStateFirstResult &&
@@ -1548,6 +1666,7 @@ export async function generateAgentResult(
           runtimeProductContext,
           activeOptions,
           requiredFields,
+          dependencies,
         )));
 
   const orderStateSummary = await getOrderStateSummary(activeOptions, requiredFields);
@@ -1561,12 +1680,47 @@ export async function generateAgentResult(
   const choiceListAction = actions.find(
     (action) => action.type === "choice_list",
   );
-  const reply =
+  const baseReply =
     choiceListAction?.type === "choice_list" &&
     choiceListAction.context === "change_size"
       ? choiceListAction.body
       : result.reply;
-  const replyUi = result.meta?.replyUi;
+  const awaitedField =
+    orderStateSummary?.missingFields?.[0] ||
+    orderStateSummary?.optionalFieldDialogue?.activeOptionalFieldKey;
+  const activeOptionalField = requiredFields?.find(
+    (field) =>
+      field.key === orderStateSummary?.optionalFieldDialogue?.activeOptionalFieldKey,
+  );
+  const optionalResumePrompt = activeOptionalField
+    ? buildOptionalFieldPrompt(activeOptionalField)
+    : undefined;
+  const requiredResumePrompt =
+    awaitedField &&
+    !activeOptionalField &&
+    orderStateSummary?.collected
+      ? renderOrderProgressReply({
+          collected: orderStateSummary.collected,
+          missingFields: orderStateSummary.missingFields,
+          isComplete: false,
+          productContext: runtimeProductContext,
+          requiredFields,
+        })
+      : undefined;
+  const shouldResumeOrderAfterSideQuestion =
+    !orderStateFirstResult &&
+    Boolean(awaitedField) &&
+    (
+      isSideQuestionDisposition(orderDisposition.disposition) ||
+      result.meta?.informationalAIEligible === true ||
+      /[؟?]/.test(userMessage) ||
+      Boolean(optionalResumePrompt)
+    );
+  const resumeLabel = requiredFields?.find((field) => field.key === awaitedField)?.label || awaitedField;
+  const reply = shouldResumeOrderAfterSideQuestion
+    ? `${baseReply}\n\n${optionalResumePrompt?.text || requiredResumePrompt?.text || `وبالنسبة للطلب ديالك، عافاك صيفط ليا ${resumeLabel}.`}`
+    : baseReply;
+  const replyUi = optionalResumePrompt?.ui || requiredResumePrompt?.ui || result.meta?.replyUi;
   const whatsappInteractivePreview =
     whatsappInteractiveMapper.toCloudInteractivePreview({
       replyText: reply,
@@ -1587,6 +1741,14 @@ export async function generateAgentResult(
       naturalReplyTimedOut: false,
       naturalReplyCircuitOpen: false,
       ...result.meta,
+      aiUsed: Boolean(
+        result.meta?.informationalAIUsed ||
+          result.meta?.intentRouterUsedAI ||
+          result.meta?.naturalReplyUsed,
+      ),
+      stateChangedFieldKeys:
+        result.meta?.stateChangedFieldKeys ||
+        (shouldResumeOrderAfterSideQuestion ? [] : undefined),
       durationMs: Date.now() - startedAt,
       source: result.source,
       orderStateSummary,

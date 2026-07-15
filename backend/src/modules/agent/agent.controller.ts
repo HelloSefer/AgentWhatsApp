@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { env } from "../../config/env";
 import { generateAgentResult, resolveAgentIdentity } from "./agent.service";
 import { runFirstEntryAgentTest } from "./config/first-entry-agent-test.service";
 import { normalizeFirstEntryClick } from "./config/first-entry-click-normalizer.service";
@@ -26,6 +27,9 @@ import {
 import { evaluateSellerBrain } from "./seller-brain/seller-brain-eval.service";
 import type { SellerBrainEvalCase } from "./seller-brain/seller-brain.types";
 import { evaluateConversationScenarios } from "./conversation-scenario-eval.service";
+import { evaluateContextualOrderUnderstanding } from "./order-understanding/contextual-order-understanding-eval.service";
+import { evaluateInformationalAIBoundary } from "./info/informational-ai-answer-eval.service";
+import { isContextualOrderUnderstandingEvaluationEnabled } from "./order-understanding/evaluation-access.policy";
 import {
   adminNotificationTypes,
   deleteAdminNotification,
@@ -825,6 +829,36 @@ export async function evalAgentConversationScenarios(req: Request, res: Response
   } catch (error) {
     return res.status(500).json({
       message: "Conversation scenario evaluation failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function evalAgentContextualOrderUnderstanding(_req: Request, res: Response) {
+  if (!isContextualOrderUnderstandingEvaluationEnabled(env.nodeEnv)) {
+    return res.status(404).json({ message: "Not found" });
+  }
+
+  try {
+    return res.status(200).json(await evaluateContextualOrderUnderstanding());
+  } catch (error) {
+    return res.status(500).json({
+      message: "Contextual order understanding evaluation failed",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+export async function evalAgentInformationalAI(_req: Request, res: Response) {
+  if (!isContextualOrderUnderstandingEvaluationEnabled(env.nodeEnv)) {
+    return res.status(404).json({ message: "Not found" });
+  }
+
+  try {
+    return res.status(200).json(await evaluateInformationalAIBoundary());
+  } catch (error) {
+    return res.status(500).json({
+      message: "Informational AI boundary evaluation failed",
       error: error instanceof Error ? error.message : "Unknown error",
     });
   }

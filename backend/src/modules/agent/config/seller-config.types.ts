@@ -55,6 +55,32 @@ export type CustomerFieldKey =
   | "quantity"
   | string;
 
+export type OrderFieldRequirement =
+  | "REQUIRED"
+  | "OPTIONAL"
+  | "DISABLED"
+  | "CONDITIONAL";
+
+export type OrderFieldCaptureMode =
+  | "CONFIGURED_ENUM"
+  | "OPEN_TEXT"
+  | "NUMERIC"
+  | "PHONE"
+  | "LOCATION"
+  | "ADDRESS"
+  | "CUSTOM";
+
+export type OptionalFieldAskPolicy =
+  | "DO_NOT_ASK"
+  | "ASK_ONCE"
+  | "ASK_BEFORE_CONFIRMATION";
+
+export type OrderFieldCondition = {
+  fieldKey: string;
+  equals?: string | number | boolean;
+  exists?: boolean;
+};
+
 export type CustomerFieldConfig = {
   key: CustomerFieldKey;
   label: string;
@@ -65,6 +91,14 @@ export type CustomerFieldConfig = {
   minValue?: number;
   maxValue?: number;
   defaultValue?: number | string;
+  /** Explicit policy; absent values retain the legacy required/enabled behavior. */
+  requirement?: OrderFieldRequirement;
+  captureMode?: OrderFieldCaptureMode;
+  semanticType?: string;
+  aliases?: string[];
+  allowMultipleMessages?: boolean;
+  askPolicy?: OptionalFieldAskPolicy;
+  condition?: OrderFieldCondition;
 };
 
 export type FirstEntryPolicy = {

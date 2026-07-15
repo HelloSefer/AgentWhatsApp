@@ -7,6 +7,8 @@ import {
   evalAgentReplies,
   evalAgentSellerBrain,
   evalAgentConversationScenarios,
+  evalAgentContextualOrderUnderstanding,
+  evalAgentInformationalAI,
   firstEntryClickPreview,
   firstEntryDryRun,
   firstEntryLiveSmokeDispatchPreview,
@@ -50,6 +52,8 @@ router.post("/eval-replies", evalAgentReplies);
 router.post("/eval-natural-replies", evalAgentNaturalReplies);
 router.post("/eval-seller-brain", evalAgentSellerBrain);
 router.post("/eval-conversation-scenarios", evalAgentConversationScenarios);
+router.post("/eval-contextual-order-understanding", evalAgentContextualOrderUnderstanding);
+router.post("/eval-informational-ai", evalAgentInformationalAI);
 router.get(
   "/config/:sellerId/first-entry-eligibility-preview",
   getAgentFirstEntryEligibilityPreview,

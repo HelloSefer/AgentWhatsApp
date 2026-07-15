@@ -1,4 +1,10 @@
 import type { DisplayMode } from "./seller-config.types";
+import type {
+  OptionalFieldAskPolicy,
+  OrderFieldCaptureMode,
+  OrderFieldCondition,
+  OrderFieldRequirement,
+} from "./seller-config.types";
 
 export type RequiredFieldSource = "customerField" | "productOption";
 
@@ -15,4 +21,11 @@ export type RequiredOrderField = {
   minValue?: number;
   maxValue?: number;
   defaultValue?: number | string;
+  requirement?: OrderFieldRequirement;
+  captureMode?: OrderFieldCaptureMode;
+  semanticType?: string;
+  aliases?: string[];
+  allowMultipleMessages?: boolean;
+  askPolicy?: OptionalFieldAskPolicy;
+  condition?: OrderFieldCondition;
 };

@@ -55,6 +55,57 @@ const SLOW_THRESHOLD_MS = 500;
 
 const defaultIntentEvalCases: IntentEvalCase[] = [
   {
+    message: "first_entry:more_info",
+    expectedIntent: "product_info_question",
+    expectedUsedAI: false,
+  },
+  {
+    message: "info:sizes",
+    expectedIntent: "size_question",
+    expectedUsedAI: false,
+  },
+  {
+    message: "info:colors",
+    expectedIntent: "color_question",
+    expectedUsedAI: false,
+  },
+  {
+    message: "info:continue_order",
+    expectedIntent: "order_start",
+    expectedUsedAI: false,
+  },
+  {
+    message: "info:more_info",
+    expectedIntent: "product_info_question",
+    expectedUsedAI: false,
+  },
+  {
+    message: "size:37",
+    expectedIntent: "order_followup",
+    expectedUsedAI: false,
+    expectedEntities: { size: "37" },
+  },
+  {
+    message: "color:أسود",
+    expectedIntent: "order_followup",
+    expectedUsedAI: false,
+  },
+  {
+    message: "field:skip:note",
+    expectedIntent: "order_followup",
+    expectedUsedAI: false,
+  },
+  {
+    message: "order:confirm",
+    expectedIntent: "order_confirmation",
+    expectedUsedAI: false,
+  },
+  {
+    message: "order:edit",
+    expectedIntent: "order_correction",
+    expectedUsedAI: false,
+  },
+  {
     message: "salam bghit ncommande wa7da 38 f casa",
     expectedIntent: "order_start",
     expectedEntities: { size: "38", quantity: 1 },
