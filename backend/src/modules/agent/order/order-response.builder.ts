@@ -7,6 +7,7 @@ import {
   calculateOrderTotals,
   formatOrderMoney,
 } from "./order-pricing.service";
+import type { ResolvedDeliveryQuote } from "./delivery-pricing.service";
 
 const fieldLabels: Record<string, string> = {
   fullName: "الاسم الكامل",
@@ -124,6 +125,7 @@ function buildPhase2AOrderSummary(input: {
   collected: OrderEntities;
   productContext: ProductContext;
   requiredFields?: RequiredOrderField[];
+  deliveryQuote: ResolvedDeliveryQuote;
 }): RenderedAgentReply {
   const lines: string[] = ["راجع تفاصيل الطلب ديالك قبل ما نأكدوه 👇"];
   const productName = getProductName(input.productContext);
@@ -164,6 +166,7 @@ function buildPhase2AOrderSummary(input: {
   const totals = calculateOrderTotals({
     productContext: input.productContext,
     quantity: input.collected.quantity,
+    deliveryQuote: input.deliveryQuote,
   });
 
   if (totals.unitPrice > 0) {
@@ -173,9 +176,7 @@ function buildPhase2AOrderSummary(input: {
       `ثمن الوحدة: ${formatOrderMoney(totals.unitPrice)} ${totals.currency}`,
       `ثمن المنتجات: ${formatOrderMoney(totals.subtotal)} ${totals.currency}`,
       `مصاريف التوصيل: ${totals.deliveryPriceLabel}`,
-      totals.deliveryPriceKnown
-        ? `المجموع: ${formatOrderMoney(totals.total)} ${totals.currency}`
-        : "المجموع النهائي: يتحدد بعد تأكيد مصاريف التوصيل",
+      `المجموع: ${formatOrderMoney(totals.total)} ${totals.currency}`,
     );
   }
 
@@ -221,12 +222,18 @@ export function renderOrderProgressReply(input: {
   isComplete: boolean;
   productContext: ProductContext;
   requiredFields?: RequiredOrderField[];
+  deliveryQuote?: ResolvedDeliveryQuote;
 }): RenderedAgentReply {
   if (input.isComplete) {
+    if (!input.deliveryQuote) {
+      throw new Error("Resolved delivery quote is required for final order review");
+    }
+
     return buildPhase2AOrderSummary({
       collected: input.collected,
       productContext: input.productContext,
       requiredFields: input.requiredFields,
+      deliveryQuote: input.deliveryQuote,
     });
   }
 
@@ -248,6 +255,7 @@ export function buildOrderProgressReply(input: {
   isComplete: boolean;
   productContext: ProductContext;
   requiredFields?: RequiredOrderField[];
+  deliveryQuote?: ResolvedDeliveryQuote;
 }): string {
   return renderOrderProgressReply(input).text;
 }

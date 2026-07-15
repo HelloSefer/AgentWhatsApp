@@ -25,6 +25,48 @@ export const demoSellerConfigs: SellerConfig[] = [
       isFree: false,
       currency: "MAD",
       wordingStyle: "clear",
+      pricing: {
+        enabled: true,
+        mode: "CITY_RULES",
+        currency: "MAD",
+        rules: [
+          {
+            id: "casablanca-free",
+            type: "FREE",
+            cityKeys: ["الدار البيضاء"],
+            aliases: ["كازا", "casa", "casablanca", "الدارالبيضاء"],
+            priority: 100,
+          },
+          {
+            id: "marrakech-30",
+            type: "PAID",
+            amount: 30,
+            cityKeys: ["مراكش"],
+            aliases: ["marrakech", "marrakesh"],
+            priority: 100,
+          },
+          {
+            id: "rabat-25",
+            type: "PAID",
+            amount: 25,
+            cityKeys: ["الرباط"],
+            aliases: ["rabat"],
+            priority: 100,
+          },
+          {
+            id: "demo-unavailable-zone",
+            type: "UNAVAILABLE",
+            cityKeys: ["منطقة خارج التغطية"],
+            aliases: ["خارج التغطية"],
+            priority: 100,
+          },
+        ],
+        defaultRule: {
+          id: "other-supported-locations-35",
+          type: "PAID",
+          amount: 35,
+        },
+      },
     },
     delivery: {
       enabled: true,
@@ -128,6 +170,12 @@ export const demoSellerConfigs: SellerConfig[] = [
       currency: "MAD",
       cities: ["الدار البيضاء", "الرباط", "مراكش", "فاس"],
       wordingStyle: "professional",
+      pricing: {
+        enabled: true,
+        mode: "FLAT_RATE",
+        flatRate: 25,
+        currency: "MAD",
+      },
     },
     delivery: {
       enabled: true,
@@ -210,6 +258,11 @@ export const demoSellerConfigs: SellerConfig[] = [
       isFree: false,
       currency: "MAD",
       wordingStyle: "short",
+      pricing: {
+        enabled: true,
+        mode: "ALL_FREE",
+        currency: "MAD",
+      },
     },
     delivery: {
       enabled: false,

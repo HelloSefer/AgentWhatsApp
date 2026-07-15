@@ -20,6 +20,7 @@ import { whatsappInteractiveMapper } from "../reply/whatsapp-interactive.mapper"
 import type { AgentReplyUiHint } from "../reply/reply-renderer.types";
 import type { WhatsAppInteractivePreview } from "../reply/whatsapp-interactive.types";
 import type { ConversationSession } from "../agent-brain.types";
+import { validateSellerConfigReadiness } from "./seller-config-readiness.service";
 
 type FirstEntryLiveSmokePresentationMode =
   | "single_message"
@@ -52,6 +53,8 @@ export type FirstEntryLiveSmokeReadiness = {
   firstEntryLiveSmokeEnabled: boolean;
   recipientAllowed: boolean;
   sellerIdConfigured: boolean;
+  deliveryConfigReady: boolean;
+  deliveryConfigReasons: string[];
   cloudProvider: boolean;
   cloudGuardEnabled: boolean;
   cloudDryRunDisabled: boolean;
@@ -68,6 +71,7 @@ export type FirstEntryLiveSmokeReadiness = {
     cloudDryRunDisabled: boolean;
     recipientExactlyAllowlisted: boolean;
     sellerIdConfigured: boolean;
+    deliveryPricingReady: boolean;
     noBroadcast: true;
     noProviderPayload: true;
     noMetaApiCall: true;
@@ -163,6 +167,8 @@ function buildWarnings(input: {
   requestedRecipient: string;
   configuredSellerId: string;
   requestedSellerId?: string;
+  deliveryConfigReady: boolean;
+  deliveryConfigReasons: string[];
 }): string[] {
   const warnings: string[] = [];
 
@@ -199,6 +205,14 @@ function buildWarnings(input: {
     warnings.push("Requested sellerId does not match the configured smoke seller.");
   }
 
+  if (!input.deliveryConfigReady) {
+    warnings.push(
+      ...input.deliveryConfigReasons.map(
+        (reason) => `Seller delivery pricing is not ready: ${reason}`,
+      ),
+    );
+  }
+
   warnings.push("Guarded smoke test only. Not production ready.");
 
   return warnings;
@@ -224,13 +238,29 @@ export function buildFirstEntryLiveSmokeReadiness(input: {
     requestedRecipient === configuredRecipient;
   const sellerIdConfigured =
     Boolean(configuredSellerId) &&
-    (!requestedSellerId || requestedSellerId === configuredSellerId);
+    (!requestedSellerId || requestedSellerId === configuredSellerId) &&
+    sellerConfigService.hasSellerConfig(configuredSellerId);
+  const deliveryConfigReadiness = sellerConfigService.hasSellerConfig(
+    requestedSellerId || configuredSellerId,
+  )
+    ? validateSellerConfigReadiness(
+        sellerConfigService.getSellerConfig(requestedSellerId || configuredSellerId),
+      )
+    : {
+        ready: false,
+        reasons: ["Configured seller does not exist."],
+        checks: { deliveryPricing: false },
+      };
   const liveEnabled =
     cloudProvider &&
     firstEntryLiveSmokeEnabled &&
     cloudGuardEnabled &&
     cloudDryRunDisabled;
-  const ready = liveEnabled && recipientAllowed && sellerIdConfigured;
+  const ready =
+    liveEnabled &&
+    recipientAllowed &&
+    sellerIdConfigured &&
+    deliveryConfigReadiness.ready;
 
   return {
     ok: true,
@@ -240,6 +270,8 @@ export function buildFirstEntryLiveSmokeReadiness(input: {
     firstEntryLiveSmokeEnabled,
     recipientAllowed,
     sellerIdConfigured,
+    deliveryConfigReady: deliveryConfigReadiness.ready,
+    deliveryConfigReasons: deliveryConfigReadiness.reasons,
     cloudProvider,
     cloudGuardEnabled,
     cloudDryRunDisabled,
@@ -259,6 +291,8 @@ export function buildFirstEntryLiveSmokeReadiness(input: {
       requestedRecipient,
       configuredSellerId,
       requestedSellerId,
+      deliveryConfigReady: deliveryConfigReadiness.ready,
+      deliveryConfigReasons: deliveryConfigReadiness.reasons,
     }),
     checks: {
       whatsappProviderCloudApi: cloudProvider,
@@ -267,6 +301,7 @@ export function buildFirstEntryLiveSmokeReadiness(input: {
       cloudDryRunDisabled,
       recipientExactlyAllowlisted: recipientAllowed,
       sellerIdConfigured,
+      deliveryPricingReady: deliveryConfigReadiness.ready,
       noBroadcast: true,
       noProviderPayload: true,
       noMetaApiCall: true,

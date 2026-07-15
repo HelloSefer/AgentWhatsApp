@@ -10,6 +10,9 @@ import type {
   OrderReceiptRecord,
   ReceiptSendStatus,
 } from "./order-receipt.types";
+import {
+  validateConfirmedOrderReceiptSnapshot,
+} from "./order-receipt-validation.service";
 
 type GenerateReceiptResult = {
   ok: boolean;
@@ -17,6 +20,8 @@ type GenerateReceiptResult = {
   exists: boolean;
   sizeBytes: number;
   errorMessage?: string;
+  errorCode?: "RECEIPT_DATA_INVALID";
+  invalidFields?: string[];
 };
 
 export type LocalReceiptDeleteResult = {
@@ -118,6 +123,8 @@ export function recordOrderReceiptDocumentFailed(input: {
   orderId: string;
   pdfPath?: string;
   errorMessage: string;
+  errorCode?: "RECEIPT_DATA_INVALID";
+  invalidFields?: string[];
   localFileDeleted?: boolean;
   localFileDeletedAt?: string;
   localFileDeleteError?: string;
@@ -128,6 +135,8 @@ export function recordOrderReceiptDocumentFailed(input: {
     pdfPath: input.pdfPath,
     sendStatus: "FAILED",
     lastError: input.errorMessage,
+    errorCode: input.errorCode,
+    invalidFields: input.invalidFields,
     localFileDeleted: input.localFileDeleted,
     localFileDeletedAt: input.localFileDeletedAt,
     localFileDeleteError: input.localFileDeleteError,
@@ -151,6 +160,8 @@ export function recordOrderReceiptSkipped(input: {
         ? "SENT"
         : input.status || "SKIPPED",
     lastError: existingRecord?.lastError,
+    errorCode: existingRecord?.errorCode,
+    invalidFields: existingRecord?.invalidFields,
     localFileDeleted: existingRecord?.localFileDeleted,
     localFileDeletedAt: existingRecord?.localFileDeletedAt,
     localFileDeleteError: existingRecord?.localFileDeleteError,
@@ -560,7 +571,7 @@ function receiptIcon(kind: ReceiptIconKind, className = "receipt-icon"): string 
     product: '<path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9Z"/><path d="m4.5 7.7 7.5 4.2 7.5-4.2M12 12v9M8 5.3l8 4.5"/>',
     cart: '<path d="M3 4h2l2.2 11.2h10.7l2-7.4H6"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/>',
     recap: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h2M14 11h2M8 15h2M14 15h2M8 19h8"/>',
-    payment: '<path d="M3 8h11v8H3zM5 11h4"/><path d="M14 10h3l3 3v3h-6v-6Z"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/><path d="M14 13h6"/>',
+    payment: '<rect x="3" y="3.5" width="15" height="9" rx="1.5"/><circle cx="10.5" cy="8" r="2"/><path d="M5.5 6h.01M15.5 10h.01M3.5 17.2h4.2l2.1-2.1h5.7c1.2 0 2 .8 2 1.8 0 .5-.2.9-.5 1.2l-4.4 3H7.2l-3.7-1.8"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 7h.01"/>',
     heart: '<path d="M20.8 4.9a5.4 5.4 0 0 0-7.6 0L12 6.1l-1.2-1.2a5.4 5.4 0 0 0-7.6 7.6L12 21l8.8-8.5a5.4 5.4 0 0 0 0-7.6Z"/>',
   };
@@ -643,15 +654,11 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
         `<div class="attribute-row"><span class="attribute-label">${escapeHtml(attribute.label)} :</span><span class="attribute-value dynamic-value" dir="auto">${escapeHtml(attribute.value)}</span></div>`,
     )
     .join("");
-  const deliveryKnown = order.deliveryPriceKnown !== false;
-  const deliveryText = deliveryKnown
-    ? order.deliveryPrice === 0
-      ? "Gratuit"
-      : formatMoney(order.deliveryPrice, currency)
-    : "À confirmer";
-  const totalText = deliveryKnown
-    ? formatMoney(order.total, currency)
-    : "À confirmer par la boutique";
+  const pricing = order.pricing;
+  const deliveryText = pricing.deliveryPrice === 0
+    ? "Gratuit"
+    : formatMoney(pricing.deliveryPrice, currency);
+  const totalText = formatMoney(pricing.total, currency);
   const logoHtml = logoDataUri
     ? `<img class="logo-image" src="${logoDataUri}" alt="Logo ${escapeHtml(branding.storeName)}" />`
     : `<div class="logo-fallback" aria-label="Logo de secours">${escapeHtml(getStoreInitials(branding.storeName))}</div>`;
@@ -708,7 +715,7 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       .store-name { color: ${primaryDark}; font-family: Georgia, "Times New Roman", serif; font-size: 31px; line-height: 1.04; font-weight: 700; overflow-wrap: anywhere; }
       .slogan { margin-top: 7px; color: ${accentColor}; font-size: 13px; line-height: 1.3; }
       .brand-accent { width: 42px; height: 1px; margin-top: 11px; background: ${accentColor}; }
-      .header-contacts { display: grid; gap: 7px; min-height: 72px; padding: 4px 0 4px 28px; border-left: 1px solid ${borderColor}; color: ${primaryDark}; font-size: 11px; }
+      .header-contacts { display: grid; gap: 7px; min-height: 72px; padding: 4px 0 4px 28px; border-left: 1px solid ${borderColor}; color: ${primaryDark}; font-size: 12px; }
       .contact-row { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 9px; min-width: 0; }
       .contact-row svg { width: 17px; height: 17px; color: ${primaryColor}; }
       .contact-row span { overflow-wrap: anywhere; unicode-bidi: plaintext; }
@@ -736,56 +743,59 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       .customer-label-group svg { width: 19px; height: 19px; flex: 0 0 19px; color: ${primaryColor}; }
       .customer-label { color: ${primaryDark}; font-size: 11px; font-weight: 500; }
       .customer-value { color: ${primaryDark}; font-size: 12.5px; font-weight: 500; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: right; }
-      .product-panel { display: flex; flex-direction: column; min-height: 220px; }
-      .product-visual { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 218px; padding: 40px 14px 10px; background: linear-gradient(150deg, #fff 58%, ${softBackground}); }
-      .product-image { width: 89%; height: 89%; max-width: 89%; max-height: 89%; object-fit: contain; filter: drop-shadow(0 7px 8px rgba(3, 31, 73, .13)); }
+      .product-panel { display: flex; flex-direction: column; min-height: 220px; border-color: ${mixHexColor(primaryColor, "#FFFFFF", 0.87)}; }
+      .product-visual { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 218px; padding: 40px 11px 8px; background: linear-gradient(180deg, #fff 72%, ${softBackground}); }
+      .product-image { width: 92%; height: 92%; max-width: 92%; max-height: 92%; object-fit: contain; }
       .product-placeholder { width: 88%; min-height: 145px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 8px; color: ${primaryDark}; border: 1px dashed ${borderColor}; border-radius: 10px; background: rgba(244,248,253,.8); }
       .product-placeholder-badge { width: 54px; height: 54px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: ${primaryColor}; color: ${accentColor}; border: 1px solid ${accentColor}; font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: 700; }
       .product-placeholder strong { max-width: 85%; font-size: 12px; font-weight: 600; }
       .product-placeholder small { color: #697a90; font-size: 9px; }
-      .details { margin-top: 23px; padding-top: 38px; }
-      .details .section-heading { min-width: 252px; }
-      .item-grid { display: grid; grid-template-columns: minmax(0, 2.15fr) .74fr 1.12fr 1fr; align-items: stretch; }
-      .item-grid > div { min-width: 0; padding: 10px 18px; }
+      .details { flex: 0 0 auto; margin-top: 20px; padding-top: 43px; border-color: ${mixHexColor(primaryColor, "#FFFFFF", 0.78)}; border-radius: 12px; }
+      .details .section-heading { top: -1px; left: -1px; min-width: 286px; height: 44px; padding: 0 21px; gap: 11px; border-radius: 12px 12px 0 0; box-shadow: inset 0 -2px 0 ${accentColor}; }
+      .details .section-heading svg { width: 20px; height: 20px; flex-basis: 20px; }
+      .item-grid { display: grid; grid-template-columns: minmax(0, 2.4fr) .72fr 1.14fr 1.04fr; align-items: stretch; }
+      .item-grid > div { min-width: 0; padding: 12px 20px; }
       .item-grid > div + div { border-left: 1px solid ${borderColor}; }
-      .item-head { color: #fff; font-size: 10.5px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; background: ${primaryColor}; }
-      .item-head > div:not(:first-child) { text-align: center; }
-      .item-row { min-height: 92px; background: #fff; }
-      .item-row > div:not(:first-child) { display: flex; align-items: center; justify-content: center; color: ${primaryDark}; font-size: 11.5px; font-weight: 500; text-align: center; }
-      .item-product-name { color: ${primaryDark}; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; unicode-bidi: plaintext; }
-      .attributes { display: grid; gap: 4px; margin-top: 7px; color: ${primaryDark}; font-size: 10.5px; }
-      .attribute-row { display: flex; align-items: baseline; justify-content: flex-start; gap: 5px; direction: ltr; }
+      .item-head { min-height: 39px; color: #fff; font-size: 10.5px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; background: linear-gradient(100deg, ${primaryDark}, ${primaryColor}); }
+      .item-head > div { display: flex; align-items: center; }
+      .item-head > div:not(:first-child) { justify-content: center; text-align: center; }
+      .item-row { min-height: 106px; background: #fff; }
+      .item-row > div { display: flex; align-items: center; }
+      .item-row > div:not(:first-child) { justify-content: center; color: ${primaryDark}; font-size: 12px; line-height: 1.4; font-weight: 600; text-align: center; }
+      .item-product-cell { flex-direction: column; align-items: flex-start !important; justify-content: center; direction: ltr; background: linear-gradient(100deg, ${softBackground}, #fff 42%); }
+      .item-product-name { width: 100%; color: ${primaryDark}; font-size: 16.5px; line-height: 1.35; font-weight: 700; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: left; }
+      .attributes { display: grid; gap: 5px; width: fit-content; margin-top: 8px; color: ${primaryDark}; font-size: 11px; line-height: 1.4; }
+      .attribute-row { display: grid; grid-template-columns: 58px minmax(0, auto); align-items: baseline; column-gap: 7px; direction: ltr; }
       .attribute-label { direction: ltr; unicode-bidi: isolate; font-weight: 600; white-space: nowrap; }
-      .attribute-value { flex: 0 1 auto; font-weight: 400; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: start; }
+      .attribute-value { min-width: 0; font-weight: 500; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: left; }
       .summary-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 22px; margin-top: 22px; align-items: stretch; }
       .summary-card, .payment-card { position: relative; min-height: 183px; padding-top: 38px; border: 1px solid ${borderColor}; border-radius: 12px; overflow: hidden; background: #fff; }
       .summary-card .section-heading { min-width: 188px; }
-      .summary-body { padding: 10px 15px 14px; }
-      .summary-line { display: flex; justify-content: space-between; gap: 18px; padding: 8px 2px; color: ${primaryDark}; border-bottom: 1px dotted ${borderColor}; font-size: 10.5px; }
+      .summary-body { padding: 11px 15px 15px; }
+      .summary-line { display: flex; justify-content: space-between; gap: 18px; padding: 9px 2px; color: ${primaryDark}; border-bottom: 1px solid ${borderColor}; font-size: 10.5px; }
       .summary-line strong { color: ${primaryDark}; font-weight: 600; }
       .summary-line .free-delivery { color: #15813f; }
       .summary-total { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-top: 11px; min-height: 53px; padding: 10px 13px; border: 1px solid ${accentColor}; border-radius: 8px; background: linear-gradient(120deg, #fffaf0, ${softBackground}); color: ${primaryDark}; }
       .total-label { font-size: 13px; font-weight: 700; }
-      .total-value { color: ${accentColor}; font-size: 21px; font-weight: 700; text-align: right; white-space: nowrap; }
-      .summary-total.pending .total-value { max-width: 64%; color: ${primaryDark}; font-size: 12px; line-height: 1.25; white-space: normal; }
+      .total-value { margin-left: auto; color: ${accentColor}; font-size: 22px; font-weight: 700; text-align: right; white-space: nowrap; }
       .payment-card { background: linear-gradient(145deg, #fff, ${softBackground}); }
       .payment-card .section-heading { min-width: 209px; }
       .payment-content { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 16px; align-items: center; min-height: 142px; padding: 10px 18px 14px; }
       .payment-icon { width: 66px; height: 66px; display: flex; align-items: center; justify-content: center; border: 1.5px solid ${accentColor}; border-radius: 50%; background: #fff; color: ${primaryColor}; }
       .payment-icon svg { width: 39px; height: 39px; }
       .payment-value { color: ${primaryDark}; font-size: 15px; line-height: 1.2; font-weight: 700; }
-      .payment-note { margin-top: 8px; color: #41536d; font-size: 10px; line-height: 1.45; }
+      .payment-note { margin-top: 8px; color: #41536d; font-size: 11px; line-height: 1.45; }
       .keep-note { margin: 10px 0 0; padding: 8px 11px; border: 1px solid ${borderColor}; border-radius: 8px; background: #fff; color: #41536d; font-size: 9.5px; unicode-bidi: plaintext; }
       .information-strip { display: flex; align-items: center; gap: 10px; min-height: 35px; margin: 12px 0 11px; padding: 7px 12px; border: 1px solid ${borderColor}; border-radius: 9px; background: ${softBackground}; color: ${primaryDark}; font-size: 9.5px; }
       .information-strip svg { width: 18px; height: 18px; flex: 0 0 18px; color: ${primaryColor}; }
-      .footer { margin: auto -10mm 0; min-height: 32mm; padding: 11px 10mm 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px; align-items: center; background: linear-gradient(108deg, ${primaryDark}, ${primaryColor}); color: #fff; }
+      .footer { margin: auto -10mm 0; min-height: 29mm; padding: 9px 10mm 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px; align-items: center; background: linear-gradient(108deg, ${primaryDark}, ${primaryColor}); color: #fff; }
       .footer.no-social { grid-template-columns: 1fr; }
       .footer-thanks { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 17px; align-items: center; }
       .footer-heart { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; border: 1.5px solid ${accentColor}; border-radius: 50%; color: ${accentColor}; }
       .footer-heart svg { width: 31px; height: 31px; }
       .footer-main { font-family: Georgia, "Times New Roman", serif; font-size: 17px; line-height: 1.15; font-weight: 600; }
       .footer-title-accent { width: 38px; height: 1.5px; margin-top: 7px; background: ${accentColor}; }
-      .footer-disclaimer { margin-top: 8px; max-width: 480px; font-size: 9px; line-height: 1.5; color: rgba(255,255,255,.9); }
+      .footer-disclaimer { margin-top: 7px; max-width: 480px; font-size: 10px; line-height: 1.45; color: rgba(255,255,255,.9); }
       .footer-social { min-width: 205px; min-height: 60px; padding-left: 27px; border-left: 1px solid ${accentColor}; display: flex; align-items: center; justify-content: center; gap: 11px; color: #fff; font-size: 11px; }
       .footer-social-icon { width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; color: ${accentColor}; }
       .footer-social-icon svg { width: 31px; height: 31px; }
@@ -836,13 +846,13 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       <section class="panel details">
         <h2 class="section-heading">${receiptIcon("cart")}<span>DÉTAILS DE LA COMMANDE</span></h2>
         <div class="item-grid item-head"><div>Produit</div><div>Quantité</div><div>Prix unitaire</div><div>Total</div></div>
-        <div class="item-grid item-row"><div><div class="item-product-name dynamic-value" dir="auto">${escapeHtml(order.productName)}</div>${productAttributes ? `<div class="attributes">${productAttributes}</div>` : ""}</div><div>${escapeHtml(order.quantity)}</div><div>${escapeHtml(formatMoney(order.unitPrice, currency))}</div><div>${escapeHtml(formatMoney(order.subtotal, currency))}</div></div>
+        <div class="item-grid item-row"><div class="item-product-cell"><div class="item-product-name dynamic-value" dir="auto">${escapeHtml(order.productName)}</div>${productAttributes ? `<div class="attributes">${productAttributes}</div>` : ""}</div><div>${escapeHtml(pricing.quantity)}</div><div>${escapeHtml(formatMoney(pricing.unitPrice, currency))}</div><div>${escapeHtml(formatMoney(pricing.subtotal, currency))}</div></div>
       </section>
 
       <section class="summary-grid">
         <div class="summary-card">
           <h2 class="section-heading">${receiptIcon("recap")}<span>RÉCAPITULATIF</span></h2>
-          <div class="summary-body"><div class="summary-line"><span>Sous-total</span><strong>${escapeHtml(formatMoney(order.subtotal, currency))}</strong></div><div class="summary-line"><span>Frais de livraison</span><strong class="${deliveryKnown && order.deliveryPrice === 0 ? "free-delivery" : ""}">${escapeHtml(deliveryText)}</strong></div><div class="summary-total${deliveryKnown ? "" : " pending"}"><span class="total-label">TOTAL FINAL</span><span class="total-value">${escapeHtml(totalText)}</span></div></div>
+          <div class="summary-body"><div class="summary-line"><span>Sous-total</span><strong>${escapeHtml(formatMoney(pricing.subtotal, currency))}</strong></div><div class="summary-line"><span>Frais de livraison</span><strong class="${pricing.deliveryPrice === 0 ? "free-delivery" : ""}">${escapeHtml(deliveryText)}</strong></div><div class="summary-total"><span class="total-label">TOTAL FINAL</span><span class="total-value">${escapeHtml(totalText)}</span></div></div>
         </div>
         <div class="payment-card"><h2 class="section-heading">${receiptIcon("payment")}<span>MODE DE PAIEMENT</span></h2><div class="payment-content"><div class="payment-icon">${receiptIcon("payment")}</div><div><div class="payment-value">${escapeHtml(paymentMethod)}</div><div class="payment-note">Vous réglez le montant total au moment de la livraison.</div></div></div></div>
       </section>
@@ -869,6 +879,19 @@ export async function generateOrderReceiptPdf(
       exists: false,
       sizeBytes: 0,
       errorMessage: "Order receipt PDF generation is disabled",
+    };
+  }
+
+  const validation = validateConfirmedOrderReceiptSnapshot(order);
+
+  if (!validation.valid) {
+    return {
+      ok: false,
+      exists: false,
+      sizeBytes: 0,
+      errorMessage: "Confirmed order receipt snapshot is structurally invalid",
+      errorCode: validation.errorCode,
+      invalidFields: validation.invalidFields,
     };
   }
 
@@ -992,6 +1015,25 @@ export function buildSampleReceiptOrder(): OrderReceiptOrder {
     deliveryPriceKnown: true,
     total: 398,
     currency: "درهم",
+    deliveryQuote: {
+      status: "RESOLVED",
+      type: "FREE",
+      amount: 0,
+      currency: "MAD",
+      inputCity: "مراكش",
+      canonicalCity: "مراكش",
+      ruleId: "sample-free-delivery",
+      resolvedAt: confirmedAt,
+    },
+    pricing: {
+      status: "COMPLETE",
+      unitPrice: 199,
+      quantity: 2,
+      subtotal: 398,
+      deliveryPrice: 0,
+      total: 398,
+      currency: "MAD",
+    },
     status: "CONFIRMED",
     source: "agent",
     confirmedAt,
@@ -1013,9 +1055,10 @@ export function buildSampleReceiptOrder(): OrderReceiptOrder {
     },
     receiptProduct: {
       imageRef: "src/modules/order-receipt/fixtures/demo-sandal-product-cropped.png",
+      requiredAttributeKeys: ["size", "color"],
       attributes: [
-        { label: "Taille", value: "40" },
-        { label: "Couleur", value: "وردي" },
+        { key: "size", label: "Taille", value: "40", canonicalValue: "40" },
+        { key: "color", label: "Couleur", value: "وردي", canonicalValue: "وردي" },
       ],
     },
   };

@@ -20,9 +20,8 @@ import {
 import type { OrderEntities } from "../../agent/agent-brain.types";
 import { fastAnalyzeCustomerMessage } from "../../agent/fast-intent-analyzer.service";
 import {
-  getInvalidOrderFields,
   getOrderFieldValidationDiagnostics,
-  recordReceiptSkippedInvalidOrderFields,
+  recordReceiptFailedInvalidOrderData,
 } from "../../agent/order/order-field-validator.service";
 import {
   getConfirmedOrderById,
@@ -43,6 +42,11 @@ import {
   recordOrderReceiptDocumentSent,
   recordOrderReceiptSkipped,
 } from "../../order-receipt/order-receipt.service";
+import {
+  canAttemptOrderReceiptSend,
+  RECEIPT_DATA_INVALID,
+  validateConfirmedOrderReceiptSnapshot,
+} from "../../order-receipt/order-receipt-validation.service";
 import type {
   WhatsAppCloudChoiceListSendInput,
   WhatsAppCloudIncomingMessage,
@@ -1467,27 +1471,28 @@ export async function sendOrderReceiptDocumentForOrder(input: {
     localFileDeletedAt?: string;
     localFileDeleteError?: string;
     pdfExistsAfterSend?: boolean;
+    errorCode?: "RECEIPT_DATA_INVALID";
+    invalidFields?: string[];
   }
 > {
   const existingReceipt = getOrderReceiptRecord(input.order.id);
+  const attemptDecision = canAttemptOrderReceiptSend({
+    orderStatus: input.order.receiptSendStatus,
+    recordStatus: existingReceipt?.sendStatus,
+  });
 
-  if (
-    !input.allowDuplicate &&
-    (["PENDING", "SENT", "FAILED"].includes(existingReceipt?.sendStatus || "") ||
-      ["PENDING", "SENT", "FAILED"].includes(
-        input.order.receiptSendStatus || "",
-      ))
-  ) {
+  if (!attemptDecision.allowed) {
     recordOrderReceiptSkipped({
       orderId: input.order.id,
       pdfPath: existingReceipt?.pdfPath || input.order.receiptPdfPath,
+      status: existingReceipt?.sendStatus || input.order.receiptSendStatus,
     });
 
     return {
       success: true,
       dryRun: env.whatsappCloudDryRun,
       payload: null,
-      response: { skipped: "duplicate_receipt" },
+      response: { skipped: attemptDecision.reason },
       pdfPath: existingReceipt?.pdfPath || input.order.receiptPdfPath,
       localFileDeleted:
         existingReceipt?.localFileDeleted ||
@@ -1498,36 +1503,29 @@ export async function sendOrderReceiptDocumentForOrder(input: {
     };
   }
 
-  const invalidOrderFields = getInvalidOrderFields(
-    {
-      fullName: input.order.fullName,
-      phone: input.order.phone,
-      city: input.order.city,
-      address: input.order.address,
-      size: input.order.size,
-      color: input.order.color,
-      quantity: input.order.quantity,
-    },
-    ["fullName", "phone", "city", "address", "size", "color", "quantity"],
-  );
+  const validation = validateConfirmedOrderReceiptSnapshot(input.order);
 
-  if (invalidOrderFields.length > 0) {
-    recordReceiptSkippedInvalidOrderFields({
+  if (!validation.valid) {
+    const errorMessage = "Confirmed order receipt snapshot is structurally invalid";
+
+    recordReceiptFailedInvalidOrderData({
       orderId: input.order.id,
-      invalidFields: invalidOrderFields,
+      invalidFields: validation.invalidFields,
     });
     updateConfirmedOrderReceipt(input.order.id, {
-      receiptSendStatus: "SKIPPED",
+      receiptSendStatus: "FAILED",
+      receiptError: errorMessage,
+      receiptErrorCode: RECEIPT_DATA_INVALID,
+      receiptInvalidFields: validation.invalidFields,
     });
 
     return {
-      success: true,
+      success: false,
       dryRun: env.whatsappCloudDryRun,
       payload: null,
-      response: {
-        skipped: "invalid_order_fields",
-        invalidFields: invalidOrderFields,
-      },
+      errorMessage,
+      errorCode: RECEIPT_DATA_INVALID,
+      invalidFields: validation.invalidFields,
     };
   }
 
@@ -1568,6 +1566,8 @@ export async function sendOrderReceiptDocumentForOrder(input: {
   updateConfirmedOrderReceipt(input.order.id, {
     receiptSendStatus: "PENDING",
     receiptError: undefined,
+    receiptErrorCode: undefined,
+    receiptInvalidFields: undefined,
   });
 
   const pdfResult = await generateOrderReceiptPdf(input.order);
@@ -1579,11 +1579,15 @@ export async function sendOrderReceiptDocumentForOrder(input: {
       receiptPdfPath: pdfResult.pdfPath,
       receiptSendStatus: "FAILED",
       receiptError: errorMessage,
+      receiptErrorCode: pdfResult.errorCode,
+      receiptInvalidFields: pdfResult.invalidFields,
     });
     recordOrderReceiptDocumentFailed({
       orderId: input.order.id,
       pdfPath: pdfResult.pdfPath,
       errorMessage,
+      errorCode: pdfResult.errorCode,
+      invalidFields: pdfResult.invalidFields,
     });
 
     return {
@@ -1634,6 +1638,8 @@ export async function sendOrderReceiptDocumentForOrder(input: {
       receiptSentAt: new Date().toISOString(),
       receiptSendStatus: "SENT",
       receiptError: undefined,
+      receiptErrorCode: undefined,
+      receiptInvalidFields: undefined,
       receiptLocalFileDeleted: deleteResult.localFileDeleted,
       receiptLocalFileDeletedAt: deleteResult.localFileDeletedAt,
       receiptLocalFileDeleteError: deleteResult.localFileDeleteError,
@@ -3059,7 +3065,7 @@ export async function processCloudWebhookBody(
       );
 
       if (
-        result.meta?.orderJustConfirmed &&
+        (result.meta?.orderJustConfirmed || result.meta?.receiptRetryRequested) &&
         result.meta.confirmedOrderId &&
         sendResult.ok
       ) {

@@ -14,6 +14,8 @@ export interface OrderReceiptRecord {
   sentAt?: string;
   sendStatus: ReceiptSendStatus;
   lastError?: string;
+  errorCode?: "RECEIPT_DATA_INVALID";
+  invalidFields?: string[];
   localFileDeleted?: boolean;
   localFileDeletedAt?: string;
   localFileDeleteError?: string;

@@ -22,13 +22,14 @@ type AppendConversationMessageInput = SessionIdentity & {
 };
 
 type UpdateConversationOrderStateInput = SessionIdentity & {
-  orderCycleId?: string;
+  orderCycleId?: string | null;
   collected?: Partial<OrderEntities>;
   replaceCollected?: boolean;
   missingFields?: string[];
   isComplete?: boolean;
   awaitingConfirmation?: boolean;
   confirmed?: boolean;
+  deliveryQuote?: ConversationSession["orderState"]["deliveryQuote"] | null;
   editField?: ConversationSession["orderState"]["editField"] | null;
   clearProductInfo?: boolean;
 };
@@ -258,7 +259,11 @@ export async function updateConversationOrderState(
 
   session.orderState = {
     ...session.orderState,
-    ...(input.orderCycleId ? { orderCycleId: input.orderCycleId } : {}),
+    ...(input.orderCycleId === null
+      ? { orderCycleId: undefined }
+      : input.orderCycleId
+        ? { orderCycleId: input.orderCycleId }
+        : {}),
     collected: input.replaceCollected
       ? { ...(input.collected || {}) }
       : {
@@ -270,6 +275,10 @@ export async function updateConversationOrderState(
     awaitingConfirmation:
       input.awaitingConfirmation ?? session.orderState.awaitingConfirmation ?? false,
     confirmed: input.confirmed ?? session.orderState.confirmed ?? false,
+    deliveryQuote:
+      input.deliveryQuote === null
+        ? undefined
+        : input.deliveryQuote ?? session.orderState.deliveryQuote,
     editField:
       input.editField === null
         ? undefined

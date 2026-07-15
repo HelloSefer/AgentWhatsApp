@@ -5,8 +5,7 @@ import {
   updateConfirmedOrderReceipt,
 } from "../agent/order/confirmed-order-store.service";
 import {
-  getInvalidOrderFields,
-  recordReceiptSkippedInvalidOrderFields,
+  recordReceiptFailedInvalidOrderData,
 } from "../agent/order/order-field-validator.service";
 import {
   buildSampleReceiptOrder,
@@ -14,6 +13,10 @@ import {
   getOrderReceiptPdfPath,
   getOrderReceiptRecord,
 } from "./order-receipt.service";
+import {
+  RECEIPT_DATA_INVALID,
+  validateConfirmedOrderReceiptSnapshot,
+} from "./order-receipt-validation.service";
 import { sendOrderReceiptDocumentForOrder } from "../whatsapp/cloud/whatsapp-cloud.service";
 
 async function fileSize(filePath: string): Promise<number> {
@@ -48,29 +51,25 @@ export async function testGenerateOrderReceipt(req: Request, res: Response) {
   }
 
   if (order) {
-    const invalidFields = getInvalidOrderFields(
-      {
-        fullName: order.fullName,
-        phone: order.phone,
-        city: order.city,
-        address: order.address,
-        size: order.size,
-        color: order.color,
-        quantity: order.quantity,
-      },
-      ["fullName", "phone", "city", "address", "size", "color", "quantity"],
-    );
+    const validation = validateConfirmedOrderReceiptSnapshot(order);
 
-    if (invalidFields.length > 0) {
-      recordReceiptSkippedInvalidOrderFields({
+    if (!validation.valid) {
+      recordReceiptFailedInvalidOrderData({
         orderId: order.id,
-        invalidFields,
+        invalidFields: validation.invalidFields,
+      });
+      updateConfirmedOrderReceipt(order.id, {
+        receiptSendStatus: "FAILED",
+        receiptError: "Confirmed order receipt snapshot is structurally invalid",
+        receiptErrorCode: RECEIPT_DATA_INVALID,
+        receiptInvalidFields: validation.invalidFields,
       });
 
       return res.status(400).json({
         ok: false,
-        message: "Order has invalid fields. Receipt was not generated.",
-        invalidFields,
+        message: "Confirmed order receipt snapshot is structurally invalid.",
+        errorCode: RECEIPT_DATA_INVALID,
+        invalidFields: validation.invalidFields,
       });
     }
   }

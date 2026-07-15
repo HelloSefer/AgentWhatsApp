@@ -205,6 +205,33 @@ export function normalizeDeliveryPolicy(
     normalized.excludedCities = cleanStringList(policy?.excludedCities);
   }
 
+  if (policy?.pricing) {
+    normalized.pricing = {
+      ...policy.pricing,
+      rules: policy.pricing.rules?.map((rule) => ({
+        ...rule,
+        cityKeys: [...rule.cityKeys],
+        aliases: rule.aliases ? [...rule.aliases] : undefined,
+      })),
+      defaultRule: policy.pricing.defaultRule
+        ? { ...policy.pricing.defaultRule }
+        : undefined,
+    };
+  } else if (normalized.isFree) {
+    normalized.pricing = {
+      enabled: true,
+      mode: "ALL_FREE",
+      currency: "MAD",
+    };
+  } else if (normalized.deliveryPrice !== undefined) {
+    normalized.pricing = {
+      enabled: true,
+      mode: "FLAT_RATE",
+      flatRate: normalized.deliveryPrice,
+      currency: "MAD",
+    };
+  }
+
   return normalized;
 }
 

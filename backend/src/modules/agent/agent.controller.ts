@@ -51,6 +51,7 @@ import { conversationKeyService } from "./identity/conversation-key.service";
 import { getConversationSession } from "./session/conversation-session.service";
 import type { ConversationOrderState } from "./agent-brain.types";
 import type { ProductContext } from "./product-context.types";
+import { validateSellerConfigReadiness } from "./config/seller-config-readiness.service";
 
 function isAIIntentRouterIntent(value: unknown): boolean {
   return (
@@ -261,14 +262,29 @@ export function firstEntryClickPreview(req: Request, res: Response) {
   }
 }
 
-export function getFirstEntryReadiness(_req: Request, res: Response) {
+export function getFirstEntryReadiness(req: Request, res: Response) {
+  const sellerId = getOptionalString(req.query.sellerId) || "seller_demo_sandals";
+  const sellerExists = sellerConfigService.hasSellerConfig(sellerId);
+  const sellerReadiness = sellerExists
+    ? validateSellerConfigReadiness(sellerConfigService.getSellerConfig(sellerId))
+    : {
+        ready: false,
+        reasons: ["Seller configuration was not found."],
+        checks: { deliveryPricing: false },
+      };
+
   return res.status(200).json({
     ok: true,
-    readiness: "ready_for_guarded_test_activation",
+    readiness: sellerReadiness.ready
+      ? "ready_for_guarded_test_activation"
+      : "configuration_not_ready",
+    sellerId,
+    reasons: sellerReadiness.reasons,
     previewOnly: true,
     liveEnabled: false,
     checks: {
-      config: true,
+      config: sellerReadiness.ready,
+      deliveryPricing: sellerReadiness.checks.deliveryPricing,
       renderer: true,
       eligibility: true,
       ctaPreview: true,

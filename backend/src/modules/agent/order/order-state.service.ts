@@ -28,6 +28,11 @@ import {
   getConfirmedOrderByCustomerId,
   saveConfirmedOrder,
 } from "./confirmed-order-store.service";
+import {
+  resolveProductDeliveryQuote,
+  type DeliveryQuote,
+  type ResolvedDeliveryQuote,
+} from "./delivery-pricing.service";
 
 type OrderField = keyof OrderEntities;
 type EditableOrderField = OrderField | "delivery_info";
@@ -52,10 +57,20 @@ type ProcessOrderTurnResult = {
   replyUi?: AgentReplyUiHint;
   replyPresentation?: OrderConfirmationPresentation;
   orderJustConfirmed?: boolean;
+  receiptRetryRequested?: boolean;
   confirmedOrderId?: string;
   publicOrderCode?: string;
   isComplete: boolean;
   missingFields: string[];
+};
+
+type FinalOrderState = {
+  collected: OrderEntities;
+  missingFields: string[];
+  isComplete: boolean;
+  awaitingConfirmation: boolean;
+  deliveryQuote?: DeliveryQuote;
+  blockedReply?: string;
 };
 
 const defaultRequiredOrderFields: RequiredOrderField[] = [
@@ -231,19 +246,49 @@ const alreadyConfirmedReply =
 const orderCancelledReply =
   "تمام، ما غاديش نأكد الطلب. إلى بغيتي تبدل شي حاجة ولا ترجع تطلب، أنا هنا.";
 
-const newOrderMessages = [
-  "order:new",
-  "بغيت نطلب واحد آخر",
-  "بغيت نطلب واحد اخر",
-  "بغيت طلب جديد",
-  "نطلب مرة أخرى",
-  "نطلب مرة اخرى",
-  "طلب جديد",
+const newOrderCommands = ["order:new"];
+const standaloneNewOrderFollowups = [
   "واحد آخر",
   "واحد اخر",
-  "another order",
-  "new order",
+  "another one",
+  "une autre",
 ];
+const orderConcepts = [
+  "طلب",
+  "نطلب",
+  "كومند",
+  "كوموند",
+  "كوموندي",
+  "commande",
+  "commander",
+  "ncommand",
+  "talab",
+  "tlab",
+  "ntleb",
+  "ntlob",
+  "order",
+];
+const newCycleConcepts = [
+  "جديد",
+  "واحد آخر",
+  "واحد اخر",
+  "مرة أخرى",
+  "مرة اخرى",
+  "عاود",
+  "نعاود",
+  "ثاني",
+  "ثانية",
+  "new",
+  "another",
+  "again",
+  "repeat",
+  "autre",
+  "encore",
+  "jdid",
+  "akhor",
+  "n3awd",
+];
+const confirmationConcepts = ["أكد", "اكد", "تأكيد", "تاكيد", "confirm"];
 
 const thanksMessages = [
   "شكرا",
@@ -305,10 +350,24 @@ function buildConfirmedEditBlockedReply(publicOrderCode?: string): string {
   ].join("\n");
 }
 
-function isNewOrderIntent(message: string): boolean {
+export function isNewOrderIntent(message: string): boolean {
   const normalizedMessage = normalizeText(message);
 
-  return isExactMessage(normalizedMessage, newOrderMessages);
+  if (
+    isExactMessage(normalizedMessage, newOrderCommands) ||
+    isExactMessage(normalizedMessage, standaloneNewOrderFollowups)
+  ) {
+    return true;
+  }
+
+  if (includesAny(normalizedMessage, confirmationConcepts)) {
+    return false;
+  }
+
+  return (
+    includesAny(normalizedMessage, orderConcepts) &&
+    includesAny(normalizedMessage, newCycleConcepts)
+  );
 }
 
 function isDuplicateConfirmationIntent(message: string): boolean {
@@ -952,6 +1011,7 @@ async function sanitizeStoredOrderState(
     isComplete: false,
     awaitingConfirmation: false,
     confirmed: false,
+    deliveryQuote: undefined,
     lastUpdatedAt: new Date().toISOString(),
   };
 
@@ -1834,6 +1894,87 @@ function extractEditFieldEntities(
   return cleanEntities(entities as OrderEntities);
 }
 
+function buildUnavailableDeliveryReply(quote: DeliveryQuote): string {
+  if (quote.status === "UNAVAILABLE" && quote.reason === "CONFIG_INVALID") {
+    return "سمح ليا، ما قدرناش نحددو مصاريف التوصيل دابا. تواصل مع صاحب المتجر باش يأكدها لك.";
+  }
+
+  const city = quote.inputCity.trim();
+
+  return city
+    ? `سمح ليا، التوصيل ما متوفرش حالياً ل${city}. عطيني مدينة أو منطقة أخرى باش نكملو الطلب.`
+    : "سمح ليا، التوصيل ما متوفرش لهاد المنطقة حالياً. عطيني مدينة أو منطقة أخرى باش نكملو الطلب.";
+}
+
+function resolveFinalOrderState(input: {
+  collected: OrderEntities;
+  productContext: ProductContext;
+  requiredFields?: RequiredOrderField[];
+}): FinalOrderState {
+  const missingFields = computeMissingFields(
+    input.collected,
+    input.productContext,
+    input.requiredFields,
+  );
+
+  if (missingFields.length > 0) {
+    return {
+      collected: input.collected,
+      missingFields,
+      isComplete: false,
+      awaitingConfirmation: false,
+    };
+  }
+
+  const deliveryQuote = resolveProductDeliveryQuote({
+    city: input.collected.city || "",
+    productContext: input.productContext,
+  });
+
+  if (deliveryQuote.status === "RESOLVED") {
+    return {
+      collected: input.collected,
+      missingFields: [],
+      isComplete: true,
+      awaitingConfirmation: true,
+      deliveryQuote,
+    };
+  }
+
+  if (deliveryQuote.reason === "CONFIG_INVALID") {
+    return {
+      collected: input.collected,
+      missingFields: [],
+      isComplete: false,
+      awaitingConfirmation: false,
+      deliveryQuote,
+      blockedReply: buildUnavailableDeliveryReply(deliveryQuote),
+    };
+  }
+
+  const collected = { ...input.collected };
+  delete collected.city;
+
+  return {
+    collected,
+    missingFields: computeMissingFields(
+      collected,
+      input.productContext,
+      input.requiredFields,
+    ),
+    isComplete: false,
+    awaitingConfirmation: false,
+    deliveryQuote,
+    blockedReply: buildUnavailableDeliveryReply(deliveryQuote),
+  };
+}
+
+function isResolvedDeliveryQuote(
+  quote: DeliveryQuote | undefined,
+): quote is ResolvedDeliveryQuote {
+  return quote?.status === "RESOLVED";
+}
+
 async function updateOrderDraftAndRenderSummary(input: {
   session: ConversationSession;
   customerId: string;
@@ -1859,36 +2000,49 @@ async function updateOrderDraftAndRenderSummary(input: {
     };
   }
 
-  const collected = mergeCorrectedEntities(
+  const mergedCollected = mergeCorrectedEntities(
     input.session.orderState.collected,
     validatedEntities.entities,
   );
-  const missingFields = computeMissingFields(
-    collected,
-    input.productContext,
-    input.requiredFields,
-  );
-  const isComplete = missingFields.length === 0;
+  const finalState = resolveFinalOrderState({
+    collected: mergedCollected,
+    productContext: input.productContext,
+    requiredFields: input.requiredFields,
+  });
 
   await updateConversationOrderState({
     customerId: input.customerId,
     customerPhone: input.customerPhone,
     sellerId: input.sellerId,
     productId: input.productId,
-    collected,
-    missingFields,
-    isComplete,
-    awaitingConfirmation: isComplete,
+    collected: finalState.collected,
+    replaceCollected: true,
+    missingFields: finalState.missingFields,
+    isComplete: finalState.isComplete,
+    awaitingConfirmation: finalState.awaitingConfirmation,
     confirmed: false,
+    deliveryQuote: finalState.deliveryQuote ?? null,
     editField: null,
   });
 
+  if (finalState.blockedReply) {
+    return {
+      handled: true,
+      reply: finalState.blockedReply,
+      isComplete: false,
+      missingFields: finalState.missingFields,
+    };
+  }
+
   const renderedReply = renderOrderProgressReply({
-    collected,
-    missingFields,
-    isComplete,
+    collected: finalState.collected,
+    missingFields: finalState.missingFields,
+    isComplete: finalState.isComplete,
     productContext: input.productContext,
     requiredFields: input.requiredFields,
+    deliveryQuote: isResolvedDeliveryQuote(finalState.deliveryQuote)
+      ? finalState.deliveryQuote
+      : undefined,
   });
 
   return {
@@ -1896,8 +2050,8 @@ async function updateOrderDraftAndRenderSummary(input: {
     reply: renderedReply.text,
     replyUi: renderedReply.ui,
     replyPresentation: renderedReply.presentation,
-    isComplete,
-    missingFields,
+    isComplete: finalState.isComplete,
+    missingFields: finalState.missingFields,
   };
 }
 
@@ -1984,6 +2138,7 @@ async function processConfirmationTurn(input: {
         isComplete: false,
         awaitingConfirmation: false,
         confirmed: false,
+        deliveryQuote: null,
       });
       recordOrderConfirmationBlockedInvalidFields({
         invalidFields: missingFields,
@@ -2006,6 +2161,19 @@ async function processConfirmationTurn(input: {
       };
     }
 
+    if (!isResolvedDeliveryQuote(input.session.orderState.deliveryQuote)) {
+      return updateOrderDraftAndRenderSummary({
+        session: input.session,
+        customerId: input.customerId,
+        customerPhone: input.customerPhone,
+        sellerId: input.sellerId,
+        productId: input.productId,
+        incomingEntities: {},
+        productContext: input.productContext,
+        requiredFields: input.requiredFields,
+      });
+    }
+
     const orderCycleId = input.session.orderState.orderCycleId || randomUUID();
 
     if (!input.session.orderState.orderCycleId) {
@@ -2024,6 +2192,7 @@ async function processConfirmationTurn(input: {
       conversationKey: input.session.conversationKey || input.customerId,
       productContext: input.productContext,
       collected: input.session.orderState.collected,
+      deliveryQuote: input.session.orderState.deliveryQuote,
       source: "agent",
     });
 
@@ -2038,6 +2207,7 @@ async function processConfirmationTurn(input: {
       isComplete: true,
       awaitingConfirmation: false,
       confirmed: true,
+      deliveryQuote: input.session.orderState.deliveryQuote,
       editField: null,
     });
 
@@ -2120,10 +2290,28 @@ async function processConfirmedOrderTurn(input: {
     }));
   }
 
-  const existingOrder =
+  let existingOrder =
     getConfirmedOrderByCustomerId(input.customerId, orderCycleId) ||
-    getConfirmedOrderByCustomerId(input.customerId) ||
-    saveConfirmedOrder({
+    getConfirmedOrderByCustomerId(input.customerId);
+
+  if (!existingOrder) {
+    const deliveryQuote = isResolvedDeliveryQuote(input.session.orderState.deliveryQuote)
+      ? input.session.orderState.deliveryQuote
+      : resolveProductDeliveryQuote({
+          city: input.session.orderState.collected.city || "",
+          productContext: input.productContext,
+        });
+
+    if (!isResolvedDeliveryQuote(deliveryQuote)) {
+      return {
+        handled: true,
+        reply: buildUnavailableDeliveryReply(deliveryQuote),
+        isComplete: false,
+        missingFields: input.session.orderState.missingFields,
+      };
+    }
+
+    existingOrder = saveConfirmedOrder({
       customerId: input.customerId,
       orderCycleId,
       sellerId: input.sellerId,
@@ -2131,8 +2319,10 @@ async function processConfirmedOrderTurn(input: {
       conversationKey: input.session.conversationKey || input.customerId,
       productContext: input.productContext,
       collected: input.session.orderState.collected,
+      deliveryQuote,
       source: "agent",
     });
+  }
 
   if (isNewOrderIntent(input.message)) {
     const orderCycleId = randomUUID();
@@ -2158,6 +2348,7 @@ async function processConfirmedOrderTurn(input: {
       isComplete: false,
       awaitingConfirmation: false,
       confirmed: false,
+      deliveryQuote: null,
       editField: null,
       clearProductInfo: true,
     });
@@ -2192,9 +2383,14 @@ async function processConfirmedOrderTurn(input: {
   }
 
   if (isDuplicateConfirmationIntent(input.message)) {
+    const receiptRetryRequested = existingOrder.receiptSendStatus === "FAILED";
+
     return {
       handled: true,
       reply: buildAlreadyConfirmedReply(existingOrder.publicOrderCode),
+      receiptRetryRequested,
+      confirmedOrderId: receiptRetryRequested ? existingOrder.id : undefined,
+      publicOrderCode: existingOrder.publicOrderCode,
       isComplete: true,
       missingFields: [],
     };
@@ -2301,6 +2497,36 @@ export async function processOrderTurn(
     });
   }
 
+  if (
+    isCancellationMessage(input.message) &&
+    (session.orderState.missingFields.length > 0 ||
+      hasCollectedOrderData(session.orderState.collected))
+  ) {
+    await updateConversationOrderState({
+      customerId: input.customerId,
+      customerPhone: input.customerPhone,
+      sellerId: input.sellerId,
+      productId: input.productId,
+      orderCycleId: null,
+      collected: {},
+      replaceCollected: true,
+      missingFields: [],
+      isComplete: false,
+      awaitingConfirmation: false,
+      confirmed: false,
+      deliveryQuote: null,
+      editField: null,
+      clearProductInfo: true,
+    });
+
+    return {
+      handled: true,
+      reply: orderCancelledReply,
+      isComplete: false,
+      missingFields: [],
+    };
+  }
+
   const fastAnalysis = fastAnalyzeCustomerMessage(input.message);
   const fallbackOrderStartAnalysis = isOrderStartMessage(input.message)
     ? ({
@@ -2395,13 +2621,11 @@ export async function processOrderTurn(
         session.orderState.collected,
         validatedIncomingEntities.entities,
       );
-  const missingFields = computeMissingFields(
+  const finalState = resolveFinalOrderState({
     collected,
-    input.productContext,
-    activeRequiredFields,
-  );
-  const isComplete = missingFields.length === 0;
-  const awaitingConfirmation = isComplete;
+    productContext: input.productContext,
+    requiredFields: activeRequiredFields,
+  });
 
   await updateConversationOrderState({
     customerId: input.customerId,
@@ -2409,19 +2633,33 @@ export async function processOrderTurn(
     sellerId: input.sellerId,
     productId: input.productId,
     orderCycleId,
-    collected,
-    missingFields,
-    isComplete,
-    awaitingConfirmation,
+    collected: finalState.collected,
+    replaceCollected: true,
+    missingFields: finalState.missingFields,
+    isComplete: finalState.isComplete,
+    awaitingConfirmation: finalState.awaitingConfirmation,
     confirmed: false,
+    deliveryQuote: finalState.deliveryQuote ?? null,
   });
 
+  if (finalState.blockedReply) {
+    return {
+      handled: true,
+      reply: finalState.blockedReply,
+      isComplete: false,
+      missingFields: finalState.missingFields,
+    };
+  }
+
   const renderedReply = renderOrderProgressReply({
-    collected,
-    missingFields,
-    isComplete,
+    collected: finalState.collected,
+    missingFields: finalState.missingFields,
+    isComplete: finalState.isComplete,
     productContext: input.productContext,
     requiredFields: activeRequiredFields,
+    deliveryQuote: isResolvedDeliveryQuote(finalState.deliveryQuote)
+      ? finalState.deliveryQuote
+      : undefined,
   });
 
   return {
@@ -2429,7 +2667,7 @@ export async function processOrderTurn(
     reply: renderedReply.text,
     replyUi: renderedReply.ui,
     replyPresentation: renderedReply.presentation,
-    isComplete,
-    missingFields,
+    isComplete: finalState.isComplete,
+    missingFields: finalState.missingFields,
   };
 }

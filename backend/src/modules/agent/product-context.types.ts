@@ -20,6 +20,7 @@ export interface ProductContext {
   deliveryInfo?: string;
   deliveryPrice?: number;
   deliveryIsFree?: boolean;
+  deliveryPricing?: import("./config/seller-config.types").DeliveryPricingConfig;
   deliveryAreas?: string[];
   deliveryTime?: string;
   paymentMethods?: string[];

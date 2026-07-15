@@ -6,6 +6,7 @@ type OrderFieldValidationDiagnostics = {
   totalOrderFieldInvalidExistingCleared: number;
   totalOrderConfirmationBlockedInvalidFields: number;
   totalReceiptSkippedInvalidOrderFields: number;
+  totalReceiptFailedInvalidOrderData: number;
 };
 
 const diagnostics: OrderFieldValidationDiagnostics = {
@@ -13,6 +14,7 @@ const diagnostics: OrderFieldValidationDiagnostics = {
   totalOrderFieldInvalidExistingCleared: 0,
   totalOrderConfirmationBlockedInvalidFields: 0,
   totalReceiptSkippedInvalidOrderFields: 0,
+  totalReceiptFailedInvalidOrderData: 0,
 };
 
 const actionPhrases = [
@@ -412,6 +414,19 @@ export function recordReceiptSkippedInvalidOrderFields(input: {
   logJson({
     event: "order_receipt.skipped_invalid_order_fields",
     orderId: input.orderId,
+    invalidFields: input.invalidFields,
+  });
+}
+
+export function recordReceiptFailedInvalidOrderData(input: {
+  orderId: string;
+  invalidFields: string[];
+}) {
+  diagnostics.totalReceiptFailedInvalidOrderData += 1;
+  logJson({
+    event: "order_receipt.failed_invalid_order_data",
+    orderId: input.orderId,
+    errorCode: "RECEIPT_DATA_INVALID",
     invalidFields: input.invalidFields,
   });
 }

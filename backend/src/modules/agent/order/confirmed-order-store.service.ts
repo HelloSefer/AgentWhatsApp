@@ -4,6 +4,10 @@ import type { ProductContext } from "../product-context.types";
 import { productContextService } from "../config/product-context.service";
 import { sellerConfigService } from "../config/seller-config.service";
 import { calculateOrderTotals } from "./order-pricing.service";
+import {
+  resolveProductDeliveryQuote,
+  type ResolvedDeliveryQuote,
+} from "./delivery-pricing.service";
 
 export const orderStatuses = [
   "CONFIRMED",
@@ -21,6 +25,8 @@ export type OrderReceiptSendStatus =
   | "SENT"
   | "FAILED"
   | "SKIPPED";
+
+export type OrderReceiptErrorCode = "RECEIPT_DATA_INVALID";
 
 export type ReceiptBrandingSnapshot = {
   storeName: string;
@@ -43,7 +49,13 @@ export type ReceiptBrandingSnapshot = {
 
 export type ReceiptProductSnapshot = {
   imageRef?: string;
-  attributes: Array<{ label: string; value: string }>;
+  attributes: Array<{
+    key?: string;
+    label: string;
+    value: string;
+    canonicalValue?: string;
+  }>;
+  requiredAttributeKeys?: string[];
 };
 
 export interface ConfirmedOrder {
@@ -69,6 +81,16 @@ export interface ConfirmedOrder {
   deliveryPriceKnown: boolean;
   total: number;
   currency: string;
+  deliveryQuote: ResolvedDeliveryQuote;
+  pricing: {
+    status: "COMPLETE";
+    unitPrice: number;
+    quantity: number;
+    subtotal: number;
+    deliveryPrice: number;
+    total: number;
+    currency: string;
+  };
   status: OrderStatus;
   source: "agent" | "whatsapp_cloud";
   confirmedAt?: string;
@@ -79,6 +101,8 @@ export interface ConfirmedOrder {
   receiptMediaId?: string;
   receiptSendStatus?: OrderReceiptSendStatus;
   receiptError?: string;
+  receiptErrorCode?: OrderReceiptErrorCode;
+  receiptInvalidFields?: string[];
   receiptLocalFileDeleted?: boolean;
   receiptLocalFileDeletedAt?: string;
   receiptLocalFileDeleteError?: string;
@@ -94,6 +118,7 @@ type SaveConfirmedOrderInput = {
   conversationKey?: string;
   productContext: ProductContext;
   collected: OrderEntities;
+  deliveryQuote?: ResolvedDeliveryQuote;
   source?: "agent" | "whatsapp_cloud";
 };
 
@@ -159,6 +184,15 @@ function getReceiptAttributeLabel(key: string, configuredLabel: string): string 
   return standardLabels[key.trim().toLowerCase()] || configuredLabel;
 }
 
+function normalizeOptionValue(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/\s+/g, " ");
+}
+
 function buildReceiptSnapshots(input: SaveConfirmedOrderInput): {
   branding: ReceiptBrandingSnapshot;
   product: ReceiptProductSnapshot;
@@ -175,19 +209,43 @@ function buildReceiptSnapshots(input: SaveConfirmedOrderInput): {
   const attributes = configuredOptions.flatMap((option) => {
     const value = collected[option.key];
 
+    const buildAttribute = (displayValue: string) => {
+      const canonicalValue = option.options.find(
+        (candidate) =>
+          normalizeOptionValue(candidate) === normalizeOptionValue(displayValue),
+      );
+
+      return {
+        key: option.key,
+        label: getReceiptAttributeLabel(option.key, option.label),
+        value: displayValue,
+        canonicalValue,
+      };
+    };
+
     return typeof value === "string" && value.trim()
-      ? [{ label: getReceiptAttributeLabel(option.key, option.label), value: value.trim() }]
+      ? [buildAttribute(value.trim())]
       : typeof value === "number" && Number.isFinite(value)
-        ? [{ label: getReceiptAttributeLabel(option.key, option.label), value: String(value) }]
+        ? [buildAttribute(String(value))]
         : [];
   });
 
   if (!attributes.some((attribute) => attribute.label === "Taille") && input.collected.size) {
-    attributes.push({ label: "Taille", value: input.collected.size });
+    attributes.push({
+      key: "size",
+      label: "Taille",
+      value: input.collected.size,
+      canonicalValue: input.collected.size,
+    });
   }
 
   if (!attributes.some((attribute) => attribute.label === "Couleur") && input.collected.color) {
-    attributes.push({ label: "Couleur", value: input.collected.color });
+    attributes.push({
+      key: "color",
+      label: "Couleur",
+      value: input.collected.color,
+      canonicalValue: input.collected.color,
+    });
   }
 
   return {
@@ -212,6 +270,9 @@ function buildReceiptSnapshots(input: SaveConfirmedOrderInput): {
     product: {
       imageRef: configProduct?.images.find(Boolean),
       attributes,
+      requiredAttributeKeys: configuredOptions
+        .filter((option) => option.required)
+        .map((option) => option.key),
     },
   };
 }
@@ -257,10 +318,26 @@ export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrd
   }
 
   const quantity = input.collected.quantity ?? 1;
+  const deliveryQuote = input.deliveryQuote || resolveProductDeliveryQuote({
+    city: getTextValue(input.collected.city),
+    productContext: input.productContext,
+  });
+
+  if (deliveryQuote.status !== "RESOLVED") {
+    throw new Error(
+      `Cannot save confirmed order without a resolved delivery quote (${deliveryQuote.reason}).`,
+    );
+  }
+
   const totals = calculateOrderTotals({
     productContext: input.productContext,
     quantity,
+    deliveryQuote,
   });
+
+  if (totals.status !== "COMPLETE") {
+    throw new Error("Cannot save confirmed order with incomplete pricing.");
+  }
   const receiptSnapshots = buildReceiptSnapshots(input);
   const confirmedAt = new Date().toISOString();
   const order: ConfirmedOrder = {
@@ -286,6 +363,16 @@ export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrd
     deliveryPriceKnown: totals.deliveryPriceKnown,
     total: totals.total,
     currency: totals.currency,
+    deliveryQuote: { ...deliveryQuote },
+    pricing: {
+      status: "COMPLETE",
+      unitPrice: totals.unitPrice,
+      quantity: totals.quantity,
+      subtotal: totals.subtotal,
+      deliveryPrice: totals.deliveryPrice,
+      total: totals.total,
+      currency: deliveryQuote.currency,
+    },
     status: "CONFIRMED",
     source: input.source || "agent",
     confirmedAt,
@@ -363,6 +450,8 @@ export function updateConfirmedOrderReceipt(
     receiptMediaId?: string;
     receiptSendStatus?: OrderReceiptSendStatus;
     receiptError?: string;
+    receiptErrorCode?: OrderReceiptErrorCode;
+    receiptInvalidFields?: string[];
     receiptLocalFileDeleted?: boolean;
     receiptLocalFileDeletedAt?: string;
     receiptLocalFileDeleteError?: string;

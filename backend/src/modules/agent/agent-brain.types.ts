@@ -83,6 +83,7 @@ export interface ConversationOrderState {
   isComplete: boolean;
   awaitingConfirmation: boolean;
   confirmed: boolean;
+  deliveryQuote?: import("./order/delivery-pricing.service").DeliveryQuote;
   editField?:
     | keyof OrderEntities
     | "delivery_info";

@@ -19,6 +19,34 @@ export type DeliveryAvailability =
 
 export type DeliveryWordingStyle = "short" | "clear" | "professional";
 
+export type DeliveryPricingMode = "ALL_FREE" | "FLAT_RATE" | "CITY_RULES";
+
+export type DeliveryPriceRuleType = "FREE" | "PAID" | "UNAVAILABLE";
+
+export type DeliveryPriceRule = {
+  id: string;
+  type: DeliveryPriceRuleType;
+  cityKeys: string[];
+  aliases?: string[];
+  amount?: number;
+  priority?: number;
+};
+
+export type DeliveryDefaultRule = {
+  id?: string;
+  type: DeliveryPriceRuleType;
+  amount?: number;
+};
+
+export type DeliveryPricingConfig = {
+  enabled: boolean;
+  mode: DeliveryPricingMode;
+  currency: "MAD";
+  flatRate?: number;
+  rules?: DeliveryPriceRule[];
+  defaultRule?: DeliveryDefaultRule;
+};
+
 export type CustomerFieldKey =
   | "fullName"
   | "phone"
@@ -62,6 +90,7 @@ export type DeliveryPolicy = {
   cities?: string[];
   excludedCities?: string[];
   wordingStyle?: DeliveryWordingStyle;
+  pricing?: DeliveryPricingConfig;
 };
 
 export type SellerConfig = {

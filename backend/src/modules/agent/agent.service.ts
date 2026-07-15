@@ -532,6 +532,7 @@ function toAgentProductContext(input: {
     deliveryIsFree:
       input.sellerConfig.deliveryPolicy.isFree === true ||
       input.sellerConfig.delivery.free === true,
+    deliveryPricing: input.sellerConfig.deliveryPolicy.pricing,
     paymentMethods: input.sellerConfig.delivery.paymentText
       ? [input.sellerConfig.delivery.paymentText]
       : undefined,
@@ -1036,6 +1037,7 @@ async function getOrderStateSummary(
       isComplete: session.orderState.isComplete,
       awaitingConfirmation: session.orderState.awaitingConfirmation,
       confirmed: session.orderState.confirmed,
+      deliveryQuote: session.orderState.deliveryQuote,
       missingFields: session.orderState.missingFields,
       requiredFields: requiredFields?.map((field) => field.key),
       requiredFieldKeys: requiredFields?.map((field) => field.key),
@@ -1078,6 +1080,7 @@ async function buildOrderResultFromRouter(input: {
           replyUi: orderResult.replyUi,
           orderConfirmationPresentation: orderResult.replyPresentation,
           orderJustConfirmed: orderResult.orderJustConfirmed,
+          receiptRetryRequested: orderResult.receiptRetryRequested,
           confirmedOrderId: orderResult.confirmedOrderId,
           publicOrderCode: orderResult.publicOrderCode,
         },
@@ -1419,6 +1422,7 @@ async function buildOrderResultIfHandled(
         replyUi: orderResult.replyUi,
         orderConfirmationPresentation: orderResult.replyPresentation,
         orderJustConfirmed: orderResult.orderJustConfirmed,
+        receiptRetryRequested: orderResult.receiptRetryRequested,
         confirmedOrderId: orderResult.confirmedOrderId,
         publicOrderCode: orderResult.publicOrderCode,
       },

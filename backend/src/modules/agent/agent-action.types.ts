@@ -15,6 +15,7 @@ export interface AgentOrderStateSummary {
   isComplete: boolean;
   awaitingConfirmation: boolean;
   confirmed: boolean;
+  deliveryQuote?: import("./order/delivery-pricing.service").DeliveryQuote;
   missingFields: string[];
   requiredFields?: string[];
   requiredFieldKeys?: string[];
@@ -79,6 +80,7 @@ export interface AgentResult {
     interactiveSendDecision?: InteractiveSendDecision;
     orderConfirmationPresentation?: OrderConfirmationPresentation;
     orderJustConfirmed?: boolean;
+    receiptRetryRequested?: boolean;
     confirmedOrderId?: string;
     publicOrderCode?: string;
     firstEntryLiveSmoke?: {
