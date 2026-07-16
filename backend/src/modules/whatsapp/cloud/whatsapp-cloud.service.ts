@@ -55,6 +55,7 @@ import type {
 import type { CloudReplyDispatchResult } from "./cloud-reply-dispatch.types";
 import { cloudReplyDispatchService } from "./cloud-reply-dispatch.service";
 import { normalizeCloudIncomingMessage } from "./cloud-interactive-reply-normalizer.service";
+import { activateTypingIndicator, applyReplyPacing } from "./whatsapp-cloud-typing-indicator.service";
 
 const GRAPH_API_BASE_URL = "https://graph.facebook.com";
 const PREVIEW_LENGTH = 90;
@@ -711,7 +712,7 @@ function extractMessagesFromValue(value: any): WhatsAppCloudIncomingMessage[] {
           ? interactiveInfo?.text || ""
           : "";
 
-    if (!phoneNumberId || !from || !messageId || !text.trim()) {
+    if (!phoneNumberId || !from || !text.trim()) {
       return [];
     }
 
@@ -867,7 +868,7 @@ export function verifyWebhookSignature(input: {
   );
 }
 
-async function postCloudMessage(
+export async function postCloudMessage(
   phoneNumberId: string,
   payload: unknown,
 ): Promise<WhatsAppCloudSendResult> {
@@ -2627,6 +2628,27 @@ export async function processCloudWebhookBody(
     sendSuccess: false,
   };
 
+  const prepareReply = async (
+    message: WhatsAppCloudIncomingMessage,
+    replyText: string,
+    processingDurationMs: number,
+    sellerId: string,
+  ) => {
+    const typing = await activateTypingIndicator({
+      messageId: message.messageId,
+      phoneNumberId: message.phoneNumberId,
+      messageType: message.type,
+      sellerId,
+      dryRun: env.whatsappCloudDryRun,
+      transport: postCloudMessage,
+    });
+    await applyReplyPacing({
+      replyText,
+      processingDurationMs: processingDurationMs + typing.durationMs,
+    });
+    return typing;
+  };
+
   for (const message of messages) {
     if (
       !options.allowUnknownPhoneNumberId &&
@@ -2641,7 +2663,7 @@ export async function processCloudWebhookBody(
       continue;
     }
 
-    if (isDuplicateMessage(message.messageId)) {
+    if (message.messageId && isDuplicateMessage(message.messageId)) {
       const now = new Date().toISOString();
       webhookDiagnostics.totalDuplicates += 1;
       pushDiagnosticEvent({
@@ -2759,6 +2781,12 @@ export async function processCloudWebhookBody(
         );
         const ctaMessage = splitMessages?.find(
           (item) => item.kind === "interactive_buttons",
+        );
+        await prepareReply(
+          message,
+          firstEntryLiveSmoke.result.reply,
+          Date.now() - startedAt,
+          identity.sellerId,
         );
         const firstSendResult = infoMessage
           ? await sendAgentCloudResult({
@@ -2901,6 +2929,7 @@ export async function processCloudWebhookBody(
             errorMessage: webhookDiagnostics.lastFlowParseError,
           });
 
+          await prepareReply(message, fallbackText, 0, identity.sellerId);
           const sendResult = await sendCloudText({
             to: message.waId,
             phoneNumberId: message.phoneNumberId,
@@ -2931,6 +2960,7 @@ export async function processCloudWebhookBody(
         });
 
         const reply = buildFlowOrderSummary(message.flowOrder);
+        await prepareReply(message, reply, 0, identity.sellerId);
         const sendResult = await sendCloudText({
           to: message.waId,
           phoneNumberId: message.phoneNumberId,
@@ -2958,6 +2988,7 @@ export async function processCloudWebhookBody(
           triggerTextPreview: previewText(message.text),
         });
 
+        await prepareReply(message, "باش نكملو الطلب بسرعة، عمّر هاد المعلومات:", 0, identity.sellerId);
         const flowResult = await sendOrderFlow(message.waId, { customerId });
         const sendResult =
           !flowResult.success && isFlowIntegrityBlocked(flowResult)
@@ -2989,6 +3020,7 @@ export async function processCloudWebhookBody(
           triggerTextPreview: previewText(message.text),
         });
 
+        await prepareReply(message, "باش نكملو الطلب بسرعة، عمّر هاد المعلومات:", 0, identity.sellerId);
         const flowResult = await sendOrderFlow(message.waId, { customerId });
         const sendResult =
           !flowResult.success && isFlowIntegrityBlocked(flowResult)
@@ -3019,6 +3051,7 @@ export async function processCloudWebhookBody(
         interactiveSendChannel: "whatsapp_cloud",
       });
       const durationMs = result.meta?.durationMs ?? Date.now() - startedAt;
+      await prepareReply(message, result.reply, durationMs, identity.sellerId);
 
       logJson({
         event: "whatsapp.cloud.agent.reply",

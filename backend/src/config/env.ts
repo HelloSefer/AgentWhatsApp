@@ -4,6 +4,14 @@ dotenv.config();
 
 const orderFormFallbackSendMode =
   process.env.ORDER_FORM_FALLBACK_SEND_MODE === "text" ? "text" : "cta_url";
+const whatsappTypingMinDelayMs = Math.max(
+  0,
+  Math.min(5000, Number(process.env.WHATSAPP_TYPING_MIN_DELAY_MS) || 500),
+);
+const whatsappTypingMaxDelayMs = Math.max(
+  whatsappTypingMinDelayMs,
+  Math.min(10000, Number(process.env.WHATSAPP_TYPING_MAX_DELAY_MS) || 1800),
+);
 
 export const env = {
   nodeEnv: process.env.NODE_ENV || "development",
@@ -90,4 +98,9 @@ export const env = {
     process.env.WHATSAPP_INTERACTIVE_CHOICES_ENABLED !== "false",
   whatsappInteractiveChoicesMode:
     process.env.WHATSAPP_INTERACTIVE_CHOICES_MODE || "auto",
+  whatsappTypingIndicatorEnabled:
+    process.env.WHATSAPP_TYPING_INDICATOR_ENABLED !== "false",
+  whatsappTypingMinDelayMs,
+  whatsappTypingMaxDelayMs,
+  whatsappTypingRequestTimeoutMs: Math.max(1, Math.min(5000, Number(process.env.WHATSAPP_TYPING_REQUEST_TIMEOUT_MS) || 1200)),
 };
