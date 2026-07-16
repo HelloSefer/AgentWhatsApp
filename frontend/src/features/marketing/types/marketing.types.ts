@@ -84,6 +84,25 @@ export type WorkflowStage = MarketingContentItem &
     number: string;
   }>;
 
+export type PricingPlan = Readonly<{
+  id: string;
+  name: string;
+  price: number;
+  currency: "MAD";
+  billingPeriod: "month";
+  description: string;
+  features: readonly string[];
+  ctaLabel: string;
+  ctaHref: string;
+  featured: boolean;
+  badge?: string;
+}>;
+
+export type FaqItem = Readonly<{
+  question: string;
+  answer: string;
+}>;
+
 export type LandingContent = Readonly<{
   problem: MarketingSectionContent &
     Readonly<{
@@ -101,5 +120,14 @@ export type LandingContent = Readonly<{
   howItWorks: MarketingSectionContent &
     Readonly<{
       steps: readonly WorkflowStage[];
+    }>;
+  differentiation: MarketingSectionContent &
+    Readonly<{
+      items: readonly MarketingContentItem[];
+    }>;
+  finalCta: MarketingSectionContent &
+    Readonly<{
+      primaryAction: MarketingAction;
+      secondaryAction: MarketingAction;
     }>;
 }>;

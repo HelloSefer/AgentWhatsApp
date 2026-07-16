@@ -1,4 +1,4 @@
-import { marketingSections } from "@/config/site";
+import { marketingSections, siteConfig } from "@/config/site";
 import type { LandingContent } from "../types/marketing.types";
 
 export const landingContent: LandingContent = {
@@ -134,5 +134,43 @@ export const landingContent: LandingContent = {
         icon: "rocket",
       },
     ],
+  },
+  differentiation: {
+    id: marketingSections.whyAgentWhatsApp,
+    eyebrow: "Built for real WhatsApp commerce",
+    title: "More than automated replies. A guided sales and order flow.",
+    description:
+      "AgentWhatsApp combines natural customer understanding with seller-controlled product information and structured order collection.",
+    items: [
+      {
+        title: "Built for Moroccan conversations",
+        description: "Understands natural Darija and Arabizi messages instead of depending only on exact keywords.",
+        icon: "language",
+      },
+      {
+        title: "Guided toward an order",
+        description: "Moves from product questions to required details, summary, correction, and confirmation.",
+        icon: "rocket",
+      },
+      {
+        title: "Configurable by seller and product",
+        description: "Sellers control product details, delivery rules, payment information, options, and required fields.",
+        icon: "sliders",
+      },
+      {
+        title: "Structured customer and order context",
+        description: "Keeps each customer conversation clear while collecting order information progressively.",
+        icon: "folder",
+      },
+    ],
+  },
+  finalCta: {
+    id: marketingSections.getStarted,
+    eyebrow: "Ready to simplify WhatsApp sales?",
+    title: "Turn more customer conversations into structured orders.",
+    description:
+      "Set up your product flow, connect WhatsApp, and let AgentWhatsApp handle the repetitive steps between the first message and order confirmation.",
+    primaryAction: siteConfig.actions.getStarted,
+    secondaryAction: siteConfig.actions.login,
   },
 };

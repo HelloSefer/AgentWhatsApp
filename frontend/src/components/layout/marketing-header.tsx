@@ -10,7 +10,7 @@ export function MarketingHeader() {
     <header className="sticky top-0 z-40 border-b border-marketing-border/80 bg-marketing-canvas/90 backdrop-blur-md">
       <Container className="grid h-16 grid-cols-[1fr_auto] items-center gap-5 md:h-[4.5rem] md:grid-cols-[1fr_auto_1fr]">
         <SiteLogo className="justify-self-start" />
-        <nav aria-label="Primary navigation" className="hidden items-center gap-7 md:flex">
+        <nav aria-label="Primary navigation" className="hidden items-center gap-4 lg:gap-7 md:flex">
           {siteConfig.navigation.map((item) => (
             <Link
               className="rounded-md px-1 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-marketing-canvas"

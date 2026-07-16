@@ -3,6 +3,10 @@ export const marketingSections = {
   product: "product",
   features: "features",
   howItWorks: "how-it-works",
+  whyAgentWhatsApp: "why-agentwhatsapp",
+  pricing: "pricing",
+  faq: "faq",
+  getStarted: "get-started",
 } as const;
 
 export const siteConfig = {
@@ -22,5 +26,7 @@ export const siteConfig = {
     { label: "Product", href: `#${marketingSections.product}` },
     { label: "Features", href: `#${marketingSections.features}` },
     { label: "How it works", href: `#${marketingSections.howItWorks}` },
+    { label: "Pricing", href: `#${marketingSections.pricing}` },
+    { label: "FAQ", href: `#${marketingSections.faq}` },
   ],
 } as const;
