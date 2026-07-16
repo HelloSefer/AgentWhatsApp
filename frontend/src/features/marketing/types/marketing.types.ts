@@ -1,13 +1,31 @@
-export type MarketingIconName = "cloud" | "commerce" | "language";
+export type MarketingIconName =
+  | "cloud"
+  | "commerce"
+  | "language"
+  | "message"
+  | "timer"
+  | "list"
+  | "brain"
+  | "reply"
+  | "collect"
+  | "check"
+  | "folder"
+  | "sliders"
+  | "receipt"
+  | "package"
+  | "link"
+  | "rocket";
 
 export type MarketingAction = Readonly<{
   label: string;
   href: string;
 }>;
 
+export type TrustIndicatorIconName = "cloud" | "commerce" | "language";
+
 export type TrustIndicator = Readonly<{
   label: string;
-  icon: MarketingIconName;
+  icon: TrustIndicatorIconName;
 }>;
 
 export type ConversationMessage = Readonly<{
@@ -46,4 +64,42 @@ export type HeroContent = Readonly<{
     description: string;
     timestamp: string;
   }>;
+}>;
+
+export type MarketingSectionContent = Readonly<{
+  id: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+}>;
+
+export type MarketingContentItem = Readonly<{
+  title: string;
+  description: string;
+  icon: MarketingIconName;
+}>;
+
+export type WorkflowStage = MarketingContentItem &
+  Readonly<{
+    number: string;
+  }>;
+
+export type LandingContent = Readonly<{
+  problem: MarketingSectionContent &
+    Readonly<{
+      items: readonly MarketingContentItem[];
+    }>;
+  solution: MarketingSectionContent &
+    Readonly<{
+      statement: string;
+      stages: readonly WorkflowStage[];
+    }>;
+  features: MarketingSectionContent &
+    Readonly<{
+      items: readonly MarketingContentItem[];
+    }>;
+  howItWorks: MarketingSectionContent &
+    Readonly<{
+      steps: readonly WorkflowStage[];
+    }>;
 }>;

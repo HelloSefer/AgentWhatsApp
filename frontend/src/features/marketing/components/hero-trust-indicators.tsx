@@ -1,8 +1,8 @@
 import { Cloud, Languages, PackageCheck } from "lucide-react";
-import type { MarketingIconName } from "../types/marketing.types";
+import type { TrustIndicatorIconName } from "../types/marketing.types";
 import { heroContent } from "../data/hero-content";
 
-const trustIcons: Readonly<Record<MarketingIconName, typeof Languages>> = {
+const trustIcons: Readonly<Record<TrustIndicatorIconName, typeof Languages>> = {
   cloud: Cloud,
   commerce: PackageCheck,
   language: Languages,

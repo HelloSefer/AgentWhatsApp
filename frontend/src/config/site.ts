@@ -1,3 +1,10 @@
+export const marketingSections = {
+  problems: "problems",
+  product: "product",
+  features: "features",
+  howItWorks: "how-it-works",
+} as const;
+
 export const siteConfig = {
   name: "AgentWhatsApp",
   description:
@@ -11,4 +18,9 @@ export const siteConfig = {
     login: { label: "Log in", href: "/login" },
     getStarted: { label: "Get started", href: "/register" },
   },
+  navigation: [
+    { label: "Product", href: `#${marketingSections.product}` },
+    { label: "Features", href: `#${marketingSections.features}` },
+    { label: "How it works", href: `#${marketingSections.howItWorks}` },
+  ],
 } as const;
