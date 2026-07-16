@@ -1,0 +1,12 @@
+
+> frontend@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.10 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.56.1:3000
+✓ Ready in 2.0s
+Creating turbopack project { dir: 'C:\\AgentWhatsApp\\frontend', testMode: true }
+
+ GET / 200 in 27.7s (next.js: 9.3s, application-code: 18.4s)
+✓ Finished writing to filesystem cache in 14.6s

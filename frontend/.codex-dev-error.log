@@ -1,0 +1,178 @@
+
+<--- Last few GCs --->
+
+[14700:000002E38EDA4000]     2455 ms: Scavenge 6.5 (8.1) -> 6.5 (10.8) MB, pooled: 0 MB, 1.72 / 0.00 ms  (average mu = 1.000, current mu = 1.000) allocation failure; 
+
+
+<--- JS stacktrace --->
+
+FATAL ERROR: Zone Allocation failed - process out of memory
+----- Native stack trace -----
+
+ 1: 00007FF7209C70F7 node::SetCppgcReference+18039
+ 2: 00007FF72092AA18 v8::base::CPU::num_virtual_address_bits+102920
+ 3: 00007FF72152F151 v8::Isolate::ReportExternalAllocationLimitReached+65
+ 4: 00007FF72151BCD6 v8::Function::Experimental_IsNopFunction+3302
+ 5: 00007FF720FFE4EB v8::SnapshotCreator::GetIsolate+50059
+ 6: 00007FF7210F976A v8::base::Thread::StartSynchronously+153818
+ 7: 00007FF7210F86FE v8::base::Thread::StartSynchronously+149614
+ 8: 00007FF7210FF0B7 v8::base::Thread::StartSynchronously+176679
+ 9: 00007FF7211144D0 v8::base::Thread::StartSynchronously+263744
+10: 00007FF721114955 v8::base::Thread::StartSynchronously+264901
+11: 00007FF721109E08 v8::base::Thread::StartSynchronously+221048
+12: 00007FF721100CFD v8::base::Thread::StartSynchronously+183917
+13: 00007FF721101271 v8::base::Thread::StartSynchronously+185313
+14: 00007FF721101101 v8::base::Thread::StartSynchronously+184945
+15: 00007FF72110667E v8::base::Thread::StartSynchronously+206830
+16: 00007FF72110F2B7 v8::base::Thread::StartSynchronously+242727
+17: 00007FF72110C889 v8::base::Thread::StartSynchronously+231929
+18: 00007FF7211010B4 v8::base::Thread::StartSynchronously+184868
+19: 00007FF72110667E v8::base::Thread::StartSynchronously+206830
+20: 00007FF721106B2E v8::base::Thread::StartSynchronously+208030
+21: 00007FF7211128BF v8::base::Thread::StartSynchronously+256559
+22: 00007FF721109E08 v8::base::Thread::StartSynchronously+221048
+23: 00007FF721100CFD v8::base::Thread::StartSynchronously+183917
+24: 00007FF721101271 v8::base::Thread::StartSynchronously+185313
+25: 00007FF721101101 v8::base::Thread::StartSynchronously+184945
+26: 00007FF72110667E v8::base::Thread::StartSynchronously+206830
+27: 00007FF72110F2B7 v8::base::Thread::StartSynchronously+242727
+28: 00007FF72110C889 v8::base::Thread::StartSynchronously+231929
+29: 00007FF7211010B4 v8::base::Thread::StartSynchronously+184868
+30: 00007FF72110667E v8::base::Thread::StartSynchronously+206830
+31: 00007FF721106B2E v8::base::Thread::StartSynchronously+208030
+32: 00007FF7211128BF v8::base::Thread::StartSynchronously+256559
+33: 00007FF721109E08 v8::base::Thread::StartSynchronously+221048
+34: 00007FF721109107 v8::base::Thread::StartSynchronously+217719
+35: 00007FF72110A82A v8::base::Thread::StartSynchronously+223642
+36: 00007FF7210FBCCD v8::base::Thread::StartSynchronously+163389
+37: 00007FF72110F81D v8::base::Thread::StartSynchronously+244109
+38: 00007FF7210F4D3C v8::base::Thread::StartSynchronously+134828
+39: 00007FF721497200 v8::SharedValueConveyor::SharedValueConveyor+23136
+40: 00007FF72149CD24 v8::SharedValueConveyor::SharedValueConveyor+46468
+41: 00007FF72151685D v8::ScriptCompiler::CompileFunctionInternal+669
+42: 00007FF7215165B4 v8::ScriptCompiler::CompileFunction+84
+43: 00007FF7209382BD node::OnFatalError+55405
+44: 00007FF7209387F4 node::OnFatalError+56740
+45: 00007FF6C150FA64 
+
+thread '<unnamed>' (135716) panicked at C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rayon-core-1.12.1\src\registry.rs:168:10:
+The global thread pool has not been initialized.: ThreadPoolBuildError { kind: IOError(Os { code: 1455, kind: Uncategorized, message: "The paging file is too small for this operation to complete." }) }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+#
+# Fatal process out of memory: Zone
+#
+----- Native stack trace -----
+
+ 1: 00007FF7209C70F7 node::SetCppgcReference+18039
+ 2: 00007FF72089B6EF node::TriggerNodeReport+71487
+ 3: 00007FF721B95076 v8::base::FatalOOM+54
+ 4: 00007FF72151BAE1 v8::Function::Experimental_IsNopFunction+2801
+ 5: 00007FF720FFE4EB v8::SnapshotCreator::GetIsolate+50059
+ 6: 00007FF721E20575 v8::internal::compiler::CompilationDependencies::TransitionDependencyOffTheRecord+1369205
+ 7: 00007FF721E2206C v8::internal::compiler::CompilationDependencies::TransitionDependencyOffTheRecord+1376108
+ 8: 00007FF721CB4AA9 v8::internal::compiler::CompilationDependencies::~CompilationDependencies+796633
+ 9: 00007FF721CAF4AA v8::internal::compiler::CompilationDependencies::~CompilationDependencies+774618
+10: 00007FF721498E14 v8::SharedValueConveyor::SharedValueConveyor+30324
+11: 00007FF72145F9F2 v8::Proxy::GetTarget+42834
+12: 00007FF721720926 v8::PropertyDescriptor::writable+1996790
+13: 00007FF72089E490 OSSL_STORE_LOADER_get0_description+784
+14: 00007FF720A26063 uv_poll_stop+371
+15: 00007FF7222A9FFB inflateValidate+172203
+16: 00007FF9278FE957 BaseThreadInitThunk+23
+17: 00007FF929B4AD6C RtlUserThreadStart+44
+
+<--- Last few GCs --->
+
+[129980:00000139317E8000]     1191 ms: Scavenge 6.5 (8.1) -> 5.7 (10.0) MB, pooled: 0 MB, 4.35 / 0.00 ms  (average mu = 1.000, current mu = 1.000) allocation failure; 
+
+
+<--- JS stacktrace --->
+
+FATAL ERROR: NewSpace::EnsureCurrentCapacity Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 00007FF7209C70F7 node::SetCppgcReference+18039
+
+<--- Last few GCs --->
+ 2: 00007FF72092AA18 v8::base::CPU::num_virtual_address_bits+102920
+
+ 3: 00007FF72152F151 v8::Isolate::ReportExternalAllocationLimitReached+65
+[23508:000001DB47C22000]     6536 ms: Scavenge 6.5 (7.1) -> 6.5 (10.8) MB, pooled: 0 MB, 1.24 / 0.00 ms  (average mu = 1.000, current mu = 1.000) allocation failure; 
+ 4: 00007FF72151BCD6 v8::Function::Experimental_IsNopFunction+3302
+[23508:000001DB47C22000]     6680 ms: Scavenge 9.3 (11.7) -> 8.5 (12.2) MB, pooled: 0 MB, 1.12 / 0.00 ms  (average mu = 1.000, current mu = 1.000) allocation failure; 
+ 5: 00007FF721378420 v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+33904
+[23508:000001DB47C22000]    13773 ms: Scavenge 9.2 (12.7) -> 8.9 (13.7) MB, pooled: 0 MB, 4035.34 / 0.00 ms  (average mu = 1.000, current mu = 1.000) allocation failure; 
+ 6: 00007FF7213551A0 v8::CpuProfileNode::GetScriptResourceNameStr+92560
+
+ 7: 00007FF72137F0BB v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+61707
+
+ 8: 00007FF7213816CE v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+71454
+<--- JS stacktrace --->
+ 9: 00007FF7213714ED v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+5437
+
+10: 00007FF72136D0A5 v8::CpuProfileNode::GetScriptResourceNameStr+190613
+FATAL ERROR: NewSpace::EnsureCurrentCapacity Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+11: 00007FF720CF6C2D BIO_ssl_shutdown+189
+12: 7FF8000000000000 
+
+ 1: 00007FF7209C70F7 node::SetCppgcReference+18039
+ 2: 00007FF72092AA18 v8::base::CPU::num_virtual_address_bits+102920
+ 3: 00007FF72152F151 v8::Isolate::ReportExternalAllocationLimitReached+65
+ 4: 00007FF72151BCD6 v8::Function::Experimental_IsNopFunction+3302
+ 5: 00007FF721378420 v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+33904
+ 6: 00007FF7213551A0 v8::CpuProfileNode::GetScriptResourceNameStr+92560
+ 7: 00007FF72137F0BB v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+61707
+ 8: 00007FF7213816CE v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+71454
+ 9: 00007FF7213714ED v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+5437
+10: 00007FF72136D0A5 v8::CpuProfileNode::GetScriptResourceNameStr+190613
+11: 00007FF720CF6C2D BIO_ssl_shutdown+189
+12: 7FF8000000000000 
+
+<--- Last few GCs --->
+
+[136648:000001C9556D6000]    14739 ms: Mark-Compact 9.2 (12.4) -> 8.5 (13.4) MB, pooled: 0 MB, 9.82 / 0.00 ms  (average mu = 0.929, current mu = 0.999) background allocation failure; GC in old space requested
+[136648:000001C9556D6000]    15836 ms: Scavenge 10.9 (13.7) -> 9.9 (11.7) MB, pooled: 2 MB, 0.46 / 0.00 ms  (average mu = 0.929, current mu = 0.999) allocation failure; 
+
+
+<--- Last few GCs --->
+
+
+<--- JS stacktrace --->
+[135408:000001FEE3013000]    16918 ms: Mark-Compact 9.1 (12.4) -> 8.5 (13.4) MB, pooled: 0 MB, 2020.99 / 0.00 ms  (average mu = 0.819, current mu = 0.839) background allocation failure; GC in old space requested
+
+[135408:000001FEE3013000]    19033 ms: Scavenge 10.9 (13.7) -> 9.8 (11.7) MB, pooled: 2 MB, 0.82 / 0.00 ms  (average mu = 0.819, current mu = 0.839) allocation failure; 
+FATAL ERROR: Committing semi space failed. Allocation failed - JavaScript heap out of memory
+
+----- Native stack trace -----
+
+
+<--- JS stacktrace --->
+
+FATAL ERROR: Committing semi space failed. Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 00007FF7209C70F7 
+ 2: 00007FF72092AA18 
+ 3: 00007FF72152F151 
+ 4: 00007FF72151BCD6 
+ 5: 00007FF721378420 
+ 6: 00007FF72133007D 
+ 7: 00007FF721381663 
+ 8: 00007FF7213714ED 
+ 9: 00007FF72136D0A5 
+10: 00007FF720CF6C2D 
+ 1: 00007FF7209C70F7 node::SetCppgcReference+18039
+11: 7FF8000000000000 
+ 2: 00007FF72092AA18 v8::base::CPU::num_virtual_address_bits+102920
+ 3: 00007FF72152F151 v8::Isolate::ReportExternalAllocationLimitReached+65
+ 4: 00007FF72151BCD6 v8::Function::Experimental_IsNopFunction+3302
+ 5: 00007FF721378420 v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+33904
+ 6: 00007FF72133007D v8::FixedArray::Length+130749
+ 7: 00007FF721381663 v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+71347
+ 8: 00007FF7213714ED v8::internal::StrongRootAllocatorBase::StrongRootAllocatorBase+5437
+ 9: 00007FF72136D0A5 v8::CpuProfileNode::GetScriptResourceNameStr+190613
+10: 00007FF720CF6C2D BIO_ssl_shutdown+189
+11: 7FF8000000000000 

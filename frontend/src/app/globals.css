@@ -7,7 +7,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -39,6 +39,15 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-marketing-canvas: var(--marketing-canvas);
+  --color-marketing-surface: var(--marketing-surface);
+  --color-marketing-subtle: var(--marketing-subtle);
+  --color-marketing-muted: var(--marketing-muted);
+  --color-marketing-accent: var(--marketing-accent);
+  --color-marketing-accent-foreground: var(--marketing-accent-foreground);
+  --color-marketing-primary: var(--marketing-primary);
+  --color-marketing-primary-foreground: var(--marketing-primary-foreground);
+  --color-marketing-border: var(--marketing-border);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -55,8 +64,8 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.46 0.13 155);
+  --primary-foreground: oklch(0.985 0.01 155);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
@@ -66,7 +75,7 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.57 0.12 155);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -81,6 +90,15 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --marketing-canvas: oklch(0.989 0.004 85);
+  --marketing-surface: oklch(1 0 0);
+  --marketing-subtle: oklch(0.968 0.014 155);
+  --marketing-muted: oklch(0.925 0.038 155);
+  --marketing-accent: oklch(0.37 0.11 155);
+  --marketing-accent-foreground: oklch(0.99 0.008 155);
+  --marketing-primary: var(--marketing-accent);
+  --marketing-primary-foreground: var(--marketing-accent-foreground);
+  --marketing-border: oklch(0.895 0.012 120);
 }
 
 .dark {
@@ -122,7 +140,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply min-h-screen bg-marketing-canvas text-foreground;
   }
   html {
     @apply font-sans;
