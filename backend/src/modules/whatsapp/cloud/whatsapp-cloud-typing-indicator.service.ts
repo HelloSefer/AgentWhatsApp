@@ -9,8 +9,9 @@ function log(payload: Record<string, unknown>) { console.log(JSON.stringify(payl
 function shortId(value: string) { return value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value; }
 function clamp(value: number, min: number, max: number) { return Math.min(Math.max(value, min), max); }
 
-export async function activateTypingIndicator(input: { messageId?: string; phoneNumberId: string; messageType?: string; sellerId?: string; dryRun?: boolean; transport: Transport }): Promise<TypingResult> {
+export async function activateTypingIndicator(input: { messageId?: string; phoneNumberId: string; messageType?: string; sellerId?: string; dryRun?: boolean; guardBlocked?: boolean; transport: Transport }): Promise<TypingResult> {
   const startedAt = Date.now();
+  if (input.guardBlocked) { log({ event: "whatsapp.cloud.typing.skipped", reason: "guard_blocked" }); return { attempted: false, displayed: false, dryRun: false, skippedReason: "guard_blocked", durationMs: 0 }; }
   if (!env.whatsappTypingIndicatorEnabled) { log({ event: "whatsapp.cloud.typing.skipped", reason: "disabled" }); return { attempted: false, displayed: false, dryRun: false, skippedReason: "disabled", durationMs: 0 }; }
   if (!input.messageId?.trim()) { log({ event: "whatsapp.cloud.typing.skipped", reason: "missing_message_id" }); return { attempted: false, displayed: false, dryRun: false, skippedReason: "missing_message_id", durationMs: 0 }; }
   if (!input.phoneNumberId.trim()) { log({ event: "whatsapp.cloud.typing.skipped", reason: "not_cloud_provider" }); return { attempted: false, displayed: false, dryRun: false, skippedReason: "not_cloud_provider", durationMs: 0 }; }

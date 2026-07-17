@@ -2405,6 +2405,7 @@ async function sendAgentCloudResult(input: {
   userMessage: string;
   result: AgentResult;
   forceDryRun?: boolean;
+  cloudDryRunOverride?: boolean;
   interactiveLiveSendAllowedOverride?: boolean;
   simulateNoProviderCall?: boolean;
 }): Promise<CloudReplyDispatchResult> {
@@ -2417,6 +2418,7 @@ async function sendAgentCloudResult(input: {
     interactiveSendDecision:
       input.result.meta?.interactiveSendDecision ?? null,
     forceDryRun: input.forceDryRun ?? env.whatsappCloudDryRun,
+    cloudDryRunOverride: input.cloudDryRunOverride,
     interactiveLiveSendAllowedOverride: input.interactiveLiveSendAllowedOverride,
     simulateNoProviderCall: input.simulateNoProviderCall,
   });
@@ -2449,6 +2451,7 @@ export async function dispatchAgentResultThroughCloud(input: {
   userMessage: string;
   result: AgentResult;
   forceDryRun?: boolean;
+  cloudDryRunOverride?: boolean;
   interactiveLiveSendAllowedOverride?: boolean;
   simulateNoProviderCall?: boolean;
 }): Promise<CloudAgentDispatchFlowResult> {
@@ -2491,6 +2494,15 @@ export async function dispatchAgentResultThroughCloud(input: {
     reviewDispatchResult,
     orderConfirmationSplit: true,
   };
+}
+
+function isInteractiveLiveGuardBlocked(result: AgentResult): boolean {
+  return (
+    env.whatsappCloudDryRun !== true &&
+    env.whatsappInteractiveLiveSendAllowed !== true &&
+    result.meta?.interactiveSendDecision?.mode === "interactive_preview" &&
+    Boolean(result.meta?.whatsappInteractivePreview)
+  );
 }
 
 function getFirstEntryLiveSmokeMessages(result: AgentResult):
@@ -2633,6 +2645,7 @@ export async function processCloudWebhookBody(
     replyText: string,
     processingDurationMs: number,
     sellerId: string,
+    guardBlocked = false,
   ) => {
     const typing = await activateTypingIndicator({
       messageId: message.messageId,
@@ -2640,6 +2653,7 @@ export async function processCloudWebhookBody(
       messageType: message.type,
       sellerId,
       dryRun: env.whatsappCloudDryRun,
+      guardBlocked,
       transport: postCloudMessage,
     });
     await applyReplyPacing({
@@ -2787,6 +2801,7 @@ export async function processCloudWebhookBody(
           firstEntryLiveSmoke.result.reply,
           Date.now() - startedAt,
           identity.sellerId,
+          isInteractiveLiveGuardBlocked(firstEntryLiveSmoke.result),
         );
         const firstSendResult = infoMessage
           ? await sendAgentCloudResult({
@@ -3051,7 +3066,13 @@ export async function processCloudWebhookBody(
         interactiveSendChannel: "whatsapp_cloud",
       });
       const durationMs = result.meta?.durationMs ?? Date.now() - startedAt;
-      await prepareReply(message, result.reply, durationMs, identity.sellerId);
+      await prepareReply(
+        message,
+        result.reply,
+        durationMs,
+        identity.sellerId,
+        isInteractiveLiveGuardBlocked(result),
+      );
 
       logJson({
         event: "whatsapp.cloud.agent.reply",

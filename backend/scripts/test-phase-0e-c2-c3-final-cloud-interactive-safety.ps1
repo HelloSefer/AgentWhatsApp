@@ -67,6 +67,7 @@ function Send-CloudFlow {
     [object]$CloudMessage = $null,
     [Nullable[bool]]$InteractiveEnabledOverride = $null,
     [Nullable[bool]]$InteractiveLiveSendAllowedOverride = $null,
+    [Nullable[bool]]$CloudDryRunOverride = $null,
     [bool]$ForceDryRun = $true,
     [bool]$SimulateNoProviderCall = $false
   )
@@ -93,6 +94,10 @@ function Send-CloudFlow {
 
   if ($null -ne $InteractiveLiveSendAllowedOverride) {
     $body.interactiveLiveSendAllowedOverride = [bool]$InteractiveLiveSendAllowedOverride
+  }
+
+  if ($null -ne $CloudDryRunOverride) {
+    $body.cloudDryRunOverride = [bool]$CloudDryRunOverride
   }
 
   return Invoke-TimedJson -Method POST -Uri ("{0}/api/whatsapp/cloud/test-agent-dispatch-flow" -f $BaseUrl) -Body $body
@@ -196,7 +201,7 @@ Add-Check $group "list includes size 40" (Has-ListRowId -Result $b -Id "size:40"
 $group = "C Live guard blocks unsafe live"
 $phoneC = "2126000C2C3C"
 Clear-Session -SellerId "seller_demo_sandals" -Phone $phoneC
-$cResultTimed = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $phoneC -Message "بغيت نكوموندي" -InteractiveEnabledOverride $true -InteractiveLiveSendAllowedOverride $false -ForceDryRun $false -SimulateNoProviderCall $true
+$cResultTimed = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $phoneC -Message "بغيت نكوموندي" -InteractiveEnabledOverride $true -InteractiveLiveSendAllowedOverride $false -CloudDryRunOverride $false -ForceDryRun $false -SimulateNoProviderCall $true
 $c = $cResultTimed.Response
 Add-Check $group "decision can be interactive" ($c.meta.interactiveSendDecision.mode -eq "interactive_preview") "" $cResultTimed.DurationMs
 Add-Check $group "falls back to text" ($c.dispatchResult.mode -eq "text" -and $c.dispatchResult.fallbackUsed -eq $true) $c.dispatchResult.reason $cResultTimed.DurationMs

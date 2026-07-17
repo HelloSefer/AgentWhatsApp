@@ -442,6 +442,13 @@ export async function testWhatsAppCloudAgentDispatchFlow(
       : env.whatsappCloudPhoneNumberId;
   const forceDryRun = req.body?.forceDryRun === false ? false : true;
   const simulateNoProviderCall = req.body?.simulateNoProviderCall === true;
+  const requestedCloudDryRunOverride =
+    typeof req.body?.cloudDryRunOverride === "boolean"
+      ? req.body.cloudDryRunOverride
+      : undefined;
+  // A dry-run override exists only for the non-sending dev simulation path.
+  const cloudDryRunOverride =
+    simulateNoProviderCall ? requestedCloudDryRunOverride : undefined;
   const interactiveEnabledOverride =
     typeof req.body?.interactiveEnabledOverride === "boolean"
       ? req.body.interactiveEnabledOverride
@@ -475,6 +482,7 @@ export async function testWhatsAppCloudAgentDispatchFlow(
       userMessage: agentInputText,
       result: agentResult,
       forceDryRun,
+      cloudDryRunOverride,
       interactiveLiveSendAllowedOverride,
       simulateNoProviderCall,
     });
@@ -484,7 +492,7 @@ export async function testWhatsAppCloudAgentDispatchFlow(
       interactiveLiveSendAllowed:
         interactiveLiveSendAllowedOverride ??
         env.whatsappInteractiveLiveSendAllowed,
-      cloudDryRun: env.whatsappCloudDryRun,
+      cloudDryRun: cloudDryRunOverride ?? env.whatsappCloudDryRun,
       forceDryRun,
       simulateNoProviderCall,
     };

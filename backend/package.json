@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test:typing": "powershell -ExecutionPolicy Bypass -File .\\scripts\\test-typing-indicator.ps1"
   },
   "keywords": [],
   "author": "",

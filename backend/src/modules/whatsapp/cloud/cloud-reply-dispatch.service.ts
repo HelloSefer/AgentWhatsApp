@@ -32,6 +32,7 @@ export class CloudReplyDispatchService {
     whatsappInteractivePreview?: WhatsAppInteractivePreview | null;
     interactiveSendDecision?: InteractiveSendDecision | null;
     forceDryRun?: boolean;
+    cloudDryRunOverride?: boolean;
     interactiveLiveSendAllowedOverride?: boolean;
     simulateNoProviderCall?: boolean;
   }): Promise<CloudReplyDispatchResult> {
@@ -40,6 +41,10 @@ export class CloudReplyDispatchService {
       Boolean(input.whatsappInteractivePreview);
     const effectiveForceDryRun =
       input.forceDryRun === true || input.simulateNoProviderCall === true;
+    const cloudDryRun =
+      input.simulateNoProviderCall === true
+        ? input.cloudDryRunOverride ?? env.whatsappCloudDryRun
+        : env.whatsappCloudDryRun;
     const interactiveLiveSendAllowed =
       input.interactiveLiveSendAllowedOverride ??
       env.whatsappInteractiveLiveSendAllowed;
@@ -81,7 +86,7 @@ export class CloudReplyDispatchService {
 
     if (
       input.forceDryRun !== true &&
-      env.whatsappCloudDryRun !== true &&
+      cloudDryRun !== true &&
       input.simulateNoProviderCall !== true &&
       interactiveLiveSendAllowed !== true
     ) {
@@ -120,7 +125,7 @@ export class CloudReplyDispatchService {
 
     if (
       input.forceDryRun !== true &&
-      env.whatsappCloudDryRun !== true &&
+      cloudDryRun !== true &&
       input.simulateNoProviderCall === true &&
       interactiveLiveSendAllowed !== true
     ) {

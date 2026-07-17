@@ -1,0 +1,8 @@
+# Runtime-generated artifacts. Keep source, configuration examples, and test code tracked.
+storage/receipts/*
+!storage/receipts/.gitkeep
+logs/
+coverage/
+test-results/
+tmp/
+*.tmp
