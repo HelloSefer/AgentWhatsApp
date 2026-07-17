@@ -41,7 +41,7 @@ type WorkflowStep = Readonly<{
   visibleOrderFields: readonly OrderField[];
 }>;
 
-export const authAgentChatMessages: readonly ChatMessage[] = [
+export const agentShowcaseChatMessages: readonly ChatMessage[] = [
   {
     body: "Salam, wach katdirou livraison?",
     id: "customer-delivery",
@@ -64,7 +64,7 @@ export const authAgentChatMessages: readonly ChatMessage[] = [
   },
 ];
 
-export const authAgentOrderFields: readonly Omit<OrderFieldState, "status">[] = [
+export const agentShowcaseOrderFields: readonly Omit<OrderFieldState, "status">[] = [
   { field: "delivery", label: "Delivery", value: "Casablanca" },
   { field: "quantity", label: "Quantity", value: "2" },
   { field: "color", label: "Color", value: "Black" },
@@ -79,7 +79,7 @@ const deliveryField = ["delivery"] as const;
 const deliveryAndQuantity = ["delivery", "quantity"] as const;
 const allOrderFields = ["delivery", "quantity", "color"] as const;
 
-export const authAgentWorkflow: readonly WorkflowStep[] = [
+export const agentShowcaseWorkflow: readonly WorkflowStep[] = [
   {
     confirmationVisible: false,
     durationMs: 1_500,
@@ -195,7 +195,7 @@ export const authAgentWorkflow: readonly WorkflowStep[] = [
   },
 ];
 
-export const authAgentAnimationConfig = {
+export const agentShowcaseAnimationConfig = {
   totalDurationMs: 18_000,
   motion: {
     confirmationPulse: 0.48,

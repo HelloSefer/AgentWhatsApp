@@ -2,21 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  authAgentChatMessages,
-  authAgentOrderFields,
-  authAgentWorkflow,
+  agentShowcaseChatMessages,
+  agentShowcaseOrderFields,
+  agentShowcaseWorkflow,
   type ChatMessage,
   type OrderFieldState,
   type RiveTriggerName,
   type WorkflowPhase,
-} from "../config/auth-agent-animation-config";
+} from "../config/agent-showcase-animation-config";
 
 export type RiveTriggerEvent = Readonly<{
   name: RiveTriggerName;
   sequence: number;
 }>;
 
-type AuthAgentWorkflowOptions = Readonly<{
+type AgentShowcaseWorkflowOptions = Readonly<{
   isActive: boolean;
   shouldReduceMotion: boolean;
 }>;
@@ -26,7 +26,7 @@ type WorkflowPosition = Readonly<{
   sequence: number;
 }>;
 
-export type AuthAgentWorkflowState = Readonly<{
+export type AgentShowcaseWorkflowState = Readonly<{
   isConfirmed: boolean;
   isSettling: boolean;
   isTyping: boolean;
@@ -38,11 +38,11 @@ export type AuthAgentWorkflowState = Readonly<{
 
 const initialPosition: WorkflowPosition = { index: 0, sequence: 0 };
 
-export function useAuthAgentWorkflow({ isActive, shouldReduceMotion }: AuthAgentWorkflowOptions): AuthAgentWorkflowState {
+export function useAgentShowcaseWorkflow({ isActive, shouldReduceMotion }: AgentShowcaseWorkflowOptions): AgentShowcaseWorkflowState {
   const [position, setPosition] = useState<WorkflowPosition>(initialPosition);
   const isMountedRef = useRef(false);
   const phaseStartedAtRef = useRef<number | null>(null);
-  const remainingDurationRef = useRef<number>(authAgentWorkflow[0].durationMs);
+  const remainingDurationRef = useRef<number>(agentShowcaseWorkflow[0].durationMs);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pauseCurrentStep = useCallback(() => {
@@ -73,7 +73,7 @@ export function useAuthAgentWorkflow({ isActive, shouldReduceMotion }: AuthAgent
       return;
     }
 
-    const step = authAgentWorkflow[position.index];
+    const step = agentShowcaseWorkflow[position.index];
     const duration = remainingDurationRef.current || step.durationMs;
     remainingDurationRef.current = duration;
     phaseStartedAtRef.current = Date.now();
@@ -86,8 +86,8 @@ export function useAuthAgentWorkflow({ isActive, shouldReduceMotion }: AuthAgent
       }
 
       setPosition((currentPosition) => {
-        const nextIndex = (currentPosition.index + 1) % authAgentWorkflow.length;
-        remainingDurationRef.current = authAgentWorkflow[nextIndex].durationMs;
+        const nextIndex = (currentPosition.index + 1) % agentShowcaseWorkflow.length;
+        remainingDurationRef.current = agentShowcaseWorkflow[nextIndex].durationMs;
 
         return { index: nextIndex, sequence: currentPosition.sequence + 1 };
       });
@@ -97,9 +97,9 @@ export function useAuthAgentWorkflow({ isActive, shouldReduceMotion }: AuthAgent
   }, [isActive, pauseCurrentStep, position.index, shouldReduceMotion]);
 
   return useMemo(() => {
-    const step = shouldReduceMotion ? authAgentWorkflow.find((item) => item.phase === "confirmed")! : authAgentWorkflow[position.index];
-    const visibleMessages = authAgentChatMessages.filter((message) => step.visibleMessageIds.includes(message.id));
-    const orderFields = authAgentOrderFields.map<OrderFieldState>((field) => ({
+    const step = shouldReduceMotion ? agentShowcaseWorkflow.find((item) => item.phase === "confirmed")! : agentShowcaseWorkflow[position.index];
+    const visibleMessages = agentShowcaseChatMessages.filter((message) => step.visibleMessageIds.includes(message.id));
+    const orderFields = agentShowcaseOrderFields.map<OrderFieldState>((field) => ({
       ...field,
       status: step.validatedOrderFields.includes(field.field)
         ? "validated"

@@ -16,36 +16,4 @@ export const heroContent: HeroContent = {
     { label: "Built for COD commerce", icon: "commerce" },
     { label: "Powered by the official WhatsApp Cloud API", icon: "cloud" },
   ],
-  conversation: {
-    agentName: "AgentWhatsApp",
-    workspaceLabel: "AI sales workspace",
-    activeLabel: "AI active",
-    productLabel: "Running shoes · 199 MAD",
-    messages: [
-      { sender: "customer", content: "Salam, wach mazal disponible?" },
-      {
-        sender: "agent",
-        content: "Wa 3alaykom salam! Ah, disponible b 199 MAD. Bghiti tcommandi daba wla tchof details?",
-      },
-      { sender: "customer", content: "Bghit black, size 40." },
-      { sender: "agent", content: "Perfect. Ch7al men pièce bghiti?" },
-    ],
-    collectionLabel: "Collecting order details",
-    collectionFields: ["Color", "Size", "Quantity"],
-  },
-  order: {
-    title: "Order draft",
-    status: "Collecting details",
-    details: [
-      { label: "Product", value: "Running shoes" },
-      { label: "Color", value: "Black" },
-      { label: "Size", value: "40" },
-      { label: "Quantity", value: "Waiting" },
-    ],
-  },
-  activity: {
-    title: "New order captured",
-    description: "Color and size added",
-    timestamp: "Just now",
-  },
 };

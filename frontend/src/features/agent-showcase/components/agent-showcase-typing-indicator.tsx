@@ -1,13 +1,13 @@
 "use client";
 
 import { motion } from "motion/react";
-import { authAgentAnimationConfig } from "../config/auth-agent-animation-config";
+import { agentShowcaseAnimationConfig } from "../config/agent-showcase-animation-config";
 
-type AuthAgentTypingIndicatorProps = Readonly<{
+type AgentShowcaseTypingIndicatorProps = Readonly<{
   shouldReduceMotion: boolean;
 }>;
 
-export function AuthAgentTypingIndicator({ shouldReduceMotion }: AuthAgentTypingIndicatorProps) {
+export function AgentShowcaseTypingIndicator({ shouldReduceMotion }: AgentShowcaseTypingIndicatorProps) {
   return (
     <div className="ml-3 flex w-fit items-center gap-1 rounded-xl border border-marketing-primary/15 bg-[#eef8f1] px-3.5 py-2.5" role="presentation">
       <span className="mr-1 text-[0.6875rem] font-semibold tracking-[0.06em] text-[#477257] uppercase">AgentWhatsApp</span>
@@ -20,8 +20,8 @@ export function AuthAgentTypingIndicator({ shouldReduceMotion }: AuthAgentTyping
             shouldReduceMotion
               ? { duration: 0 }
               : {
-                  delay: dot * authAgentAnimationConfig.motion.particleDelay,
-                  duration: authAgentAnimationConfig.motion.typingDot,
+                  delay: dot * agentShowcaseAnimationConfig.motion.particleDelay,
+                  duration: agentShowcaseAnimationConfig.motion.typingDot,
                   ease: "easeInOut",
                   repeat: Number.POSITIVE_INFINITY,
                 }

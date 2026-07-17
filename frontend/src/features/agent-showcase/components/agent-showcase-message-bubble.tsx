@@ -1,11 +1,11 @@
 import { cn } from "@/lib/utils";
-import type { ChatMessage } from "../config/auth-agent-animation-config";
+import type { ChatMessage } from "../config/agent-showcase-animation-config";
 
-type AuthAgentMessageBubbleProps = Readonly<{
+type AgentShowcaseMessageBubbleProps = Readonly<{
   message: ChatMessage;
 }>;
 
-export function AuthAgentMessageBubble({ message }: AuthAgentMessageBubbleProps) {
+export function AgentShowcaseMessageBubble({ message }: AgentShowcaseMessageBubbleProps) {
   const isAgent = message.sender === "agent";
 
   return (

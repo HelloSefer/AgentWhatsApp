@@ -2,20 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alignment, Fit, Layout, useRive, useStateMachineInput } from "@rive-app/react-webgl2";
-import type { RiveTriggerEvent } from "../hooks/use-auth-agent-workflow";
+import type { RiveTriggerEvent } from "../hooks/use-agent-showcase-workflow";
 
 const riveSource = "/animations/auth/agentwhatsapp-bot.riv";
 const riveArtboard = "Artboard";
 const riveStateMachine = "State Machine 1";
 
-type AuthAgentRiveProps = Readonly<{
+type AgentShowcaseRiveProps = Readonly<{
   isActive: boolean;
   onError: () => void;
   onReady: () => void;
   trigger: RiveTriggerEvent | null;
 }>;
 
-export function AuthAgentRive({ isActive, onError, onReady, trigger }: AuthAgentRiveProps) {
+export function AgentShowcaseRive({ isActive, onError, onReady, trigger }: AgentShowcaseRiveProps) {
   const [hasFailed, setHasFailed] = useState(false);
   const hasFiredInitialBounceRef = useRef(false);
   const hasReportedReadyRef = useRef(false);
