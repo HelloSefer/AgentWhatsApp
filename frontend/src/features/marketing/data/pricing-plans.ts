@@ -62,7 +62,7 @@ export const pricingPlans: readonly PricingPlan[] = [
       "More flexible product requirements",
       "Extended receipt customization",
       "Priority assistance",
-      "Future advanced workspace capabilities",
+      "Advanced confirmation settings",
     ],
     ctaLabel: "Choose Pro",
     ctaHref: siteConfig.routes.signUp,

@@ -2,13 +2,13 @@ import { auth } from "@/auth";
 import { AuthScreen } from "@/features/auth/components/auth-screen";
 import { redirect } from "next/navigation";
 
-type LoginPageProps = Readonly<{
+type SignupPageProps = Readonly<{
   searchParams: Promise<{
     error?: string;
   }>;
 }>;
 
-export default async function LoginPage({ searchParams }: LoginPageProps) {
+export default async function SignupPage({ searchParams }: SignupPageProps) {
   const session = await auth();
 
   if (session?.user) {
@@ -17,5 +17,5 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   const { error } = await searchParams;
 
-  return <AuthScreen hasSignInError={Boolean(error)} mode="login" />;
+  return <AuthScreen hasSignInError={Boolean(error)} mode="signup" />;
 }

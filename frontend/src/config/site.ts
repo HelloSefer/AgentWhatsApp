@@ -16,11 +16,11 @@ export const siteConfig = {
   routes: {
     home: "/",
     login: "/login",
-    signUp: "/register",
+    signUp: "/signup",
   },
   actions: {
     login: { label: "Log in", href: "/login" },
-    getStarted: { label: "Get started", href: "/register" },
+    getStarted: { label: "Get started", href: "/signup" },
   },
   navigation: [
     { label: "Product", href: `#${marketingSections.product}` },

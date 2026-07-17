@@ -1,10 +1,6 @@
-import { AuthRoutePlaceholder } from "@/features/auth/components/auth-route-placeholder";
+import { siteConfig } from "@/config/site";
+import { redirect } from "next/navigation";
 
 export default function RegisterPage() {
-  return (
-    <AuthRoutePlaceholder
-      description="The account creation flow will be available here."
-      title="Create your account"
-    />
-  );
+  redirect(siteConfig.routes.signUp);
 }
