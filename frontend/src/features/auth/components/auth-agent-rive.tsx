@@ -59,7 +59,6 @@ export function AuthAgentRive({ isActive, onError, onReady, trigger }: AuthAgent
 
   const { RiveComponent, rive } = useRive(riveParameters, { shouldResizeCanvasToContainer: true });
   const thinkInput = useStateMachineInput(rive, riveStateMachine, "think");
-  const typeInput = useStateMachineInput(rive, riveStateMachine, "type");
   const bounceInput = useStateMachineInput(rive, riveStateMachine, "bounce");
 
   useEffect(() => {
@@ -99,7 +98,6 @@ export function AuthAgentRive({ isActive, onError, onReady, trigger }: AuthAgent
     const input = {
       bounce: bounceInput,
       think: thinkInput,
-      type: typeInput,
     }[trigger.name];
 
     if (!input) {
@@ -112,7 +110,7 @@ export function AuthAgentRive({ isActive, onError, onReady, trigger }: AuthAgent
     } catch {
       reportError();
     }
-  }, [bounceInput, hasFailed, reportError, thinkInput, trigger, typeInput]);
+  }, [bounceInput, hasFailed, reportError, thinkInput, trigger]);
 
   if (hasFailed) {
     return null;

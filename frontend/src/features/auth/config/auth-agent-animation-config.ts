@@ -1,5 +1,5 @@
 export type MessageSender = "agent" | "customer";
-export type RiveTriggerName = "bounce" | "think" | "type";
+export type RiveTriggerName = "bounce" | "think";
 export type OrderField = "color" | "delivery" | "quantity";
 export type OrderFieldStatus = "hidden" | "validated" | "visible";
 
@@ -24,8 +24,7 @@ export type WorkflowPhase =
   | "confirmed"
   | "customer-message-one"
   | "customer-message-two"
-  | "delivery-population"
-  | "final-validation"
+  | "delivery-validation"
   | "quantity-validation"
   | "settle"
   | "typing-one"
@@ -83,7 +82,7 @@ const allOrderFields = ["delivery", "quantity", "color"] as const;
 export const authAgentWorkflow: readonly WorkflowStep[] = [
   {
     confirmationVisible: false,
-    durationMs: 2_000,
+    durationMs: 1_500,
     phase: "active-idle",
     typingVisible: false,
     validatedOrderFields: noOrderFields,
@@ -104,7 +103,6 @@ export const authAgentWorkflow: readonly WorkflowStep[] = [
     confirmationVisible: false,
     durationMs: 1_500,
     phase: "typing-one",
-    riveTrigger: "type",
     typingVisible: true,
     validatedOrderFields: noOrderFields,
     visibleMessageIds: ["customer-delivery"],
@@ -112,7 +110,7 @@ export const authAgentWorkflow: readonly WorkflowStep[] = [
   },
   {
     confirmationVisible: false,
-    durationMs: 3_000,
+    durationMs: 2_500,
     phase: "agent-response-one",
     riveTrigger: "bounce",
     typingVisible: false,
@@ -122,7 +120,7 @@ export const authAgentWorkflow: readonly WorkflowStep[] = [
   },
   {
     confirmationVisible: false,
-    durationMs: 1_000,
+    durationMs: 2_000,
     phase: "customer-message-two",
     riveTrigger: "think",
     typingVisible: false,
@@ -132,28 +130,27 @@ export const authAgentWorkflow: readonly WorkflowStep[] = [
   },
   {
     confirmationVisible: false,
-    durationMs: 1_000,
-    phase: "delivery-population",
-    typingVisible: false,
-    validatedOrderFields: noOrderFields,
-    visibleMessageIds: customerOrderConversation,
-    visibleOrderFields: deliveryField,
-  },
-  {
-    confirmationVisible: false,
     durationMs: 1_500,
     phase: "typing-two",
-    riveTrigger: "type",
     typingVisible: true,
     validatedOrderFields: noOrderFields,
     visibleMessageIds: customerOrderConversation,
-    visibleOrderFields: deliveryField,
+    visibleOrderFields: noOrderFields,
   },
   {
     confirmationVisible: false,
     durationMs: 750,
     phase: "agent-response-two",
     riveTrigger: "bounce",
+    typingVisible: false,
+    validatedOrderFields: noOrderFields,
+    visibleMessageIds: completeConversation,
+    visibleOrderFields: deliveryField,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 750,
+    phase: "delivery-validation",
     typingVisible: false,
     validatedOrderFields: deliveryField,
     visibleMessageIds: completeConversation,
@@ -178,15 +175,6 @@ export const authAgentWorkflow: readonly WorkflowStep[] = [
     visibleOrderFields: allOrderFields,
   },
   {
-    confirmationVisible: false,
-    durationMs: 750,
-    phase: "final-validation",
-    typingVisible: false,
-    validatedOrderFields: allOrderFields,
-    visibleMessageIds: completeConversation,
-    visibleOrderFields: allOrderFields,
-  },
-  {
     confirmationVisible: true,
     durationMs: 3_000,
     phase: "confirmed",
@@ -198,7 +186,7 @@ export const authAgentWorkflow: readonly WorkflowStep[] = [
   },
   {
     confirmationVisible: true,
-    durationMs: 2_000,
+    durationMs: 1_000,
     phase: "settle",
     typingVisible: false,
     validatedOrderFields: allOrderFields,
@@ -208,7 +196,7 @@ export const authAgentWorkflow: readonly WorkflowStep[] = [
 ];
 
 export const authAgentAnimationConfig = {
-  totalDurationMs: 20_000,
+  totalDurationMs: 18_000,
   motion: {
     confirmationPulse: 0.48,
     enter: 0.3,

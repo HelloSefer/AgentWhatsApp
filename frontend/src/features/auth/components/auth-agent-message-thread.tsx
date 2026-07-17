@@ -21,7 +21,7 @@ export function AuthAgentMessageThread({ isSettling, isTyping, messages, shouldR
       className="h-full w-full"
       transition={{ duration: shouldReduceMotion ? 0 : authAgentAnimationConfig.motion.exit, ease: "easeOut" }}
     >
-      <ol className="flex h-full flex-col justify-start gap-1.5">
+      <ol className="flex h-full flex-col justify-start gap-2">
         <AnimatePresence initial={false}>
           {messages.map((message) => (
             <motion.li

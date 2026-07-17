@@ -70,7 +70,7 @@ export function AuthAgentAnimation() {
         ))}
       </div>
 
-      <div className="absolute top-[1%] left-0 h-[98%] w-[35%] min-w-0">
+      <div className="absolute top-[1%] left-[5%] h-[98%] w-[38%] min-w-0">
         <AuthAgentMessageThread
           isSettling={workflow.isSettling}
           isTyping={workflow.isTyping}
@@ -79,7 +79,7 @@ export function AuthAgentAnimation() {
         />
       </div>
 
-      <div className="absolute top-[8%] left-[35%] h-[80%] w-[31%]">
+      <div className="absolute top-[5%] left-[42%] h-[90%] w-[32%]">
         {shouldRenderVisual && riveStatus === "loading" ? (
           <div aria-hidden="true" className="absolute inset-0 flex items-center justify-center">
             <motion.span
@@ -105,7 +105,7 @@ export function AuthAgentAnimation() {
         </motion.div>
       </div>
 
-      <div className="absolute top-[23%] right-0 w-[29%] min-w-0">
+      <div className="absolute top-[22%] right-0 w-[28%] min-w-0">
         <AuthAgentOrderCard
           fields={workflow.orderFields}
           isConfirmed={workflow.isConfirmed}

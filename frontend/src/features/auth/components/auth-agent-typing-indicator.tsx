@@ -9,8 +9,8 @@ type AuthAgentTypingIndicatorProps = Readonly<{
 
 export function AuthAgentTypingIndicator({ shouldReduceMotion }: AuthAgentTypingIndicatorProps) {
   return (
-    <div className="ml-3 flex w-fit items-center gap-1 rounded-xl border border-marketing-primary/15 bg-[#eef8f1] px-3 py-2.5" role="presentation">
-      <span className="mr-1 text-[0.625rem] font-semibold tracking-[0.06em] text-[#477257] uppercase">AgentWhatsApp</span>
+    <div className="ml-3 flex w-fit items-center gap-1 rounded-xl border border-marketing-primary/15 bg-[#eef8f1] px-3.5 py-2.5" role="presentation">
+      <span className="mr-1 text-[0.6875rem] font-semibold tracking-[0.06em] text-[#477257] uppercase">AgentWhatsApp</span>
       {[0, 1, 2].map((dot) => (
         <motion.span
           animate={shouldReduceMotion ? { opacity: 0.55, y: 0 } : { opacity: [0.35, 1, 0.35], y: [0, -2, 0] }}
