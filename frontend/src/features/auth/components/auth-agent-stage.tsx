@@ -1,6 +1,6 @@
 import { AuthAgentAnimationBoundary } from "./auth-agent-animation-boundary";
 
-const sceneDescription = "AgentWhatsApp AI assistant turning a customer conversation into a confirmed order";
+const sceneDescription = "AgentWhatsApp AI assistant answering a Moroccan customer and confirming an order";
 
 export function AuthAgentStage() {
   return (

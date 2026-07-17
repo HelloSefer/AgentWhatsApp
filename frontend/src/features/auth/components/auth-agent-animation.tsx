@@ -1,90 +1,118 @@
 "use client";
 
-import { useId, useRef } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { motion, useInView, useReducedMotion } from "motion/react";
-import { AuthAgentMessageBubbles } from "./auth-agent-message-bubbles";
+import { authAgentAnimationConfig } from "../config/auth-agent-animation-config";
+import { useAuthAgentWorkflow } from "../hooks/use-auth-agent-workflow";
+import { AuthAgentMessageThread } from "./auth-agent-message-thread";
 import { AuthAgentOrderCard } from "./auth-agent-order-card";
-import { AuthAgentRobotSvg } from "./auth-agent-robot-svg";
 
-const sceneDescription = "AgentWhatsApp AI assistant turning a customer conversation into a confirmed order";
+const AuthAgentRive = dynamic(() => import("./auth-agent-rive").then((module) => module.AuthAgentRive), { ssr: false });
+const visualBreakpointQuery = "(min-width: 768px)";
 
-const sceneVariants = {
-  active: {
-    opacity: 1,
-    scale: [0.997, 1],
-    transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] },
-  },
-  static: { opacity: 1, scale: 1, transition: { duration: 0 } },
-};
+type RiveStatus = "failed" | "loading" | "ready";
+
+function subscribeToVisualBreakpoint(callback: () => void) {
+  const mediaQuery = window.matchMedia(visualBreakpointQuery);
+  mediaQuery.addEventListener("change", callback);
+
+  return () => mediaQuery.removeEventListener("change", callback);
+}
+
+function getVisualBreakpointSnapshot() {
+  return window.matchMedia(visualBreakpointQuery).matches;
+}
+
+function getVisualBreakpointServerSnapshot() {
+  return false;
+}
 
 export function AuthAgentAnimation() {
-  const sceneId = useId().replaceAll(":", "");
   const sceneRef = useRef<HTMLDivElement>(null);
+  const [riveStatus, setRiveStatus] = useState<RiveStatus>("loading");
+  const shouldRenderVisual = useSyncExternalStore(subscribeToVisualBreakpoint, getVisualBreakpointSnapshot, getVisualBreakpointServerSnapshot);
   const isInView = useInView(sceneRef, { amount: 0.2 });
-  const shouldReduceMotion = useReducedMotion();
-  const isAnimated = isInView && !shouldReduceMotion;
+  const shouldReduceMotion = Boolean(useReducedMotion());
+  const isActive = shouldRenderVisual && isInView && !shouldReduceMotion;
+  const workflow = useAuthAgentWorkflow({ isActive, shouldReduceMotion });
+  const handleRiveReady = useCallback(() => setRiveStatus("ready"), []);
+  const handleRiveError = useCallback(() => setRiveStatus("failed"), []);
 
   return (
-    <div
-      aria-label={sceneDescription}
-      className="relative aspect-[36/23] w-full overflow-visible"
-      ref={sceneRef}
-      role="img"
-    >
-      <motion.svg
-        animate={isAnimated ? "active" : "static"}
-        aria-hidden="true"
-        className="block size-full overflow-visible"
-        focusable="false"
-        initial={false}
-        preserveAspectRatio="xMidYMid meet"
-        variants={sceneVariants}
-        viewBox="0 0 720 430"
-      >
-        <defs>
-          <radialGradient id={`${sceneId}-scene-glow`} cx="52%" cy="52%" r="56%">
-            <stop offset="0" stopColor="#c9efd3" stopOpacity="0.78" />
-            <stop offset="0.52" stopColor="#eaf7ed" stopOpacity="0.38" />
-            <stop offset="1" stopColor="#fbfdf9" stopOpacity="0" />
-          </radialGradient>
-        </defs>
-        <ellipse cx="369" cy="244" fill={`url(#${sceneId}-scene-glow)`} rx="275" ry="178" />
+    <div className="relative aspect-[4/3] w-full overflow-visible" ref={sceneRef}>
+      <div aria-hidden="true" className="pointer-events-none absolute top-[16%] left-[29%] h-[58%] w-[42%] rounded-full bg-[radial-gradient(circle,rgba(201,239,211,0.78)_0%,rgba(234,247,237,0.34)_55%,transparent_76%)]" />
 
-        <g className="hidden sm:block">
-          {[
-            [120, 319, 3],
-            [213, 294, 2.5],
-            [274, 72, 3],
-            [447, 79, 2.5],
-            [620, 104, 3],
-            [672, 340, 2.5],
-          ].map(([cx, cy, radius], index) => (
-            <motion.circle
-              animate={isAnimated ? { opacity: [0.22, 0.62, 0.22], y: [0, -5, 0] } : { opacity: 0.35, y: 0 }}
-              cx={cx}
-              cy={cy}
-              fill="#75a987"
-              key={`${cx}-${cy}`}
-              r={radius}
-              transition={isAnimated ? { delay: index * 0.35, duration: 4.8 + index * 0.2, ease: "easeInOut", repeat: Number.POSITIVE_INFINITY } : { duration: 0 }}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 hidden sm:block">
+        {[
+          [16, 72],
+          [28, 18],
+          [61, 14],
+          [88, 25],
+          [94, 78],
+        ].map(([left, top], index) => (
+          <motion.span
+            animate={isActive ? { opacity: [0.2, 0.58, 0.2], y: [0, -4, 0] } : { opacity: 0.3, y: 0 }}
+            className="absolute size-1 rounded-full bg-[#75a987]"
+            key={`${left}-${top}`}
+            style={{ left: `${left}%`, top: `${top}%` }}
+            transition={
+              isActive
+                ? {
+                    delay: index * authAgentAnimationConfig.motion.particleDelay,
+                    duration: authAgentAnimationConfig.motion.particleDuration,
+                    ease: "easeInOut",
+                    repeat: Number.POSITIVE_INFINITY,
+                  }
+                : { duration: 0 }
+            }
+          />
+        ))}
+      </div>
+
+      <div className="absolute top-[1%] left-0 h-[98%] w-[35%] min-w-0">
+        <AuthAgentMessageThread
+          isSettling={workflow.isSettling}
+          isTyping={workflow.isTyping}
+          messages={workflow.visibleMessages}
+          shouldReduceMotion={shouldReduceMotion}
+        />
+      </div>
+
+      <div className="absolute top-[8%] left-[35%] h-[80%] w-[31%]">
+        {shouldRenderVisual && riveStatus === "loading" ? (
+          <div aria-hidden="true" className="absolute inset-0 flex items-center justify-center">
+            <motion.span
+              animate={shouldReduceMotion ? { opacity: 0.3 } : { opacity: [0.22, 0.48, 0.22] }}
+              className="h-px w-16 rounded-full bg-marketing-primary/30"
+              transition={shouldReduceMotion ? { duration: 0 } : { duration: authAgentAnimationConfig.motion.typingDot, ease: "easeInOut", repeat: Number.POSITIVE_INFINITY }}
             />
-          ))}
-        </g>
-
-        <AuthAgentMessageBubbles isAnimated={isAnimated} />
-        <motion.g
-          animate={isAnimated ? { rotate: [0, -0.65, 0, 0.55, 0], y: [0, -3, 0, 2, 0] } : { rotate: 0, y: 0 }}
-          style={{ transformBox: "fill-box", transformOrigin: "center" }}
-          transition={
-            isAnimated
-              ? { duration: 5.8, ease: "easeInOut", repeat: Number.POSITIVE_INFINITY, times: [0, 0.25, 0.5, 0.75, 1] }
-              : { duration: 0 }
-          }
+          </div>
+        ) : null}
+        <motion.div
+          animate={{ opacity: riveStatus === "ready" ? 1 : 0 }}
+          className="size-full"
+          transition={{ duration: shouldReduceMotion ? 0 : authAgentAnimationConfig.motion.riveFade, ease: "easeOut" }}
         >
-          <AuthAgentRobotSvg idPrefix={sceneId} isAnimated={isAnimated} />
-        </motion.g>
-        <AuthAgentOrderCard isAnimated={isAnimated} />
-      </motion.svg>
+          {shouldRenderVisual && riveStatus !== "failed" ? (
+            <AuthAgentRive
+              isActive={isActive}
+              onError={handleRiveError}
+              onReady={handleRiveReady}
+              trigger={workflow.riveTrigger}
+            />
+          ) : null}
+        </motion.div>
+      </div>
+
+      <div className="absolute top-[23%] right-0 w-[29%] min-w-0">
+        <AuthAgentOrderCard
+          fields={workflow.orderFields}
+          isConfirmed={workflow.isConfirmed}
+          isSettling={workflow.isSettling}
+          shouldReduceMotion={shouldReduceMotion}
+        />
+      </div>
     </div>
   );
 }

@@ -1,30 +1,222 @@
+export type MessageSender = "agent" | "customer";
+export type RiveTriggerName = "bounce" | "think" | "type";
+export type OrderField = "color" | "delivery" | "quantity";
+export type OrderFieldStatus = "hidden" | "validated" | "visible";
+
+export type ChatMessage = Readonly<{
+  body: string;
+  id: "agent-delivery" | "agent-summary" | "customer-delivery" | "customer-order";
+  sender: MessageSender;
+}>;
+
+export type OrderFieldState = Readonly<{
+  field: OrderField;
+  label: string;
+  status: OrderFieldStatus;
+  value: string;
+}>;
+
+export type WorkflowPhase =
+  | "active-idle"
+  | "agent-response-one"
+  | "agent-response-two"
+  | "color-validation"
+  | "confirmed"
+  | "customer-message-one"
+  | "customer-message-two"
+  | "delivery-population"
+  | "final-validation"
+  | "quantity-validation"
+  | "settle"
+  | "typing-one"
+  | "typing-two";
+
+type WorkflowStep = Readonly<{
+  confirmationVisible: boolean;
+  durationMs: number;
+  phase: WorkflowPhase;
+  riveTrigger?: RiveTriggerName;
+  typingVisible: boolean;
+  validatedOrderFields: readonly OrderField[];
+  visibleMessageIds: readonly ChatMessage["id"][];
+  visibleOrderFields: readonly OrderField[];
+}>;
+
+export const authAgentChatMessages: readonly ChatMessage[] = [
+  {
+    body: "Salam, wach katdirou livraison?",
+    id: "customer-delivery",
+    sender: "customer",
+  },
+  {
+    body: "Wa 3likom salam 👋 Ah, kanwsslou. Chno hiya lmdina dyalk?",
+    id: "agent-delivery",
+    sender: "agent",
+  },
+  {
+    body: "Casablanca. Bghit 2, couleur noire.",
+    id: "customer-order",
+    sender: "customer",
+  },
+  {
+    body: "Mzyan 👌 2 noir l Casablanca. Talab dyalk wajed lta2kid.",
+    id: "agent-summary",
+    sender: "agent",
+  },
+];
+
+export const authAgentOrderFields: readonly Omit<OrderFieldState, "status">[] = [
+  { field: "delivery", label: "Delivery", value: "Casablanca" },
+  { field: "quantity", label: "Quantity", value: "2" },
+  { field: "color", label: "Color", value: "Black" },
+];
+
+const firstExchange = ["customer-delivery", "agent-delivery"] as const;
+const completeConversation = [...firstExchange, "customer-order", "agent-summary"] as const;
+const customerOrderConversation = [...firstExchange, "customer-order"] as const;
+const noMessages = [] as const;
+const noOrderFields = [] as const;
+const deliveryField = ["delivery"] as const;
+const deliveryAndQuantity = ["delivery", "quantity"] as const;
+const allOrderFields = ["delivery", "quantity", "color"] as const;
+
+export const authAgentWorkflow: readonly WorkflowStep[] = [
+  {
+    confirmationVisible: false,
+    durationMs: 2_000,
+    phase: "active-idle",
+    typingVisible: false,
+    validatedOrderFields: noOrderFields,
+    visibleMessageIds: noMessages,
+    visibleOrderFields: noOrderFields,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 2_000,
+    phase: "customer-message-one",
+    riveTrigger: "think",
+    typingVisible: false,
+    validatedOrderFields: noOrderFields,
+    visibleMessageIds: ["customer-delivery"],
+    visibleOrderFields: noOrderFields,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 1_500,
+    phase: "typing-one",
+    riveTrigger: "type",
+    typingVisible: true,
+    validatedOrderFields: noOrderFields,
+    visibleMessageIds: ["customer-delivery"],
+    visibleOrderFields: noOrderFields,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 3_000,
+    phase: "agent-response-one",
+    riveTrigger: "bounce",
+    typingVisible: false,
+    validatedOrderFields: noOrderFields,
+    visibleMessageIds: firstExchange,
+    visibleOrderFields: noOrderFields,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 1_000,
+    phase: "customer-message-two",
+    riveTrigger: "think",
+    typingVisible: false,
+    validatedOrderFields: noOrderFields,
+    visibleMessageIds: customerOrderConversation,
+    visibleOrderFields: noOrderFields,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 1_000,
+    phase: "delivery-population",
+    typingVisible: false,
+    validatedOrderFields: noOrderFields,
+    visibleMessageIds: customerOrderConversation,
+    visibleOrderFields: deliveryField,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 1_500,
+    phase: "typing-two",
+    riveTrigger: "type",
+    typingVisible: true,
+    validatedOrderFields: noOrderFields,
+    visibleMessageIds: customerOrderConversation,
+    visibleOrderFields: deliveryField,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 750,
+    phase: "agent-response-two",
+    riveTrigger: "bounce",
+    typingVisible: false,
+    validatedOrderFields: deliveryField,
+    visibleMessageIds: completeConversation,
+    visibleOrderFields: deliveryField,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 750,
+    phase: "quantity-validation",
+    typingVisible: false,
+    validatedOrderFields: deliveryAndQuantity,
+    visibleMessageIds: completeConversation,
+    visibleOrderFields: deliveryAndQuantity,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 750,
+    phase: "color-validation",
+    typingVisible: false,
+    validatedOrderFields: allOrderFields,
+    visibleMessageIds: completeConversation,
+    visibleOrderFields: allOrderFields,
+  },
+  {
+    confirmationVisible: false,
+    durationMs: 750,
+    phase: "final-validation",
+    typingVisible: false,
+    validatedOrderFields: allOrderFields,
+    visibleMessageIds: completeConversation,
+    visibleOrderFields: allOrderFields,
+  },
+  {
+    confirmationVisible: true,
+    durationMs: 3_000,
+    phase: "confirmed",
+    riveTrigger: "bounce",
+    typingVisible: false,
+    validatedOrderFields: allOrderFields,
+    visibleMessageIds: completeConversation,
+    visibleOrderFields: allOrderFields,
+  },
+  {
+    confirmationVisible: true,
+    durationMs: 2_000,
+    phase: "settle",
+    typingVisible: false,
+    validatedOrderFields: allOrderFields,
+    visibleMessageIds: completeConversation,
+    visibleOrderFields: allOrderFields,
+  },
+];
+
 export const authAgentAnimationConfig = {
-  duration: 9.8,
-  repeatDelay: 0.55,
-  ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
-  timeline: {
-    customerMessage: [0, 0.06, 0.12, 0.88, 0.94, 1],
-    typing: [0, 0.17, 0.22, 0.34, 0.39, 0.88, 0.94, 1],
-    orderCard: [0, 0.32, 0.38, 0.92, 0.97, 1],
-    customerRow: [0, 0.39, 0.44, 0.92, 0.97, 1],
-    productRow: [0, 0.46, 0.51, 0.92, 0.97, 1],
-    deliveryRow: [0, 0.53, 0.58, 0.92, 0.97, 1],
-    customerCheck: [0, 0.58, 0.63, 0.92, 0.97, 1],
-    productCheck: [0, 0.65, 0.7, 0.92, 0.97, 1],
-    deliveryCheck: [0, 0.72, 0.77, 0.92, 0.97, 1],
-    confirmation: [0, 0.78, 0.83, 0.92, 0.97, 1],
-    confirmationPulse: [0, 0.81, 0.84, 0.88, 0.92, 0.97, 1],
-    robotFocus: [0, 0.17, 0.22, 0.38, 0.43, 0.78, 0.84, 0.94, 1],
-    robotGesture: [0, 0.55, 0.61, 0.86, 0.92, 0.97, 1],
+  totalDurationMs: 20_000,
+  motion: {
+    confirmationPulse: 0.48,
+    enter: 0.3,
+    exit: 1.2,
+    particleDelay: 0.35,
+    particleDuration: 4.8,
+    riveFade: 0.45,
+    slide: 8,
+    typingDot: 0.8,
   },
 } as const;
-
-export function createAuthAgentTransition(times: readonly number[]) {
-  return {
-    duration: authAgentAnimationConfig.duration,
-    ease: authAgentAnimationConfig.ease,
-    repeat: Number.POSITIVE_INFINITY,
-    repeatDelay: authAgentAnimationConfig.repeatDelay,
-    times: [...times],
-  };
-}
