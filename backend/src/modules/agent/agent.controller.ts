@@ -62,6 +62,7 @@ import { runCartPlanningPreview } from "./order/planning/preview/cart-planning-p
 import { runItemCollectionPreview } from "./order/item-collection/preview/item-collection-preview.service";
 import type { CartDraft } from "./order/cart-state.types";
 import type { CartPlanningPreviewState } from "./order/planning/quantity/flow/cart-custom-quantity-flow.types";
+import type { SameAsPreviousPreviewState } from "./order/item-collection/shortcuts/same-as-previous.types";
 
 function isAIIntentRouterIntent(value: unknown): boolean {
   return (
@@ -181,6 +182,16 @@ function getItemCollectionPreviewText(body: unknown): unknown {
   }
 
   return (body as Record<string, unknown>).itemCollectionText;
+}
+
+function getItemCollectionPreviewState(
+  value: unknown,
+): SameAsPreviousPreviewState | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as SameAsPreviousPreviewState;
 }
 
 function getCartPlanningPreviewCart(value: unknown): CartDraft | undefined {
@@ -452,6 +463,9 @@ export async function testAgentReply(req: Request, res: Response) {
             previewEnabled: true,
             rawActionId: getItemCollectionPreviewActionInput(req.body),
             itemCollectionText: getItemCollectionPreviewText(req.body),
+            previewState: getItemCollectionPreviewState(
+              req.body?.itemCollectionPreviewState,
+            ),
             sellerId: productContext.sellerId,
             productContext,
             requiredFields: requiredFieldsService.getOrderFields({

@@ -6,6 +6,14 @@ import { startItemCollection } from "../item-collection.service";
 import { buildItemCollectionPresentation } from "../presentation/item-collection-presentation.service";
 import { analyzeItemCollectionProgression } from "../progression/item-collection-progression.service";
 import { runItemCollectionLoop } from "../loop/item-collection-loop.service";
+import {
+  buildSameAsPreviousPresentation,
+  evaluateSameAsPreviousEligibility,
+  handleSameAsPreviousAction,
+  normalizeSameAsPreviousActionId,
+  normalizeSameAsPreviousPreviewState,
+} from "../shortcuts/same-as-previous.service";
+import type { SameAsPreviousPreviewState } from "../shortcuts/same-as-previous.types";
 import type {
   ItemCollectionPreviewInput,
   ItemCollectionPreviewNextStep,
@@ -93,6 +101,8 @@ function result(input: {
   collectionResult?: ItemCollectionPreviewResult["collectionResult"];
   actionResult?: ItemCollectionPreviewResult["actionResult"];
   loopResult?: ItemCollectionPreviewResult["loopResult"];
+  shortcutPresentation?: ItemCollectionPreviewResult["shortcutPresentation"];
+  previewState: SameAsPreviousPreviewState;
   progression?: ItemCollectionPreviewResult["progression"];
   presentation?: ItemCollectionPreviewResult["presentation"];
   nextStep?: ItemCollectionPreviewNextStep;
@@ -124,6 +134,17 @@ function result(input: {
       : {}),
     ...(input.actionResult ? { actionResult: cloneActionResult(input.actionResult) } : {}),
     ...(input.loopResult ? { loopResult: input.loopResult } : {}),
+    ...(input.shortcutPresentation
+      ? {
+          shortcutPresentation: {
+            ...input.shortcutPresentation,
+            uiHints: {
+              ...input.shortcutPresentation.uiHints,
+              options: input.shortcutPresentation.uiHints.options?.map((option) => ({ ...option })),
+            },
+          },
+        }
+      : {}),
     ...(input.progression
       ? {
           progression: {
@@ -155,6 +176,7 @@ function result(input: {
       : {}),
     ...(input.nextStep ? { nextStep: input.nextStep } : {}),
     ...(input.failureCode ? { failureCode: input.failureCode } : {}),
+    previewState: { ...input.previewState },
     warnings: [...(input.warnings || [])],
   };
 }
@@ -170,7 +192,24 @@ function describeProgression(input: ItemCollectionPreviewInput, cart: CartDraft)
     progression,
     requiredFields: input.requiredFields,
   });
-  return { progression, presentation, nextStep: nextStepFor(presentation) };
+  const previewState = normalizeSameAsPreviousPreviewState(input.previewState, cart);
+  // The shortcut is an explicit D3 preview contract. Existing preview callers
+  // keep their D2D loop behavior until they opt in by returning this state.
+  const eligibility = input.previewState === undefined
+    ? undefined
+    : evaluateSameAsPreviousEligibility({ ...input, cart, previewState });
+  const shortcutPresentation = eligibility?.eligible
+    ? buildSameAsPreviousPresentation()
+    : undefined;
+  return {
+    progression,
+    presentation,
+    shortcutPresentation,
+    previewState,
+    nextStep: shortcutPresentation
+      ? "SAME_OR_DIFFERENT_ITEM_OPTIONS" as const
+      : nextStepFor(presentation),
+  };
 }
 
 /**
@@ -181,14 +220,40 @@ export function runItemCollectionPreview(
   input: ItemCollectionPreviewInput,
 ): ItemCollectionPreviewResult {
   const cartBefore = cloneCart(input.cart || initializeCart());
+  const previewState = normalizeSameAsPreviousPreviewState(input.previewState, cartBefore);
   if (!input.previewEnabled) {
-    return result({ handled: false, success: false, route: "NOT_HANDLED", cartBefore });
+    return result({ handled: false, success: false, route: "NOT_HANDLED", cartBefore, previewState });
   }
 
   if (isActionProvided(input.rawActionId)) {
+    const shortcutNormalization = normalizeSameAsPreviousActionId(input.rawActionId);
+    if (shortcutNormalization.recognized) {
+      // Give the shortcut handler the caller's original state so it can reject
+      // a delayed click that belongs to a previously completed item.
+      const shortcut = handleSameAsPreviousAction({ ...input, cart: cartBefore, previewState: input.previewState, rawActionId: input.rawActionId });
+      const next = describeProgression({ ...input, previewState: shortcut.previewState }, shortcut.cartAfter);
+      return result({
+        handled: shortcut.handled,
+        success: shortcut.success,
+        route: shortcut.success
+          ? next.nextStep === "ENTER_ITEM_QUANTITY"
+            ? "QUANTITY_REQUIRED"
+            : "OPTION_ACTION"
+          : "BLOCKED",
+        cartBefore,
+        cartAfter: shortcut.cartAfter,
+        progression: next.progression,
+        presentation: next.presentation,
+        shortcutPresentation: next.shortcutPresentation,
+        previewState: shortcut.previewState,
+        nextStep: next.nextStep,
+        failureCode: shortcut.failureCode,
+        warnings: shortcut.warnings,
+      });
+    }
     const normalization = normalizeItemOptionActionId(input.rawActionId);
     if (!normalization.recognized) {
-      return result({ handled: false, success: false, route: "NOT_HANDLED", cartBefore });
+      return result({ handled: false, success: false, route: "NOT_HANDLED", cartBefore, previewState });
     }
     if (!normalization.valid || !normalization.action) {
       return result({
@@ -196,6 +261,7 @@ export function runItemCollectionPreview(
         success: false,
         route: "BLOCKED",
         cartBefore,
+        previewState,
         failureCode: normalization.failureCode,
       });
     }
@@ -208,17 +274,8 @@ export function runItemCollectionPreview(
       requiredFields: input.requiredFields,
     });
     const cartAfter = actionResult.collectionResult?.cart || cartBefore;
-    const next = actionResult.progression
-      ? {
-          progression: actionResult.progression,
-          presentation: buildItemCollectionPresentation({
-            progression: actionResult.progression,
-            requiredFields: input.requiredFields,
-          }),
-          nextStep: undefined,
-        }
-      : describeProgression(input, cartAfter);
-    const nextStep = next.nextStep || nextStepFor(next.presentation);
+    const next = describeProgression({ ...input, previewState }, cartAfter);
+    const nextStep = next.nextStep;
 
     return result({
       handled: true,
@@ -233,6 +290,8 @@ export function runItemCollectionPreview(
       actionResult,
       progression: next.progression,
       presentation: next.presentation,
+      shortcutPresentation: next.shortcutPresentation,
+      previewState: next.previewState,
       nextStep,
       failureCode: actionResult.failureCode,
       warnings: actionResult.warnings,
@@ -247,6 +306,7 @@ export function runItemCollectionPreview(
       requiredFields: input.requiredFields,
       quantityText: input.itemCollectionText,
     });
+    const next = describeProgression({ ...input, previewState }, loopResult.cartAfter);
     const route = loopResult.success
       ? "LOOP_COMPLETED"
       : loopResult.nextStep === "RETRY_ITEM_QUANTITY" || loopResult.nextStep === "ENTER_ITEM_QUANTITY"
@@ -260,9 +320,11 @@ export function runItemCollectionPreview(
       cartBefore,
       cartAfter: loopResult.cartAfter,
       loopResult,
-      progression: loopResult.progression,
-      presentation: loopResult.presentation,
-      nextStep: loopResult.nextStep,
+      progression: next.progression,
+      presentation: next.presentation,
+      shortcutPresentation: next.shortcutPresentation,
+      previewState: next.previewState,
+      nextStep: next.shortcutPresentation ? next.nextStep : loopResult.nextStep,
       failureCode: loopResult.failureCode,
       warnings: loopResult.warnings,
     });
@@ -288,6 +350,8 @@ export function runItemCollectionPreview(
     collectionResult,
     progression: next.progression,
     presentation: next.presentation,
+    shortcutPresentation: next.shortcutPresentation,
+    previewState: next.previewState,
     nextStep: next.nextStep,
     failureCode: collectionResult.failureCode,
     warnings: [...collectionResult.warnings, ...next.progression.warnings],
