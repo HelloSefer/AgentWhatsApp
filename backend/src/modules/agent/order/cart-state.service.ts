@@ -19,6 +19,7 @@ import {
 export const CART_SCHEMA_VERSION = 1 as const;
 export const MAX_CART_ITEMS = 20;
 export const MAX_CART_ITEM_QUANTITY = 100;
+export const MAX_CART_TARGET_ITEM_COUNT = MAX_CART_ITEM_QUANTITY;
 
 const ORDER_FIELD_KEYS = new Set([
   "fullname",
@@ -297,7 +298,7 @@ export function evaluateCartIntegrity(input: {
     invalidPaths.push("items");
   }
 
-  if (cart.targetItemCount !== undefined && !isValidPositiveInteger(cart.targetItemCount, MAX_CART_ITEMS)) {
+  if (cart.targetItemCount !== undefined && !isValidPositiveInteger(cart.targetItemCount, MAX_CART_TARGET_ITEM_COUNT)) {
     invalidPaths.push("targetItemCount");
   }
 
@@ -583,6 +584,59 @@ export function removeItem(input: { cart: CartDraft; itemId: string }): CartMuta
     return { cart, accepted: false, invalidPaths: ["itemId"] };
   }
   cart.status = deriveCartStatus({ cart });
+  return { cart, accepted: true };
+}
+
+/**
+ * Generic planning metadata mutation. Lifecycle and offer policy intentionally
+ * live above this cart boundary in the planning domain.
+ */
+export function setCartPlanning(input: {
+  cart: CartDraft;
+  mode: CartMode;
+  targetItemCount: number;
+  selectedOfferId?: string;
+}): CartMutationResult {
+  if (!isValidPositiveInteger(input.targetItemCount, MAX_CART_TARGET_ITEM_COUNT)) {
+    return { cart: cloneCart(input.cart), accepted: false, invalidPaths: ["targetItemCount"] };
+  }
+
+  const selectedOfferId = input.selectedOfferId?.trim();
+  if (input.mode === "OFFER" && !selectedOfferId) {
+    return { cart: cloneCart(input.cart), accepted: false, invalidPaths: ["selectedOfferId"] };
+  }
+
+  if (input.mode === "STANDARD" && selectedOfferId) {
+    return { cart: cloneCart(input.cart), accepted: false, invalidPaths: ["selectedOfferId"] };
+  }
+
+  const cart = cloneCart(input.cart);
+  cart.mode = input.mode;
+  cart.targetItemCount = input.targetItemCount;
+  if (selectedOfferId) {
+    cart.selectedOfferId = selectedOfferId;
+  } else {
+    delete cart.selectedOfferId;
+  }
+
+  if (cart.items.length === 0 && !cart.currentItemDraft) {
+    cart.status = "PLANNING";
+  }
+
+  return { cart, accepted: true };
+}
+
+/** Clears only planning metadata; it never removes items or drafts. */
+export function clearCartPlanning(input: { cart: CartDraft }): CartMutationResult {
+  const cart = cloneCart(input.cart);
+  cart.mode = "STANDARD";
+  delete cart.targetItemCount;
+  delete cart.selectedOfferId;
+
+  if (cart.items.length === 0 && !cart.currentItemDraft) {
+    cart.status = "EMPTY";
+  }
+
   return { cart, accepted: true };
 }
 
