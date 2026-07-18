@@ -16,6 +16,7 @@ export type CartPlanningPresentationFailureCode =
 
 export type CartOfferActionId = `cart_offer:${string}`;
 export type CartQuantityActionId = `cart_quantity:${number}` | "cart_quantity:more";
+export const MAX_CART_PLANNING_ACTION_ID_LENGTH = 200;
 
 export type OfferSelectorPresentationInput = {
   sellerId: string;

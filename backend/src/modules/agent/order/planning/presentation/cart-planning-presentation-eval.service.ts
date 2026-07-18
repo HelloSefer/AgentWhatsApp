@@ -115,6 +115,8 @@ export function evaluateCartPlanningPresentation(): CartPlanningPresentationEval
   add(cases, "invalid configuration produces no unsafe options", !invalid.success && invalid.failureCode === "INVALID_OFFER_CONFIG" && invalid.optionCount === 0);
   const noOffers = buildOfferSelectorPresentation(presentationInput(product({ offers: [] })));
   add(cases, "no offers returns typed unavailable result", !noOffers.success && noOffers.kind === "UNAVAILABLE" && noOffers.failureCode === "NO_AVAILABLE_OFFERS");
+  const unsafeId = buildOfferSelectorPresentation(presentationInput(product({ offers: [offer({ id: "offer:349" })] })));
+  add(cases, "unsafe offer action id is never presented", !unsafeId.success && unsafeId.failureCode === "NO_AVAILABLE_OFFERS" && unsafeId.optionCount === 0);
 
   const duplicateIds = four.uiHints?.options?.map((item) => item.id) || [];
   add(cases, "duplicate presentation ids cannot occur", new Set(duplicateIds).size === duplicateIds.length);

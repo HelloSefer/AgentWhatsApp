@@ -1,4 +1,5 @@
 import type { ProductOfferConfig } from "../../../config/offers/offer.types";
+import { MAX_PRODUCT_OFFER_ID_LENGTH } from "../../../config/offers/offer.types";
 import type { AgentReplyUiHint } from "../../../reply/reply-renderer.types";
 import type {
   CartOfferActionId,
@@ -6,15 +7,16 @@ import type {
   CartQuantityActionId,
   OfferSelectorPresentationInput,
 } from "./cart-planning-presentation.types";
+import { MAX_CART_PLANNING_ACTION_ID_LENGTH } from "./cart-planning-presentation.types";
 
 const MAX_BUTTON_OPTIONS = 3;
 const MAX_BUTTON_LABEL_LENGTH = 20;
 const MAX_LIST_TITLE_LENGTH = 24;
 const MAX_LIST_DESCRIPTION_LENGTH = 72;
-const MAX_ACTION_ID_LENGTH = 200;
 const OFFER_ACTION_PREFIX = "cart_offer:";
 const QUANTITY_ACTION_PREFIX = "cart_quantity:";
 const COMMON_QUANTITIES = [1, 2, 3] as const;
+const UNSAFE_ACTION_SEGMENT = /[:\s\u0000-\u001F\u007F-\u009F]/u;
 
 const OFFER_PROMPT = "اختار العرض اللي مناسب ليك";
 const QUANTITY_PROMPT = "قبل ما نبدأو، شحال من قطعة بغيتي؟";
@@ -89,7 +91,14 @@ function buildUnavailable(
 
 function buildOfferActionId(offerId: string): CartOfferActionId | undefined {
   const id = `${OFFER_ACTION_PREFIX}${offerId}`;
-  return id.length <= MAX_ACTION_ID_LENGTH ? (id as CartOfferActionId) : undefined;
+  return (
+    offerId.length > 0 &&
+    Array.from(offerId).length <= MAX_PRODUCT_OFFER_ID_LENGTH &&
+    !UNSAFE_ACTION_SEGMENT.test(offerId) &&
+    id.length <= MAX_CART_PLANNING_ACTION_ID_LENGTH
+  )
+    ? (id as CartOfferActionId)
+    : undefined;
 }
 
 function buildQuantityActionId(quantity: number): CartQuantityActionId {
