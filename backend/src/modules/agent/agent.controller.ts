@@ -65,6 +65,7 @@ import type { CartDraft } from "./order/cart-state.types";
 import type { CartPlanningPreviewState } from "./order/planning/quantity/flow/cart-custom-quantity-flow.types";
 import type { SameAsPreviousPreviewState } from "./order/item-collection/shortcuts/same-as-previous.types";
 import type { CartReviewPreviewState } from "./order/cart-review/cart-review.types";
+import type { CartItemEditPreviewState } from "./order/cart-review/item-edit/cart-item-edit.types";
 
 function isAIIntentRouterIntent(value: unknown): boolean {
   return (
@@ -217,6 +218,14 @@ function getCartReviewPreviewState(value: unknown): CartReviewPreviewState | und
   }
 
   return value as CartReviewPreviewState;
+}
+
+function getCartItemEditPreviewState(value: unknown): CartItemEditPreviewState | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as CartItemEditPreviewState;
 }
 
 function getItemCollectionPreviewState(
@@ -507,6 +516,7 @@ export async function testAgentReply(req: Request, res: Response) {
             rawActionId: getCartReviewPreviewActionInput(req.body),
             cartReviewText: getCartReviewPreviewText(req.body),
             previewState: getCartReviewPreviewState(req.body?.cartReviewPreviewState),
+            cartItemEditPreviewState: getCartItemEditPreviewState(req.body?.cartItemEditPreviewState),
             sellerId: productContext.sellerId,
             productContext,
             requiredFields,

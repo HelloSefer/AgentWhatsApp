@@ -66,6 +66,9 @@ export function normalizeCartReviewAction(rawId: unknown): CartReviewActionNorma
   if (operation === "quantity") {
     return { recognized: true, valid: true, action: { type: "EDIT_ITEM_QUANTITY", rawId: rawId as `cart_review_item:quantity:${string}`, itemId } };
   }
+  if (operation === "options") {
+    return { recognized: true, valid: true, action: { type: "EDIT_ITEM_OPTIONS", rawId: rawId as `cart_review_item:options:${string}`, itemId } };
+  }
   if (operation === "remove") {
     return { recognized: true, valid: true, action: { type: "REMOVE_ITEM", rawId: rawId as `cart_review_item:remove:${string}`, itemId } };
   }

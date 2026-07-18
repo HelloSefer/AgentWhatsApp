@@ -3,6 +3,8 @@ import type { CartDraft } from "../cart-state.types";
 import { runItemCollectionPreview } from "../item-collection/preview/item-collection-preview.service";
 import { normalizeCartCustomQuantityInput } from "../planning/quantity/cart-quantity-input-normalizer.service";
 import { normalizeCartReviewAction } from "./cart-review-action.service";
+import { runCartItemEditPreview } from "./item-edit/cart-item-edit-preview.service";
+import type { CartItemEditPreviewState } from "./item-edit/cart-item-edit.types";
 import {
   buildCartReviewItemActionsPresentation,
   buildCartReviewItemSelectorPresentation,
@@ -45,6 +47,13 @@ function cloneState(state: CartReviewPreviewState): CartReviewPreviewState {
       : { kind: "NONE" },
     ...(state.selectedItemId ? { selectedItemId: state.selectedItemId } : {}),
     ...(state.standardAccepted ? { standardAccepted: true } : {}),
+  };
+}
+
+function cloneItemEditState(state: CartItemEditPreviewState): CartItemEditPreviewState {
+  return {
+    ...state,
+    workingItem: { ...state.workingItem, selectedOptions: { ...state.workingItem.selectedOptions } },
   };
 }
 
@@ -138,6 +147,8 @@ function result(input: {
   itemCollectionPreview?: CartReviewPreviewResult["itemCollectionPreview"];
   planningResult?: CartReviewPreviewResult["planningResult"];
   quantityResult?: CartReviewPreviewResult["quantityResult"];
+  cartItemEditPreview?: CartReviewPreviewResult["cartItemEditPreview"];
+  cartItemEditPreviewState?: CartReviewPreviewResult["cartItemEditPreviewState"];
   normalizedAction?: CartReviewPreviewResult["normalizedAction"];
   nextStep?: CartReviewPreviewResult["nextStep"];
   failureCode?: CartReviewPreviewResult["failureCode"];
@@ -156,6 +167,8 @@ function result(input: {
     ...(input.itemCollectionPreview ? { itemCollectionPreview: input.itemCollectionPreview } : {}),
     ...(input.planningResult ? { planningResult: input.planningResult } : {}),
     ...(input.quantityResult ? { quantityResult: { ...input.quantityResult } } : {}),
+    ...(input.cartItemEditPreview ? { cartItemEditPreview: input.cartItemEditPreview } : {}),
+    ...(input.cartItemEditPreviewState ? { cartItemEditPreviewState: cloneItemEditState(input.cartItemEditPreviewState) } : {}),
     ...(input.normalizedAction ? { normalizedAction: { ...input.normalizedAction } } : {}),
     ...(input.nextStep ? { nextStep: input.nextStep } : {}),
     ...(input.failureCode ? { failureCode: input.failureCode } : {}),
@@ -192,6 +205,54 @@ export function runCartReviewPreview(
   const previewState = normalizePreviewState(input.previewState, cartBefore);
   if (!input.previewEnabled) {
     return result({ handled: false, success: false, changed: false, cartBefore, previewState });
+  }
+
+  const initialReviewAction = typeof input.rawActionId === "string"
+    ? normalizeCartReviewAction(input.rawActionId)
+    : undefined;
+  const itemEditStartItemId = initialReviewAction?.valid && initialReviewAction.action?.type === "EDIT_ITEM_OPTIONS"
+    ? initialReviewAction.action.itemId
+    : undefined;
+  const isExplicitItemEditControl = typeof input.rawActionId === "string" && input.rawActionId.startsWith("cart_review_item_edit:");
+  if (itemEditStartItemId || input.cartItemEditPreviewState !== undefined || isExplicitItemEditControl) {
+    const itemEdit = runCartItemEditPreview({
+      previewEnabled: true,
+      rawActionId: input.rawActionId,
+      cartReviewText: input.cartReviewText,
+      editState: input.cartItemEditPreviewState,
+      ...(itemEditStartItemId ? { startItemId: itemEditStartItemId } : {}),
+      hasCartReviewConflict: previewState.awaitingInput.kind !== "NONE",
+      sellerId: input.sellerId,
+      productContext: input.productContext,
+      requiredFields: input.requiredFields,
+      offerLookup: input.offerLookup,
+      cart: cartBefore,
+      now: input.now,
+    });
+    return result({
+      handled: itemEdit.handled,
+      success: itemEdit.success,
+      changed: itemEdit.changed,
+      cartBefore,
+      cartAfter: itemEdit.cartAfter,
+      ...(itemEdit.review ? { review: itemEdit.review } : {}),
+      ...(itemEdit.presentation ? { presentation: itemEdit.presentation } : {}),
+      ...(itemEdit.commercialEvaluation ? { commercialEvaluation: itemEdit.commercialEvaluation } : {}),
+      previewState,
+      ...(itemEdit.editState ? { cartItemEditPreviewState: itemEdit.editState } : {}),
+      cartItemEditPreview: itemEdit,
+      ...(itemEdit.planningResult ? { planningResult: itemEdit.planningResult } : {}),
+      ...(initialReviewAction?.action ? { normalizedAction: initialReviewAction.action } : {}),
+      nextStep: itemEdit.nextStep === "RETURN_TO_CART_REVIEW" || itemEdit.nextStep === "REVIEW_ITEM_CHANGES"
+        ? "SHOW_CART_REVIEW"
+        : itemEdit.nextStep === "ENTER_ITEM_OPTION_TEXT" || itemEdit.nextStep === "SELECT_ITEM_OPTION"
+          ? "SHOW_ITEM_ACTIONS"
+          : itemEdit.nextStep === "RESOLVE_COMMERCIAL_STATE"
+            ? "RESOLVE_COMMERCIAL_STATE"
+            : "BLOCKED",
+      failureCode: itemEdit.failureCode,
+      warnings: itemEdit.warnings,
+    });
   }
 
   if (previewState.awaitingInput.kind === "EDIT_CART_ITEM_QUANTITY" && input.cartReviewText !== undefined) {

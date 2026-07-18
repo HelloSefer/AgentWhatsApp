@@ -7,6 +7,11 @@ import type { CartDraft } from "../cart-state.types";
 import type { ItemCollectionPreviewResult } from "../item-collection/preview/item-collection-preview.types";
 import type { CartPlanningResult } from "../planning/cart-planning.types";
 import type { CartQuantityInputResult } from "../planning/quantity/cart-quantity-input.types";
+import type {
+  CartItemEditFailureCode,
+  CartItemEditPreviewResult,
+  CartItemEditPreviewState,
+} from "./item-edit/cart-item-edit.types";
 
 export const CART_REVIEW_PREVIEW_STATE_VERSION = 1 as const;
 export const MAX_CART_REVIEW_ACTION_ID_LENGTH = 200;
@@ -51,7 +56,8 @@ export type CartReviewFailureCode =
   | "INVALID_QUANTITY"
   | "CART_MUTATION_REJECTED"
   | "PLANNING_COMMAND_REJECTED"
-  | "STALE_PREVIEW_STATE";
+  | "STALE_PREVIEW_STATE"
+  | "CONFLICTING_CART_REVIEW_STATE";
 
 export type CartReviewActionFailureCode =
   | "NOT_CART_REVIEW_ACTION"
@@ -66,6 +72,7 @@ export type CartReviewAction =
   | { type: "USE_STANDARD"; rawId: "cart_review:use_standard" }
   | { type: "SELECT_ITEM"; rawId: `cart_review_item:select:${string}`; itemId: string }
   | { type: "EDIT_ITEM_QUANTITY"; rawId: `cart_review_item:quantity:${string}`; itemId: string }
+  | { type: "EDIT_ITEM_OPTIONS"; rawId: `cart_review_item:options:${string}`; itemId: string }
   | { type: "REMOVE_ITEM"; rawId: `cart_review_item:remove:${string}`; itemId: string };
 
 export type CartReviewActionNormalizationResult = {
@@ -105,6 +112,8 @@ export type CartReviewPresentationKind =
   | "ITEM_SELECTOR"
   | "ITEM_ACTIONS"
   | "QUANTITY_INPUT"
+  | "ITEM_OPTION_EDIT"
+  | "ITEM_OPTION_TEXT_INPUT"
   | "BLOCKED";
 
 export type CartReviewPresentationPromptKey =
@@ -112,6 +121,8 @@ export type CartReviewPresentationPromptKey =
   | "SELECT_CART_ITEM"
   | "CART_ITEM_ACTIONS"
   | "EDIT_CART_ITEM_QUANTITY"
+  | "EDIT_CART_ITEM_OPTIONS"
+  | "ENTER_CART_ITEM_OPTION_TEXT"
   | "RESOLVE_COMMERCIAL_STATE"
   | "BLOCKED";
 
@@ -160,6 +171,7 @@ export type CartReviewPreviewInput = {
   rawActionId?: unknown;
   cartReviewText?: unknown;
   previewState?: CartReviewPreviewState;
+  cartItemEditPreviewState?: CartItemEditPreviewState;
   cart?: CartDraft;
   sellerId: string;
   productContext: ProductContext;
@@ -181,8 +193,10 @@ export type CartReviewPreviewResult = {
   itemCollectionPreview?: ItemCollectionPreviewResult;
   planningResult?: CartPlanningResult;
   quantityResult?: CartQuantityInputResult;
+  cartItemEditPreview?: CartItemEditPreviewResult;
+  cartItemEditPreviewState?: CartItemEditPreviewState;
   normalizedAction?: CartReviewAction;
   nextStep?: CartReviewNextStep;
-  failureCode?: CartReviewFailureCode | CartReviewActionFailureCode;
+  failureCode?: CartReviewFailureCode | CartReviewActionFailureCode | CartItemEditFailureCode | "MALFORMED_ITEM_EDIT_ACTION" | "UNSAFE_ITEM_EDIT_FIELD" | "INVALID_ITEM_OPTION_ACTION";
   warnings: string[];
 };

@@ -576,6 +576,54 @@ export function updateItem(input: {
   return { cart, accepted: true };
 }
 
+/**
+ * Replaces one completed item's option map as a single cart-boundary mutation.
+ * If the replacement becomes compatible with an existing completed line, that
+ * existing line remains authoritative and receives the source quantity.
+ */
+export function replaceItemOptionsAndMerge(input: {
+  cart: CartDraft;
+  itemId: string;
+  selectedOptions: Record<string, SupportedOrderFieldValue>;
+}): CartMutationResult {
+  const cartBefore = cloneCart(input.cart);
+  const source = cartBefore.items.find((item) => item.id === input.itemId);
+  if (!source) {
+    return { cart: cartBefore, accepted: false, invalidPaths: ["itemId"] };
+  }
+
+  const replacement = updateItem({
+    cart: cartBefore,
+    itemId: input.itemId,
+    selectedOptions: input.selectedOptions,
+  });
+  if (!replacement.accepted) {
+    return replacement;
+  }
+
+  const replacedSource = replacement.cart.items.find((item) => item.id === input.itemId);
+  if (!replacedSource) {
+    return { cart: cartBefore, accepted: false, invalidPaths: ["itemId"] };
+  }
+
+  const destination = replacement.cart.items.find(
+    (item) => item.id !== replacedSource.id && areCartItemsMergeCompatible(item, replacedSource),
+  );
+  if (!destination) {
+    return { cart: replacement.cart, accepted: true };
+  }
+
+  const quantity = destination.quantity + replacedSource.quantity;
+  if (!isValidQuantity(quantity)) {
+    return { cart: cartBefore, accepted: false, invalidPaths: ["items.quantity"] };
+  }
+
+  destination.quantity = quantity;
+  destination.quantityExplicitlySet = destination.quantityExplicitlySet || replacedSource.quantityExplicitlySet;
+  replacement.cart.items = replacement.cart.items.filter((item) => item.id !== replacedSource.id);
+  return { cart: replacement.cart, accepted: true, mergedItemId: destination.id };
+}
+
 export function removeItem(input: { cart: CartDraft; itemId: string }): CartMutationResult {
   const cart = cloneCart(input.cart);
   const previousLength = cart.items.length;

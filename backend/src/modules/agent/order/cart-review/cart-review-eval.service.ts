@@ -173,7 +173,7 @@ export async function evaluateCartReview(): Promise<CartReviewEvaluationResult> 
   const edit = run(review.cartAfter, "cart_review:edit", review.previewState);
   add(cases, "edit returns item list with stable IDs", edit.success && edit.nextStep === "SELECT_CART_ITEM" && edit.presentation?.uiHints?.options?.[0]?.id === "cart_review_item:select:review-item-one");
   const selected = run(edit.cartAfter, "cart_review_item:select:review-item-one", edit.previewState);
-  add(cases, "selecting an item returns quantity remove back actions", selected.success && selected.presentation?.uiHints?.options?.map((option) => option.id).join(",") === "cart_review_item:quantity:review-item-one,cart_review_item:remove:review-item-one,cart_review:back");
+  add(cases, "selecting an item returns quantity options remove back actions", selected.success && selected.presentation?.uiHints?.options?.map((option) => option.id).join(",") === "cart_review_item:quantity:review-item-one,cart_review_item:options:review-item-one,cart_review_item:remove:review-item-one,cart_review:back");
   const awaiting = run(selected.cartAfter, "cart_review_item:quantity:review-item-one", selected.previewState);
   add(cases, "quantity edit creates explicit awaiting state", awaiting.success && awaiting.nextStep === "ENTER_ITEM_QUANTITY" && awaiting.previewState.awaitingInput.kind === "EDIT_CART_ITEM_QUANTITY");
   const outsideQuantity = run(review.cartAfter, undefined, review.previewState, "2");

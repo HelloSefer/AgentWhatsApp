@@ -81,6 +81,7 @@ export function buildCartReviewItemActionsPresentation(
     body: itemLabel(item),
     options: [
       { id: `cart_review_item:quantity:${item.id}`, label: "بدل الكمية" },
+      { id: `cart_review_item:options:${item.id}`, label: "بدل الاختيارات" },
       { id: `cart_review_item:remove:${item.id}`, label: "حيد القطعة" },
       { id: "cart_review:back", label: "رجوع" },
     ],
