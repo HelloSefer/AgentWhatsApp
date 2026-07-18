@@ -5,6 +5,7 @@ import { normalizeItemOptionActionId } from "../actions/item-option-action-norma
 import { startItemCollection } from "../item-collection.service";
 import { buildItemCollectionPresentation } from "../presentation/item-collection-presentation.service";
 import { analyzeItemCollectionProgression } from "../progression/item-collection-progression.service";
+import { runItemCollectionLoop } from "../loop/item-collection-loop.service";
 import type {
   ItemCollectionPreviewInput,
   ItemCollectionPreviewNextStep,
@@ -64,6 +65,10 @@ function isActionProvided(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function isQuantityTextProvided(value: unknown): boolean {
+  return value !== undefined;
+}
+
 function nextStepFor(
   presentation: ItemCollectionPreviewResult["presentation"],
 ): ItemCollectionPreviewNextStep | undefined {
@@ -87,6 +92,7 @@ function result(input: {
   cartAfter?: CartDraft;
   collectionResult?: ItemCollectionPreviewResult["collectionResult"];
   actionResult?: ItemCollectionPreviewResult["actionResult"];
+  loopResult?: ItemCollectionPreviewResult["loopResult"];
   progression?: ItemCollectionPreviewResult["progression"];
   presentation?: ItemCollectionPreviewResult["presentation"];
   nextStep?: ItemCollectionPreviewNextStep;
@@ -117,6 +123,7 @@ function result(input: {
         }
       : {}),
     ...(input.actionResult ? { actionResult: cloneActionResult(input.actionResult) } : {}),
+    ...(input.loopResult ? { loopResult: input.loopResult } : {}),
     ...(input.progression
       ? {
           progression: {
@@ -229,6 +236,35 @@ export function runItemCollectionPreview(
       nextStep,
       failureCode: actionResult.failureCode,
       warnings: actionResult.warnings,
+    });
+  }
+
+  if (isQuantityTextProvided(input.itemCollectionText)) {
+    const loopResult = runItemCollectionLoop({
+      cart: cartBefore,
+      sellerId: input.sellerId,
+      productContext: input.productContext,
+      requiredFields: input.requiredFields,
+      quantityText: input.itemCollectionText,
+    });
+    const route = loopResult.success
+      ? "LOOP_COMPLETED"
+      : loopResult.nextStep === "RETRY_ITEM_QUANTITY" || loopResult.nextStep === "ENTER_ITEM_QUANTITY"
+        ? "QUANTITY_REQUIRED"
+        : "BLOCKED";
+
+    return result({
+      handled: loopResult.handled,
+      success: loopResult.success,
+      route,
+      cartBefore,
+      cartAfter: loopResult.cartAfter,
+      loopResult,
+      progression: loopResult.progression,
+      presentation: loopResult.presentation,
+      nextStep: loopResult.nextStep,
+      failureCode: loopResult.failureCode,
+      warnings: loopResult.warnings,
     });
   }
 

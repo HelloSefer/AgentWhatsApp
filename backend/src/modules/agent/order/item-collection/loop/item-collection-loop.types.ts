@@ -1,50 +1,47 @@
 import type { ProductContext } from "../../../config/product-context.types";
 import type { RequiredOrderField } from "../../../config/required-fields.types";
 import type { CartDraft } from "../../cart-state.types";
-import type { ItemOptionActionHandleResult } from "../actions/item-option-action.types";
-import type { ItemCollectionCommandResult } from "../item-collection.types";
+import type { ItemCollectionCommandResult, ItemCollectionFailureCode } from "../item-collection.types";
 import type { ItemCollectionPresentationResult } from "../presentation/item-collection-presentation.types";
 import type { ItemCollectionProgressionResult } from "../progression/item-collection-progression.types";
-import type { ItemCollectionLoopResult } from "../loop/item-collection-loop.types";
+import type { CurrentItemQuantityFailureCode, CurrentItemQuantityResult } from "../quantity/current-item-quantity.types";
 
-export type ItemCollectionPreviewRoute =
-  | "COLLECTION_STARTED"
-  | "OPTION_ACTION"
-  | "QUANTITY_REQUIRED"
-  | "LOOP_COMPLETED"
-  | "NOT_HANDLED"
-  | "BLOCKED";
-
-export type ItemCollectionPreviewNextStep =
+export type ItemCollectionLoopNextStep =
   | "SELECT_ITEM_OPTION"
   | "ENTER_ITEM_OPTION"
   | "ENTER_ITEM_QUANTITY"
-  | "RETRY_ITEM_QUANTITY"
   | "CART_REVIEW_READY"
+  | "RETRY_ITEM_QUANTITY"
   | "BLOCKED";
 
-export type ItemCollectionPreviewInput = {
-  previewEnabled: boolean;
-  rawActionId?: unknown;
-  itemCollectionText?: unknown;
-  cart?: CartDraft;
+export type ItemCollectionLoopFailureCode =
+  | ItemCollectionFailureCode
+  | CurrentItemQuantityFailureCode
+  | "CURRENT_ITEM_MISSING"
+  | "QUANTITY_NOT_CURRENTLY_EXPECTED"
+  | "FINALIZATION_NOT_READY";
+
+export type ItemCollectionLoopInput = {
+  cart: CartDraft;
   sellerId: string;
   productContext: ProductContext;
   requiredFields: RequiredOrderField[];
+  quantityText: unknown;
 };
 
-export type ItemCollectionPreviewResult = {
+export type ItemCollectionLoopResult = {
   handled: boolean;
   success: boolean;
-  route: ItemCollectionPreviewRoute;
+  changed: boolean;
   cartBefore: CartDraft;
   cartAfter: CartDraft;
+  quantityResult?: CurrentItemQuantityResult;
   collectionResult?: ItemCollectionCommandResult;
-  actionResult?: ItemOptionActionHandleResult;
-  loopResult?: ItemCollectionLoopResult;
   progression?: ItemCollectionProgressionResult;
   presentation?: ItemCollectionPresentationResult;
-  nextStep?: ItemCollectionPreviewNextStep;
-  failureCode?: string;
+  finalizedItem?: boolean;
+  nextItemStarted?: boolean;
+  nextStep?: ItemCollectionLoopNextStep;
+  failureCode?: ItemCollectionLoopFailureCode;
   warnings: string[];
 };

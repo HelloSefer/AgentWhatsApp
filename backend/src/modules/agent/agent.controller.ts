@@ -175,6 +175,14 @@ function getItemCollectionPreviewActionInput(body: unknown): unknown {
   return candidate.itemCollectionActionId || candidate.interactiveReplyId;
 }
 
+function getItemCollectionPreviewText(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+
+  return (body as Record<string, unknown>).itemCollectionText;
+}
+
 function getCartPlanningPreviewCart(value: unknown): CartDraft | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
@@ -443,6 +451,7 @@ export async function testAgentReply(req: Request, res: Response) {
         ? runItemCollectionPreview({
             previewEnabled: true,
             rawActionId: getItemCollectionPreviewActionInput(req.body),
+            itemCollectionText: getItemCollectionPreviewText(req.body),
             sellerId: productContext.sellerId,
             productContext,
             requiredFields: requiredFieldsService.getOrderFields({
