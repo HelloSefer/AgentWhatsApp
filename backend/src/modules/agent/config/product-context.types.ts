@@ -5,6 +5,7 @@ import type {
   OrderFieldCondition,
   OrderFieldRequirement,
 } from "./seller-config.types";
+import type { ProductOfferConfig } from "./offers/offer.types";
 
 export type ProductOptionGroup = {
   key: string;
@@ -47,6 +48,8 @@ export type ProductContext = {
   price: number;
   oldPrice?: number;
   currency: "MAD";
+  /** Commercial configuration only. Offer selection and pricing are handled in later phases. */
+  offers?: ProductOfferConfig[];
   active: boolean;
   images: string[];
   benefits: string[];
