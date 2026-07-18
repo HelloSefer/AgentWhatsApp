@@ -79,6 +79,8 @@ export interface ConversationMessage {
 export interface ConversationOrderState {
   orderCycleId?: string;
   collected: OrderEntities;
+  /** Internal cart authority; `collected` remains a single-item compatibility projection. */
+  cart?: import("./order/cart-state.types").CartDraft;
   missingFields: string[];
   isComplete: boolean;
   awaitingConfirmation: boolean;

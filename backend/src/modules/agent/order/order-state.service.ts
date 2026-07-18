@@ -2030,6 +2030,7 @@ async function processConfirmationTurn(input: {
       productContext: input.productContext,
       collected: finalState.collected,
       deliveryQuote: finalState.deliveryQuote,
+      cart: input.session.orderState.cart,
       source: "agent",
     });
 
@@ -2217,6 +2218,7 @@ async function processConfirmedOrderTurn(input: {
       productContext: input.productContext,
       collected: finalState.collected,
       deliveryQuote: finalState.deliveryQuote,
+      cart: input.session.orderState.cart,
       source: "agent",
     });
   }

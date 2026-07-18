@@ -7,6 +7,14 @@ import type {
 } from "../agent-brain.types";
 import { conversationKeyService } from "../identity/conversation-key.service";
 import { DEFAULT_DEMO_SELLER_ID } from "../identity/seller-resolver.service";
+import { productContextService } from "../config/product-context.service";
+import { requiredFieldsService } from "../config/required-fields.service";
+import { sellerConfigService } from "../config/seller-config.service";
+import {
+  asLegacyOrderEntities,
+  initializeCart,
+  reconcileLegacyOrderStateWithCart,
+} from "../order/cart-state.service";
 
 type SessionIdentity = {
   customerId: string;
@@ -43,6 +51,18 @@ type UpdateConversationProductInfoStateInput = SessionIdentity & {
 };
 
 const MAX_SESSION_MESSAGES = 20;
+
+function maskConversationIdentity(value: string | undefined): string | undefined {
+  const normalized = cleanText(value);
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  return normalized.length <= 4
+    ? "***"
+    : `${normalized.slice(0, 2)}***${normalized.slice(-2)}`;
+}
 
 function cleanText(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -151,6 +171,7 @@ export function createEmptySession(input: SessionIdentity): ConversationSession 
     orderState: {
       orderCycleId: undefined,
       collected: {},
+      cart: initializeCart(),
       missingFields: [],
       isComplete: false,
       awaitingConfirmation: false,
@@ -163,9 +184,74 @@ export function createEmptySession(input: SessionIdentity): ConversationSession 
   };
 }
 
+function normalizeSessionCartState(session: ConversationSession): {
+  migrated: boolean;
+  integrityInvalidPaths: string[];
+  changed: boolean;
+} {
+  const sellerId = session.sellerId || DEFAULT_DEMO_SELLER_ID;
+  const configProduct = session.productId
+    ? productContextService.getProductContextById(session.productId)
+    : undefined;
+  const productContext = configProduct || productContextService.getActiveProductContext(sellerId);
+  const sellerConfig = sellerConfigService.getSellerConfig(sellerId);
+  const fields = requiredFieldsService.getOrderFields({
+    sellerConfig,
+    productContext,
+  });
+  const compatibility = reconcileLegacyOrderStateWithCart({
+    cart: session.orderState.cart,
+    legacyCollected: session.orderState.collected as Record<string, unknown>,
+    legacyState: session.orderState,
+    productId: productContext.productId,
+    fields,
+  });
+
+  session.orderState = {
+    ...session.orderState,
+    cart: compatibility.cart,
+    collected: asLegacyOrderEntities(compatibility.collected),
+    ...(compatibility.integrity.valid
+      ? {}
+      : {
+          isComplete: false,
+          awaitingConfirmation: false,
+          confirmed: false,
+        }),
+  };
+
+  return {
+    migrated: compatibility.migrated,
+    integrityInvalidPaths: compatibility.integrity.invalidPaths,
+    changed: compatibility.changed,
+  };
+}
+
 export async function saveConversationSession(
   session: ConversationSession,
 ): Promise<void> {
+  const cartNormalization = normalizeSessionCartState(session);
+  if (cartNormalization.migrated) {
+    console.info(JSON.stringify({
+      event: "cart.legacy_migrated",
+      sellerId: session.sellerId,
+      customerId: maskConversationIdentity(session.customerId),
+      orderCycleId: session.orderState.orderCycleId,
+      status: session.orderState.cart?.status,
+      itemCount: session.orderState.cart?.items.length || 0,
+    }));
+  }
+  if (cartNormalization.integrityInvalidPaths.length > 0) {
+    console.warn(JSON.stringify({
+      event: "cart.integrity_failed",
+      sellerId: session.sellerId,
+      customerId: maskConversationIdentity(session.customerId),
+      orderCycleId: session.orderState.orderCycleId,
+      status: session.orderState.cart?.status,
+      itemCount: session.orderState.cart?.items.length || 0,
+      invalidPaths: cartNormalization.integrityInvalidPaths,
+    }));
+  }
   const now = new Date().toISOString();
   const sessionToSave: ConversationSession = {
     ...session,
@@ -212,8 +298,7 @@ export async function getConversationSession(
 
   try {
     const session = JSON.parse(rawSession) as ConversationSession;
-
-    return {
+    const normalizedSession = {
       ...session,
       customerId: session.customerId || identity.customerId,
       customerPhone: session.customerPhone || identity.customerPhone,
@@ -221,6 +306,12 @@ export async function getConversationSession(
       sellerId: session.sellerId || identity.sellerId,
       productId: session.productId || identity.productId,
     };
+    const normalization = normalizeSessionCartState(normalizedSession);
+    if (normalization.changed) {
+      await saveConversationSession(normalizedSession);
+    }
+
+    return normalizedSession;
   } catch (_error) {
     const session = createEmptySession(identity);
     await saveConversationSession(session);
@@ -259,6 +350,11 @@ export async function updateConversationOrderState(
     input.productId,
     input.customerPhone,
   );
+  const startsNewOrderCycle =
+    Boolean(input.orderCycleId) &&
+    input.orderCycleId !== session.orderState.orderCycleId &&
+    input.replaceCollected === true &&
+    Object.keys(input.collected || {}).length === 0;
 
   session.orderState = {
     ...session.orderState,
@@ -294,6 +390,7 @@ export async function updateConversationOrderState(
       input.optionalFieldDialogue === null
         ? undefined
         : input.optionalFieldDialogue ?? session.orderState.optionalFieldDialogue,
+    cart: startsNewOrderCycle ? initializeCart() : session.orderState.cart,
     lastUpdatedAt: new Date().toISOString(),
   };
 

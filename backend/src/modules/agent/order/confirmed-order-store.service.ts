@@ -5,6 +5,7 @@ import { productContextService } from "../config/product-context.service";
 import { sellerConfigService } from "../config/seller-config.service";
 import { calculateOrderTotals } from "./order-pricing.service";
 import type { ResolvedDeliveryQuote } from "./delivery-pricing.service";
+import type { CartDraft } from "./cart-state.types";
 
 export const orderStatuses = [
   "CONFIRMED",
@@ -53,6 +54,14 @@ export type ReceiptProductSnapshot = {
     canonicalValue?: string;
   }>;
   requiredAttributeKeys?: string[];
+};
+
+/** Internal compatibility snapshot only; single-item receipts still use the legacy projection. */
+export type ConfirmedOrderCartItemSnapshot = {
+  id: string;
+  productId: string;
+  quantity: number;
+  selectedOptions: Record<string, string | number | boolean>;
 };
 
 export interface ConfirmedOrder {
@@ -105,6 +114,7 @@ export interface ConfirmedOrder {
   receiptLocalFileDeleteError?: string;
   receiptBranding?: ReceiptBrandingSnapshot;
   receiptProduct?: ReceiptProductSnapshot;
+  cartItems?: ConfirmedOrderCartItemSnapshot[];
 }
 
 type SaveConfirmedOrderInput = {
@@ -116,6 +126,7 @@ type SaveConfirmedOrderInput = {
   productContext: ProductContext;
   collected: OrderEntities;
   deliveryQuote: ResolvedDeliveryQuote;
+  cart?: CartDraft;
   source?: "agent" | "whatsapp_cloud";
 };
 
@@ -274,6 +285,19 @@ function buildReceiptSnapshots(input: SaveConfirmedOrderInput): {
   };
 }
 
+function buildCartItemSnapshots(cart: CartDraft | undefined): ConfirmedOrderCartItemSnapshot[] | undefined {
+  if (!cart?.items.length) {
+    return undefined;
+  }
+
+  return cart.items.map((item) => ({
+    id: item.id,
+    productId: item.productId,
+    quantity: item.quantity,
+    selectedOptions: { ...item.selectedOptions },
+  }));
+}
+
 function matchesOptionalFilter(value: string, filter: string | undefined): boolean {
   if (!filter) {
     return true;
@@ -367,6 +391,7 @@ export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrd
     receiptSendStatus: "NOT_REQUESTED",
     receiptBranding: receiptSnapshots.branding,
     receiptProduct: receiptSnapshots.product,
+    cartItems: buildCartItemSnapshots(input.cart),
     createdAt: confirmedAt,
     updatedAt: confirmedAt,
   };

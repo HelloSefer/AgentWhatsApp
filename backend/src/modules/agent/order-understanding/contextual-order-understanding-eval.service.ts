@@ -1,4 +1,6 @@
 import type { ConversationSession } from "../agent-brain.types";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { RequiredOrderField } from "../config/required-fields.types";
 import type { ProductContext } from "../product-context.types";
 import { analyzeAIIntentWithMeta } from "../ai/ai-intent-router.service";
@@ -21,6 +23,19 @@ import { isContextualOrderUnderstandingEvaluationEnabled } from "./evaluation-ac
 import { classifyOrderMessageDisposition } from "./message-disposition.service";
 import { applyUnderstandingDecision } from "./order-draft-mutation.service";
 import { validateOrderDraftIntegrity } from "./order-draft-integrity.service";
+import {
+  MAX_CART_ITEM_QUANTITY,
+  addItem,
+  createCartItem,
+  createItemFingerprint,
+  evaluateCartIntegrity,
+  finalizeCurrentItem,
+  initializeCart,
+  reconcileLegacyOrderStateWithCart,
+  setCurrentItemOption,
+  setCurrentItemQuantity,
+  startCurrentItem,
+} from "../order/cart-state.service";
 
 type EvaluationResult = {
   name: string;
@@ -598,6 +613,196 @@ export async function evaluateContextualOrderUnderstanding(): Promise<{
 
   const directDisposition = classifyOrderMessageDisposition("وش التوصيل مجاني");
   add("message firewall consumes delivery questions", directDisposition.disposition === "DELIVERY_QUESTION" && directDisposition.consumed && !directDisposition.extractionText);
+
+  const cartFields: RequiredOrderField[] = [
+    { key: "size", label: "المقاس", required: true, enabled: true, source: "productOption", askOrder: 1, captureMode: "CONFIGURED_ENUM", options: ["38", "40"] },
+    { key: "color", label: "اللون", required: true, enabled: true, source: "productOption", askOrder: 2, captureMode: "CONFIGURED_ENUM", options: ["أسود", "وردي"] },
+    { key: "quantity", label: "الكمية", required: true, enabled: true, source: "customerField", askOrder: 3, semanticType: "QUANTITY", captureMode: "NUMERIC", minValue: 1, maxValue: 10 },
+    ...baseFields.slice(0, 4).map((field, index) => ({ ...field, askOrder: index + 4 })),
+  ];
+  const legacyCollected = {
+    size: "38",
+    color: "أسود",
+    quantity: 1,
+    fullName: "عمر",
+    phone: "0612345678",
+    city: "دوار النخيل الجديدة",
+    address: "حي السلام",
+  };
+  const emptyCart = initializeCart();
+  add("cart initializes empty with schema version", emptyCart.schemaVersion === 1 && emptyCart.status === "EMPTY" && emptyCart.items.length === 0 && !emptyCart.currentItemDraft);
+
+  const legacyCart = reconcileLegacyOrderStateWithCart({
+    legacyCollected,
+    legacyState: { orderCycleId: "cart-legacy-cycle", isComplete: true, awaitingConfirmation: true, confirmed: false },
+    productId: "cart-product",
+    fields: cartFields,
+  });
+  add("legacy complete single item migrates into one cart item", legacyCart.migrated && legacyCart.cart.items.length === 1 && legacyCart.cart.items[0].selectedOptions.color === "أسود" && legacyCart.cart.items[0].quantity === 1);
+  add("legacy migration separates shared delivery fields", legacyCart.cart.orderLevelFields.city === "دوار النخيل الجديدة" && legacyCart.cart.orderLevelFields.address === "حي السلام" && !Object.hasOwn(legacyCart.cart.items[0].selectedOptions, "city"));
+  add("legacy migration preserves order cycle and lifecycle", legacyCart.cart.status === "AWAITING_CONFIRMATION" && legacyCart.collected.city === "دوار النخيل الجديدة");
+  const migratedTwice = reconcileLegacyOrderStateWithCart({
+    cart: legacyCart.cart,
+    legacyCollected: legacyCart.collected,
+    legacyState: { orderCycleId: "cart-legacy-cycle", isComplete: true, awaitingConfirmation: true, confirmed: false },
+    productId: "cart-product",
+    fields: cartFields,
+  });
+  add("legacy migration is idempotent", migratedTwice.cart.items.length === 1 && migratedTwice.cart.items[0].id === legacyCart.cart.items[0].id && !migratedTwice.migrated);
+  add("legacy projection keeps single-item receipt fields", migratedTwice.collected.size === "38" && migratedTwice.collected.color === "أسود" && migratedTwice.collected.quantity === 1 && migratedTwice.collected.fullName === "عمر");
+
+  const optionlessFields: RequiredOrderField[] = [
+    { key: "fullName", label: "الاسم", required: true, enabled: true, source: "customerField", askOrder: 1, semanticType: "PERSON_NAME" },
+    { key: "phone", label: "الهاتف", required: true, enabled: true, source: "customerField", askOrder: 2, semanticType: "PHONE" },
+    { key: "city", label: "المدينة", required: true, enabled: true, source: "customerField", askOrder: 3, semanticType: "LOCATION" },
+  ];
+  const optionlessLegacyCollected = {
+    fullName: "محمد",
+    phone: "0612345678",
+    city: "مراكش",
+  };
+  const optionlessReady = reconcileLegacyOrderStateWithCart({
+    legacyCollected: optionlessLegacyCollected,
+    legacyState: { orderCycleId: "optionless-ready-cycle", isComplete: true, awaitingConfirmation: true, confirmed: false },
+    productId: "optionless-product",
+    fields: optionlessFields,
+  });
+  const optionlessItem = optionlessReady.cart.items[0];
+  add("option-less compatibility creates one complete item", optionlessReady.cart.items.length === 1 && optionlessItem?.status === "COMPLETE" && optionlessItem.productId === "optionless-product");
+  add("option-less compatibility keeps empty selected options", Boolean(optionlessItem) && Object.keys(optionlessItem.selectedOptions).length === 0);
+  add("option-less compatibility keeps implicit quantity one internal", optionlessItem?.quantity === 1 && optionlessItem.quantityExplicitlySet === false && optionlessReady.collected.quantity === undefined);
+  add("option-less compatibility keeps delivery fields order scoped", optionlessReady.cart.orderLevelFields.fullName === "محمد" && optionlessReady.cart.orderLevelFields.phone === "0612345678" && optionlessReady.cart.orderLevelFields.city === "مراكش");
+  add("option-less compatibility remains ready for confirmation", optionlessReady.integrity.valid && optionlessReady.cart.status === "AWAITING_CONFIRMATION");
+  add("option-less confirmation action stays deterministic", classifyOrderMessageDisposition("نعم").disposition === "CONFIRM" && optionlessReady.cart.status === "AWAITING_CONFIRMATION");
+  add("option-less edit action stays deterministic", classifyOrderMessageDisposition("تعديل").disposition === "EDIT" && optionlessReady.cart.status === "AWAITING_CONFIRMATION");
+  const optionlessMigratedTwice = reconcileLegacyOrderStateWithCart({
+    cart: optionlessReady.cart,
+    legacyCollected: optionlessReady.collected,
+    legacyState: { orderCycleId: "optionless-ready-cycle", isComplete: true, awaitingConfirmation: true, confirmed: false },
+    productId: "optionless-product",
+    fields: optionlessFields,
+  });
+  add("option-less migration remains idempotent", optionlessMigratedTwice.cart.items.length === 1 && optionlessMigratedTwice.cart.items[0].id === optionlessItem.id);
+
+  const sameOptionsFirst = createCartItem({ productId: "cart-product", quantity: 1, status: "COMPLETE", selectedOptions: { size: "40", color: "red" } });
+  const sameOptionsSecond = createCartItem({ productId: "cart-product", quantity: 1, status: "COMPLETE", selectedOptions: { color: "red", size: "40" } });
+  const sameOptionsCart = addItem({ cart: emptyCart, item: sameOptionsFirst });
+  const sameOptionsMerged = addItem({ cart: sameOptionsCart.cart, item: sameOptionsSecond });
+  add("same product and canonical options merge quantities", sameOptionsMerged.accepted && sameOptionsMerged.cart.items.length === 1 && sameOptionsMerged.cart.items[0].quantity === 2);
+  add("item fingerprint ignores option insertion order", createItemFingerprint(sameOptionsFirst) === createItemFingerprint(sameOptionsSecond));
+  add("merged item keeps stable original identity", sameOptionsMerged.cart.items[0].id === sameOptionsFirst.id && sameOptionsFirst.id !== sameOptionsSecond.id);
+
+  const differentColor = addItem({
+    cart: sameOptionsCart.cart,
+    item: createCartItem({ productId: "cart-product", quantity: 1, status: "COMPLETE", selectedOptions: { size: "40", color: "black" } }),
+  });
+  add("different color remains a distinct item", differentColor.accepted && differentColor.cart.items.length === 2);
+  const differentSize = addItem({
+    cart: sameOptionsCart.cart,
+    item: createCartItem({ productId: "cart-product", quantity: 1, status: "COMPLETE", selectedOptions: { size: "42", color: "red" } }),
+  });
+  add("different size remains a distinct item", differentSize.accepted && differentSize.cart.items.length === 2);
+  const differentProduct = addItem({
+    cart: sameOptionsCart.cart,
+    item: createCartItem({ productId: "another-product", quantity: 1, status: "COMPLETE", selectedOptions: { size: "40", color: "red" } }),
+  });
+  add("different product remains a distinct item", differentProduct.accepted && differentProduct.cart.items.length === 2);
+
+  const customItemFields: RequiredOrderField[] = [
+    { key: "material", label: "الخامة", required: true, enabled: true, source: "productOption", askOrder: 1, captureMode: "CONFIGURED_ENUM", options: ["cotton", "linen"] },
+    { key: "quantity", label: "الكمية", required: true, enabled: true, source: "customerField", askOrder: 2, semanticType: "QUANTITY", captureMode: "NUMERIC" },
+  ];
+  const customDraft = setCurrentItemOption({
+    cart: initializeCart(), productId: "custom-product", optionKey: "material", value: "linen",
+  });
+  const customComplete = finalizeCurrentItem({
+    cart: setCurrentItemQuantity({ cart: customDraft.cart, productId: "custom-product", quantity: 1 }).cart,
+    fields: customItemFields,
+  });
+  add("custom configured option finalizes without size or color hardcoding", customComplete.accepted && customComplete.cart.items[0]?.selectedOptions.material === "linen");
+  const optionlessComplete = finalizeCurrentItem({
+    cart: setCurrentItemQuantity({
+      cart: startCurrentItem({ cart: initializeCart(), productId: "optionless-product" }).cart,
+      productId: "optionless-product",
+      quantity: 1,
+    }).cart,
+    fields: [{ key: "quantity", label: "الكمية", required: true, enabled: true, source: "customerField", askOrder: 1, semanticType: "QUANTITY", captureMode: "NUMERIC" }],
+  });
+  add("option-less product supports a complete item with no options", optionlessComplete.accepted && optionlessComplete.cart.items[0]?.selectedOptions && Object.keys(optionlessComplete.cart.items[0].selectedOptions).length === 0);
+
+  const isolatedDraft = setCurrentItemOption({
+    cart: startCurrentItem({ cart: initializeCart(), productId: "cart-product" }).cart,
+    productId: "cart-product",
+    optionKey: "color",
+    value: "أسود",
+  });
+  add("current item draft remains outside completed items", isolatedDraft.cart.items.length === 0 && isolatedDraft.cart.currentItemDraft?.selectedOptions.color === "أسود");
+  const validDraftWithSize = setCurrentItemOption({
+    cart: isolatedDraft.cart, productId: "cart-product", optionKey: "size", value: "38",
+  });
+  const validFinalized = finalizeCurrentItem({
+    cart: setCurrentItemQuantity({ cart: validDraftWithSize.cart, productId: "cart-product", quantity: 1 }).cart,
+    fields: cartFields,
+  });
+  add("finalizing valid current item moves it to completed items", validFinalized.accepted && validFinalized.cart.items.length === 1 && !validFinalized.cart.currentItemDraft && validFinalized.cart.items[0].status === "COMPLETE");
+  const invalidFinalized = finalizeCurrentItem({ cart: isolatedDraft.cart, fields: cartFields });
+  add("incomplete current item does not mutate completed items", !invalidFinalized.accepted && invalidFinalized.cart.items.length === 0 && Boolean(invalidFinalized.cart.currentItemDraft));
+
+  const quantityInputCart = startCurrentItem({ cart: initializeCart(), productId: "cart-product" }).cart;
+  for (const [label, quantityValue] of [["zero", 0], ["negative", -1], ["decimal", 1.5], ["excessive", MAX_CART_ITEM_QUANTITY + 1], ["nan", Number.NaN]] as const) {
+    const result = setCurrentItemQuantity({ cart: quantityInputCart, productId: "cart-product", quantity: quantityValue });
+    add(`invalid quantity ${label} is rejected`, !result.accepted && result.cart.currentItemDraft?.quantity === 1);
+  }
+
+  const repeatedItems = [
+    createCartItem({ productId: "a", status: "COMPLETE" }),
+    createCartItem({ productId: "b", status: "COMPLETE" }),
+  ];
+  add("stable cart item IDs are unique", repeatedItems[0].id !== repeatedItems[1].id);
+  const scopeIntegrity = evaluateCartIntegrity({
+    cart: {
+      ...initializeCart(),
+      status: "CART_REVIEW",
+      items: [createCartItem({ productId: "cart-product", status: "COMPLETE", selectedOptions: { size: "38", color: "أسود" } })],
+      orderLevelFields: { fullName: "عمر", city: "منطقة الأمل الشرقية", address: "حي السلام" },
+    },
+    fields: cartFields,
+  });
+  add("shared delivery fields stay order scoped and item options stay item scoped", scopeIntegrity.valid);
+  const invalidConfirmed = evaluateCartIntegrity({
+    cart: { ...isolatedDraft.cart, status: "CONFIRMED" },
+    fields: cartFields,
+  });
+  add("confirmed cart cannot contain unresolved current item draft", !invalidConfirmed.valid && invalidConfirmed.invalidPaths.includes("confirmed.currentItemDraft"));
+  const zeroItemConfirmation = evaluateCartIntegrity({
+    cart: { ...initializeCart(), status: "AWAITING_CONFIRMATION" },
+    fields: cartFields,
+  });
+  add("confirmable cart requires one completed item", !zeroItemConfirmation.valid && zeroItemConfirmation.invalidPaths.includes("awaitingConfirmation.items"));
+
+  const conversationOne = reconcileLegacyOrderStateWithCart({
+    legacyCollected: { ...legacyCollected, city: "دار بوعزة" },
+    legacyState: { orderCycleId: "conversation-one", isComplete: false, awaitingConfirmation: false, confirmed: false },
+    productId: "seller-a-product", fields: cartFields,
+  });
+  const conversationTwo = reconcileLegacyOrderStateWithCart({
+    legacyCollected: { ...legacyCollected, city: "تامنصورت", color: "وردي" },
+    legacyState: { orderCycleId: "conversation-two", isComplete: false, awaitingConfirmation: false, confirmed: false },
+    productId: "seller-a-product", fields: cartFields,
+  });
+  add("cart state remains isolated between conversations", conversationOne.cart !== conversationTwo.cart && conversationOne.cart.orderLevelFields.city === "دار بوعزة" && conversationTwo.cart.orderLevelFields.city === "تامنصورت");
+  const sellerTwo = reconcileLegacyOrderStateWithCart({
+    legacyCollected,
+    legacyState: { orderCycleId: "seller-two", isComplete: true, awaitingConfirmation: false, confirmed: false },
+    productId: "seller-b-product", fields: cartFields,
+  });
+  add("cart state remains isolated between sellers", sellerTwo.cart.items[0]?.productId === "seller-b-product" && conversationOne.cart.items[0]?.productId === "seller-a-product");
+
+  const cartDomainSource = readFileSync(
+    join(process.cwd(), "src", "modules", "agent", "order", "cart-state.service.ts"),
+    "utf8",
+  );
+  add("cart domain has no AI or Ollama dependency", !/from\s+["'][^"']*(?:\/ai\/|ollama|prompt)/i.test(cartDomainSource) && !/generateAIReply|analyzeAIIntent/i.test(cartDomainSource));
 
   const passed = results.filter((result) => result.passed).length;
   return {
