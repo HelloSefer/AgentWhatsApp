@@ -143,7 +143,8 @@ export function buildOfferSelectorPresentation(
     !sellerId ||
     sellerId !== input.productContext.sellerId ||
     input.offerLookup.sellerId !== sellerId ||
-    input.offerLookup.productId !== productId
+    input.offerLookup.productId !== productId ||
+    input.offerLookup.state === "PRODUCT_NOT_FOUND"
   ) {
     return buildUnavailable("PRODUCT_MISMATCH");
   }

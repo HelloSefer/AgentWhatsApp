@@ -56,6 +56,9 @@ import { getConversationSession } from "./session/conversation-session.service";
 import type { ConversationOrderState } from "./agent-brain.types";
 import type { ProductContext } from "./product-context.types";
 import { validateSellerConfigReadiness } from "./config/seller-config-readiness.service";
+import { offerConfigService } from "./config/offers/offer-config.service";
+import { runCartPlanningPreview } from "./order/planning/preview/cart-planning-preview.service";
+import type { CartDraft } from "./order/cart-state.types";
 
 function isAIIntentRouterIntent(value: unknown): boolean {
   return (
@@ -132,6 +135,32 @@ function isFirstEntryClickPreviewRequested(body: unknown): boolean {
     candidate.enableFirstEntryClickPreview === true ||
     candidate.firstEntryClickMode === "preview"
   );
+}
+
+function isCartPlanningPreviewRequested(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return false;
+  }
+
+  const candidate = body as Record<string, unknown>;
+  return candidate.enableCartPlanningPreview === true || candidate.cartPlanningMode === "preview";
+}
+
+function getCartPlanningPreviewActionInput(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return "";
+  }
+
+  const candidate = body as Record<string, unknown>;
+  return candidate.planningActionId || candidate.interactiveReplyId || candidate.message || "";
+}
+
+function getCartPlanningPreviewCart(value: unknown): CartDraft | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as CartDraft;
 }
 
 function getFirstEntryClickInput(body: unknown): unknown {
@@ -336,14 +365,80 @@ export function firstEntryLiveSmokeDispatchPreview(req: Request, res: Response) 
 
 export async function testAgentReply(req: Request, res: Response) {
   const message = typeof req.body?.message === "string" ? req.body.message : "";
+  const cartPlanningPreviewRequested = isCartPlanningPreviewRequested(req.body);
   const firstEntryClickPreviewRequested = isFirstEntryClickPreviewRequested(
     req.body,
   );
 
-  if (!message.trim() && !firstEntryClickPreviewRequested) {
+  if (!message.trim() && !firstEntryClickPreviewRequested && !cartPlanningPreviewRequested) {
     return res.status(400).json({
       message: "Message is required",
     });
+  }
+
+  if (cartPlanningPreviewRequested) {
+    const sellerId = getOptionalString(req.body?.sellerId) || "seller_demo_sandals";
+    const customerPhone =
+      getOptionalString(req.body?.customerPhone) ||
+      getOptionalString(req.body?.customerId);
+
+    if (!customerPhone) {
+      return res.status(400).json({
+        ok: false,
+        mode: "agent_test",
+        previewOnly: true,
+        dryRun: true,
+        handledBy: "cart_planning_preview_blocked",
+        message: "customerPhone is required for cart planning preview",
+      });
+    }
+
+    try {
+      const productResult = productContextService.getActiveProductContextWithMeta(sellerId);
+      const productContext = productResult.productContext;
+      const offerLookup = offerConfigService.getConfiguredOffers({
+        sellerId: productContext.sellerId,
+        productId: productContext.productId,
+      });
+      const result = runCartPlanningPreview({
+        previewEnabled: true,
+        rawActionId: getCartPlanningPreviewActionInput(req.body),
+        sellerId: productContext.sellerId,
+        productContext,
+        offerLookup,
+        cart: getCartPlanningPreviewCart(req.body?.previewCart),
+        now: new Date(),
+      });
+
+      return res.status(200).json({
+        ok: true,
+        mode: "agent_test",
+        previewOnly: true,
+        dryRun: true,
+        handledBy: "cart_planning_preview",
+        sellerId: productContext.sellerId,
+        customerPhone,
+        result,
+        fallbackUsed: productResult.fallbackUsed,
+        safety: {
+          noLiveSend: true,
+          noMetaApi: true,
+          noSessionMutation: true,
+          noOrderMutation: true,
+          noLiveRouting: true,
+        },
+      });
+    } catch (error) {
+      return res.status(500).json({
+        ok: false,
+        mode: "agent_test",
+        previewOnly: true,
+        dryRun: true,
+        handledBy: "cart_planning_preview_blocked",
+        message: "Cart planning preview failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   }
 
   if (firstEntryClickPreviewRequested) {
