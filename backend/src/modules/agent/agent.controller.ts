@@ -59,6 +59,7 @@ import { validateSellerConfigReadiness } from "./config/seller-config-readiness.
 import { offerConfigService } from "./config/offers/offer-config.service";
 import { runCartPlanningPreview } from "./order/planning/preview/cart-planning-preview.service";
 import type { CartDraft } from "./order/cart-state.types";
+import type { CartPlanningPreviewState } from "./order/planning/quantity/flow/cart-custom-quantity-flow.types";
 
 function isAIIntentRouterIntent(value: unknown): boolean {
   return (
@@ -161,6 +162,24 @@ function getCartPlanningPreviewCart(value: unknown): CartDraft | undefined {
   }
 
   return value as CartDraft;
+}
+
+function getCartPlanningPreviewState(
+  value: unknown,
+): CartPlanningPreviewState | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as CartPlanningPreviewState;
+}
+
+function getCartPlanningPreviewText(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+
+  return (body as Record<string, unknown>).planningText;
 }
 
 function getFirstEntryClickInput(body: unknown): unknown {
@@ -407,6 +426,10 @@ export async function testAgentReply(req: Request, res: Response) {
         productContext,
         offerLookup,
         cart: getCartPlanningPreviewCart(req.body?.previewCart),
+        previewPlanningState: getCartPlanningPreviewState(
+          req.body?.previewPlanningState,
+        ),
+        planningText: getCartPlanningPreviewText(req.body),
         now: new Date(),
       });
 

@@ -9,12 +9,37 @@ import {
   buildOfferSelectorPresentation,
   buildStandardQuantitySelectorPresentation,
 } from "../presentation/cart-planning-presentation.service";
+import {
+  beginCartCustomQuantityAwaiting,
+  handleCartCustomQuantityInput,
+} from "../quantity/flow/cart-custom-quantity-flow.service";
+import {
+  CART_PLANNING_PREVIEW_STATE_VERSION,
+  type CartPlanningPreviewState,
+} from "../quantity/flow/cart-custom-quantity-flow.types";
 import type {
   CartPlanningPreviewInput,
   CartPlanningPreviewResult,
 } from "./cart-planning-preview.types";
 
 const ORDER_NOW_ACTION_ID = "first_entry:order_now";
+
+function normalizePreviewPlanningState(
+  state: CartPlanningPreviewState | undefined,
+): CartPlanningPreviewState {
+  if (state?.version === CART_PLANNING_PREVIEW_STATE_VERSION && state.awaitingInput?.kind === "CUSTOM_QUANTITY") {
+    return {
+      version: CART_PLANNING_PREVIEW_STATE_VERSION,
+      awaitingInput: {
+        kind: "CUSTOM_QUANTITY",
+        attempts: state.awaitingInput.attempts,
+        ...(state.awaitingInput.startedAt ? { startedAt: state.awaitingInput.startedAt } : {}),
+      },
+    };
+  }
+
+  return { version: CART_PLANNING_PREVIEW_STATE_VERSION, awaitingInput: { kind: "NONE" } };
+}
 
 function cloneCart(cart: CartDraft): CartDraft {
   return {
@@ -34,10 +59,12 @@ function result(input: {
   route: CartPlanningPreviewResult["route"];
   warnings?: string[];
   failureCode?: string;
+  previewPlanningState?: CartPlanningPreviewState;
 }): CartPlanningPreviewResult {
   return {
     handled: input.handled,
     route: input.route,
+    previewPlanningState: normalizePreviewPlanningState(input.previewPlanningState),
     cartBefore: cloneCart(input.cartBefore),
     cartAfter: cloneCart(input.cartAfter || input.cartBefore),
     warnings: [...(input.warnings || [])],
@@ -53,9 +80,49 @@ export function runCartPlanningPreview(
   input: CartPlanningPreviewInput,
 ): CartPlanningPreviewResult {
   const cartBefore = cloneCart(input.cart || initializeCart());
+  const previewPlanningState = normalizePreviewPlanningState(input.previewPlanningState);
 
   if (!input.previewEnabled) {
-    return result({ cartBefore, handled: false, route: "NOT_HANDLED" });
+    return result({ cartBefore, handled: false, route: "NOT_HANDLED", previewPlanningState });
+  }
+
+  if (previewPlanningState.awaitingInput.kind === "CUSTOM_QUANTITY" && input.planningText !== undefined) {
+    const customQuantity = handleCartCustomQuantityInput({
+      cart: cartBefore,
+      awaitingInput: previewPlanningState.awaitingInput,
+      planningText: input.planningText,
+      planningContext: {
+        sellerId: input.sellerId,
+        productContext: input.productContext,
+        cart: cartBefore,
+        offerLookup: input.offerLookup,
+        now: input.now,
+      },
+    });
+    return {
+      ...result({
+        cartBefore,
+        cartAfter: customQuantity.cartAfter,
+        handled: customQuantity.handled,
+        route: customQuantity.nextStep === "CUSTOM_QUANTITY_EXHAUSTED"
+          ? "UNAVAILABLE"
+          : customQuantity.nextStep === "START_ITEM_COLLECTION"
+            ? "PLANNING_ACTION"
+            : "REQUEST_CUSTOM_QUANTITY",
+        warnings: customQuantity.warnings,
+        failureCode: customQuantity.failureCode,
+        previewPlanningState: {
+          version: CART_PLANNING_PREVIEW_STATE_VERSION,
+          awaitingInput: customQuantity.awaitingInput,
+        },
+      }),
+      quantityResult: customQuantity.quantityResult,
+      planningResult: customQuantity.planningResult,
+      nextStep: customQuantity.nextStep,
+      ...(customQuantity.nextStep === "RETRY_CUSTOM_QUANTITY" || customQuantity.nextStep === "REQUEST_CUSTOM_QUANTITY"
+        ? { prompt: { key: "REQUEST_CUSTOM_QUANTITY" as const, previewOnly: true as const } }
+        : {}),
+    };
   }
 
   if (input.rawActionId === ORDER_NOW_ACTION_ID) {
@@ -73,6 +140,7 @@ export function runCartPlanningPreview(
         route: "UNAVAILABLE",
         warnings: readiness.warnings,
         failureCode: readiness.failureCode,
+        previewPlanningState,
       });
     }
 
@@ -84,7 +152,7 @@ export function runCartPlanningPreview(
     });
     if (offerSelector.success) {
       return {
-        ...result({ cartBefore, handled: true, route: "OFFER_SELECTOR" }),
+        ...result({ cartBefore, handled: true, route: "OFFER_SELECTOR", previewPlanningState }),
         selector: offerSelector,
         nextStep: "SELECT_OFFER",
       };
@@ -100,6 +168,7 @@ export function runCartPlanningPreview(
         route: "UNAVAILABLE",
         warnings: offerSelector.warnings,
         failureCode: offerSelector.failureCode,
+        previewPlanningState,
       });
     }
 
@@ -112,6 +181,7 @@ export function runCartPlanningPreview(
         route: "QUANTITY_SELECTOR",
         warnings: invalidConfig ? ["invalid_offer_config_hidden"] : [],
         ...(invalidConfig ? { failureCode: offerSelector.failureCode } : {}),
+        previewPlanningState,
       }),
       selector: quantitySelector,
       nextStep: "SELECT_QUANTITY",
@@ -120,7 +190,7 @@ export function runCartPlanningPreview(
 
   const normalization = normalizeCartPlanningAction(input.rawActionId);
   if (!normalization.recognized) {
-    return result({ cartBefore, handled: false, route: "NOT_HANDLED" });
+    return result({ cartBefore, handled: false, route: "NOT_HANDLED", previewPlanningState });
   }
 
   if (!normalization.valid || !normalization.action) {
@@ -129,6 +199,7 @@ export function runCartPlanningPreview(
       handled: true,
       route: "PLANNING_ACTION",
       failureCode: normalization.failureCode,
+      previewPlanningState,
     });
   }
 
@@ -144,8 +215,21 @@ export function runCartPlanningPreview(
   });
 
   if (handled.nextStep === "REQUEST_CUSTOM_QUANTITY") {
+    const customQuantity = beginCartCustomQuantityAwaiting({
+      cart: cartBefore,
+      awaitingInput: previewPlanningState.awaitingInput,
+    });
     return {
-      ...result({ cartBefore, handled: true, route: "REQUEST_CUSTOM_QUANTITY" }),
+      ...result({
+        cartBefore,
+        cartAfter: customQuantity.cartAfter,
+        handled: true,
+        route: "REQUEST_CUSTOM_QUANTITY",
+        previewPlanningState: {
+          version: CART_PLANNING_PREVIEW_STATE_VERSION,
+          awaitingInput: customQuantity.awaitingInput,
+        },
+      }),
       normalizedAction: handled.action,
       nextStep: "REQUEST_CUSTOM_QUANTITY",
       prompt: { key: "REQUEST_CUSTOM_QUANTITY", previewOnly: true },
@@ -160,6 +244,7 @@ export function runCartPlanningPreview(
       route: "PLANNING_ACTION",
       warnings: handled.planningResult?.warnings || [],
       failureCode: handled.planningResult?.failureCode,
+      previewPlanningState,
     }),
     normalizedAction: handled.action,
     planningResult: handled.planningResult,
