@@ -3,6 +3,7 @@ import {
   MAX_CART_TARGET_ITEM_COUNT,
   clearCartPlanning,
   setCartPlanning,
+  setCartStatus,
 } from "../cart-state.service";
 import type { CartDraft } from "../cart-state.types";
 import type {
@@ -60,6 +61,10 @@ function hasUnresolvedCurrentItem(cart: CartDraft): boolean {
 
 function hasValidNow(now: Date): boolean {
   return Number.isFinite(now.getTime());
+}
+
+function completedUnits(cart: CartDraft): number {
+  return cart.items.reduce((total, item) => total + item.quantity, 0);
 }
 
 function validateOfferAvailability(
@@ -254,4 +259,135 @@ export function clearPlanning(context: CartPlanningContext): CartPlanningResult 
     changed: !samePlanningState(context.cart, mutation.cart),
     warnings: [],
   };
+}
+
+/** Review-target commands are intentionally separate from first-entry planning. */
+export function inspectCartReviewPlanningReadiness(
+  context: CartPlanningContext,
+): CartPlanningReadiness {
+  if (context.cart.status === "CONFIRMED") {
+    return { ready: false, failureCode: "CART_ALREADY_CONFIRMED", warnings: [] };
+  }
+
+  if (context.sellerId.trim() !== context.productContext.sellerId.trim()) {
+    return { ready: false, failureCode: "PRODUCT_MISMATCH", warnings: [] };
+  }
+
+  if (context.cart.status !== "CART_REVIEW" || context.cart.currentItemDraft) {
+    return { ready: false, failureCode: "INVALID_REVIEW_STATE", warnings: [] };
+  }
+
+  if (!context.cart.items.length) {
+    return { ready: false, failureCode: "EMPTY_REVIEW_CART", warnings: [] };
+  }
+
+  if (context.cart.items.some((item) => item.productId !== context.productContext.productId)) {
+    return { ready: false, failureCode: "PRODUCT_MISMATCH", warnings: [] };
+  }
+
+  const units = completedUnits(context.cart);
+  if (!Number.isSafeInteger(units) || units <= 0 || units > MAX_CART_TARGET_ITEM_COUNT) {
+    return { ready: false, failureCode: "INVALID_QUANTITY", warnings: [] };
+  }
+
+  return { ready: true, warnings: [] };
+}
+
+function applyReviewPlanning(input: {
+  context: CartPlanningContext;
+  command: CartPlanningCommand;
+  targetItemCount: number;
+  mode: CartDraft["mode"];
+  selectedOfferId?: string;
+  status: CartDraft["status"];
+}): CartPlanningResult {
+  const readiness = inspectCartReviewPlanningReadiness(input.context);
+  if (!readiness.ready) {
+    return failure(input.context, input.command, readiness.failureCode!, readiness.warnings);
+  }
+
+  const planning = setCartPlanning({
+    cart: input.context.cart,
+    mode: input.mode,
+    targetItemCount: input.targetItemCount,
+    ...(input.selectedOfferId ? { selectedOfferId: input.selectedOfferId } : {}),
+  });
+  if (!planning.accepted) {
+    return failure(input.context, input.command, "INVALID_QUANTITY");
+  }
+
+  const lifecycle = setCartStatus({ cart: planning.cart, status: input.status });
+  if (!lifecycle.accepted) {
+    return failure(input.context, input.command, "INVALID_REVIEW_STATE");
+  }
+
+  return {
+    success: true,
+    command: input.command,
+    cart: lifecycle.cart,
+    changed: !samePlanningState(input.context.cart, lifecycle.cart),
+    warnings: [],
+  };
+}
+
+/** Aligns the review target with completed units after a scoped item mutation. */
+export function synchronizeReviewTargetToCompletedUnits(
+  context: CartPlanningContext,
+): CartPlanningResult {
+  return applyReviewPlanning({
+    context,
+    command: "SYNCHRONIZE_REVIEW_TARGET",
+    targetItemCount: completedUnits(context.cart),
+    mode: context.cart.mode,
+    ...(context.cart.selectedOfferId ? { selectedOfferId: context.cart.selectedOfferId } : {}),
+    status: "CART_REVIEW",
+  });
+}
+
+/** Adds exactly one planned unit, then leaves D1 responsible for the new draft. */
+export function incrementReviewTarget(
+  context: CartPlanningContext,
+): CartPlanningResult {
+  const units = completedUnits(context.cart);
+  return applyReviewPlanning({
+    context,
+    command: "INCREMENT_REVIEW_TARGET",
+    targetItemCount: units + 1,
+    mode: context.cart.mode,
+    ...(context.cart.selectedOfferId ? { selectedOfferId: context.cart.selectedOfferId } : {}),
+    status: "PLANNING",
+  });
+}
+
+/** Requires the caller's fresh commercial evaluation before leaving a lost offer. */
+export function acceptStandardAfterOfferLoss(
+  context: CartPlanningContext,
+  selectedOfferIneligible: boolean,
+): CartPlanningResult {
+  const readiness = inspectCartReviewPlanningReadiness(context);
+  if (!readiness.ready) {
+    return failure(context, "ACCEPT_STANDARD_AFTER_OFFER_LOSS", readiness.failureCode!, readiness.warnings);
+  }
+
+  if (context.cart.mode === "STANDARD" && !context.cart.selectedOfferId) {
+    return {
+      success: true,
+      command: "ACCEPT_STANDARD_AFTER_OFFER_LOSS",
+      cart: cloneCart(context.cart),
+      changed: false,
+      warnings: [],
+    };
+  }
+
+  if (!context.cart.selectedOfferId || !selectedOfferIneligible) {
+    return failure(context, "ACCEPT_STANDARD_AFTER_OFFER_LOSS", "SELECTED_OFFER_NOT_INELIGIBLE");
+  }
+
+  return applyReviewPlanning({
+    context,
+    command: "ACCEPT_STANDARD_AFTER_OFFER_LOSS",
+    targetItemCount: completedUnits(context.cart),
+    mode: "STANDARD",
+    status: "CART_REVIEW",
+  });
 }

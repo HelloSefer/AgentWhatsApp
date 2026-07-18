@@ -60,9 +60,11 @@ import { offerConfigService } from "./config/offers/offer-config.service";
 import { requiredFieldsService } from "./config/required-fields.service";
 import { runCartPlanningPreview } from "./order/planning/preview/cart-planning-preview.service";
 import { runItemCollectionPreview } from "./order/item-collection/preview/item-collection-preview.service";
+import { runCartReviewPreview } from "./order/cart-review/cart-review-preview.service";
 import type { CartDraft } from "./order/cart-state.types";
 import type { CartPlanningPreviewState } from "./order/planning/quantity/flow/cart-custom-quantity-flow.types";
 import type { SameAsPreviousPreviewState } from "./order/item-collection/shortcuts/same-as-previous.types";
+import type { CartReviewPreviewState } from "./order/cart-review/cart-review.types";
 
 function isAIIntentRouterIntent(value: unknown): boolean {
   return (
@@ -158,6 +160,14 @@ function isItemCollectionPreviewRequested(body: unknown): boolean {
   return (body as Record<string, unknown>).itemCollectionMode === "preview";
 }
 
+function isCartReviewPreviewRequested(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return false;
+  }
+
+  return (body as Record<string, unknown>).cartReviewMode === "preview";
+}
+
 function getCartPlanningPreviewActionInput(body: unknown): unknown {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return "";
@@ -182,6 +192,31 @@ function getItemCollectionPreviewText(body: unknown): unknown {
   }
 
   return (body as Record<string, unknown>).itemCollectionText;
+}
+
+function getCartReviewPreviewActionInput(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+
+  const candidate = body as Record<string, unknown>;
+  return candidate.cartReviewActionId || candidate.interactiveReplyId;
+}
+
+function getCartReviewPreviewText(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+
+  return (body as Record<string, unknown>).cartReviewText;
+}
+
+function getCartReviewPreviewState(value: unknown): CartReviewPreviewState | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as CartReviewPreviewState;
 }
 
 function getItemCollectionPreviewState(
@@ -424,17 +459,18 @@ export async function testAgentReply(req: Request, res: Response) {
   const message = typeof req.body?.message === "string" ? req.body.message : "";
   const cartPlanningPreviewRequested = isCartPlanningPreviewRequested(req.body);
   const itemCollectionPreviewRequested = isItemCollectionPreviewRequested(req.body);
+  const cartReviewPreviewRequested = isCartReviewPreviewRequested(req.body);
   const firstEntryClickPreviewRequested = isFirstEntryClickPreviewRequested(
     req.body,
   );
 
-  if (!message.trim() && !firstEntryClickPreviewRequested && !cartPlanningPreviewRequested) {
+  if (!message.trim() && !firstEntryClickPreviewRequested && !cartPlanningPreviewRequested && !cartReviewPreviewRequested) {
     return res.status(400).json({
       message: "Message is required",
     });
   }
 
-  if (cartPlanningPreviewRequested) {
+  if (cartPlanningPreviewRequested || cartReviewPreviewRequested) {
     const sellerId = getOptionalString(req.body?.sellerId) || "seller_demo_sandals";
     const customerPhone =
       getOptionalString(req.body?.customerPhone) ||
@@ -458,8 +494,28 @@ export async function testAgentReply(req: Request, res: Response) {
         sellerId: productContext.sellerId,
         productId: productContext.productId,
       });
-      const result = itemCollectionPreviewRequested
-        ? runItemCollectionPreview({
+      const requiredFields = requiredFieldsService.getOrderFields({
+        sellerConfig: normalizeSellerConfig(
+          sellerConfigService.getSellerConfig(productContext.sellerId),
+          productContext.price,
+        ),
+        productContext,
+      });
+      const result = cartReviewPreviewRequested
+        ? runCartReviewPreview({
+            previewEnabled: true,
+            rawActionId: getCartReviewPreviewActionInput(req.body),
+            cartReviewText: getCartReviewPreviewText(req.body),
+            previewState: getCartReviewPreviewState(req.body?.cartReviewPreviewState),
+            sellerId: productContext.sellerId,
+            productContext,
+            requiredFields,
+            offerLookup,
+            cart: getCartPlanningPreviewCart(req.body?.previewCart),
+            now: new Date(),
+          })
+        : itemCollectionPreviewRequested
+          ? runItemCollectionPreview({
             previewEnabled: true,
             rawActionId: getItemCollectionPreviewActionInput(req.body),
             itemCollectionText: getItemCollectionPreviewText(req.body),
@@ -468,16 +524,10 @@ export async function testAgentReply(req: Request, res: Response) {
             ),
             sellerId: productContext.sellerId,
             productContext,
-            requiredFields: requiredFieldsService.getOrderFields({
-              sellerConfig: normalizeSellerConfig(
-                sellerConfigService.getSellerConfig(productContext.sellerId),
-                productContext.price,
-              ),
-              productContext,
-            }),
+            requiredFields,
             cart: getCartPlanningPreviewCart(req.body?.previewCart),
           })
-        : runCartPlanningPreview({
+          : runCartPlanningPreview({
             previewEnabled: true,
             rawActionId: getCartPlanningPreviewActionInput(req.body),
             sellerId: productContext.sellerId,
@@ -496,9 +546,11 @@ export async function testAgentReply(req: Request, res: Response) {
         mode: "agent_test",
         previewOnly: true,
         dryRun: true,
-        handledBy: itemCollectionPreviewRequested
-          ? "item_collection_preview"
-          : "cart_planning_preview",
+        handledBy: cartReviewPreviewRequested
+          ? "cart_review_preview"
+          : itemCollectionPreviewRequested
+            ? "item_collection_preview"
+            : "cart_planning_preview",
         sellerId: productContext.sellerId,
         customerPhone,
         result,

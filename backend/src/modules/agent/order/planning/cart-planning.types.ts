@@ -7,7 +7,10 @@ export type CartPlanningCommand =
   | "SELECT_STANDARD_QUANTITY"
   | "INITIALIZE_OFFER_PLANNING"
   | "SELECT_OFFER"
-  | "CLEAR_PLANNING";
+  | "CLEAR_PLANNING"
+  | "SYNCHRONIZE_REVIEW_TARGET"
+  | "INCREMENT_REVIEW_TARGET"
+  | "ACCEPT_STANDARD_AFTER_OFFER_LOSS";
 
 export type CartPlanningFailureCode =
   | "INVALID_CART_STATE"
@@ -21,7 +24,10 @@ export type CartPlanningFailureCode =
   | "UNRESOLVED_CURRENT_ITEM"
   | "CART_ALREADY_CONFIRMED"
   | "PRODUCT_MISMATCH"
-  | "INVALID_EVALUATION_TIME";
+  | "INVALID_EVALUATION_TIME"
+  | "INVALID_REVIEW_STATE"
+  | "EMPTY_REVIEW_CART"
+  | "SELECTED_OFFER_NOT_INELIGIBLE";
 
 /**
  * Read-only dependencies for cart planning. The caller owns persistence and
