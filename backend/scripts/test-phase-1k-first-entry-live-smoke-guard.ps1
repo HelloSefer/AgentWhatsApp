@@ -198,6 +198,19 @@ function Invoke-Phase1KSafetyScan {
     $cloudService.Contains("sendAgentCloudResult") -and
     $cloudService.Contains("markFirstEntryLiveSmokeShown")
   ) "first-entry hook dispatches through existing guarded path"
+  Add-Result "Runtime CTA Routing" "Cloud webhook activates guarded runtime only through smoke readiness" (
+    $cloudService.Contains("guardedRuntimeLiveSmokeActivation") -and
+    $cloudService.Contains("orderRuntimeEnabled: guardedRuntimeLiveSmokeActivation") -and
+    $cloudService.Contains("firstEntryLiveSmoke.readiness.ready === true") -and
+    $cloudService.Contains("firstEntryLiveSmoke.readiness.recipientAllowed === true")
+  ) "runtime activation remains tied to the configured seller and allowlisted smoke recipient"
+  Add-Result "Safety" "Cloud webhook blocks unscoped dispatch while smoke mode is armed" (
+    $cloudService.Contains("liveSmokeDispatchAllowed") -and
+    $cloudService.Contains("env.whatsappInteractiveEnabled === true") -and
+    $cloudService.Contains("whatsapp.cloud.live_smoke.scope_blocked") -and
+    $cloudService.Contains("processResult.sendAttempted = false") -and
+    $cloudService.Contains("processResult.sendSuccess = false")
+  ) "unrelated seller/recipient webhook messages do not reach Cloud dispatch during an armed smoke test"
 
   $firstEntryServicePath = Join-Path $backendRoot "src/modules/agent/config/first-entry-live-smoke.service.ts"
   $firstEntryService = if (Test-Path $firstEntryServicePath) {

@@ -2760,6 +2760,31 @@ export async function processCloudWebhookBody(
         buttonReplyId: message.buttonReplyId,
         buttonReplyTitle: message.buttonReplyTitle,
       });
+      const liveSmokeModeArmed =
+        firstEntryLiveSmoke.readiness.liveEnabled === true;
+      const liveSmokeDispatchAllowed =
+        liveSmokeModeArmed &&
+        env.whatsappInteractiveEnabled === true &&
+        firstEntryLiveSmoke.readiness.recipientAllowed === true &&
+        firstEntryLiveSmoke.readiness.sellerIdConfigured === true &&
+        firstEntryLiveSmoke.readiness.expectedSellerId === identity.sellerId;
+
+      if (liveSmokeModeArmed && !liveSmokeDispatchAllowed) {
+        logJson({
+          event: "whatsapp.cloud.live_smoke.scope_blocked",
+          customerPhone: maskPhone(identity.customerPhone),
+          sellerId: identity.sellerId,
+          conversationKey: maskConversationKey(identity.conversationKey),
+          recipientAllowed: firstEntryLiveSmoke.readiness.recipientAllowed,
+          sellerIdConfigured: firstEntryLiveSmoke.readiness.sellerIdConfigured,
+        });
+        processResult.handled = false;
+        processResult.agentReplyPreview = "";
+        processResult.actionsCount = 0;
+        processResult.sendAttempted = false;
+        processResult.sendSuccess = false;
+        continue;
+      }
 
       if (!firstEntryLiveSmoke.handled) {
         const routedToAgent = firstEntryLiveSmoke.blockedReason.includes(
@@ -3056,6 +3081,12 @@ export async function processCloudWebhookBody(
         continue;
       }
 
+      // The multi-item runtime remains globally default-off. It is activated
+      // here only after the existing First Entry smoke guard has verified the
+      // configured seller and the exact allowlisted test recipient.
+      const guardedRuntimeLiveSmokeActivation =
+        liveSmokeDispatchAllowed &&
+        firstEntryLiveSmoke.readiness.ready === true;
       const startedAt = Date.now();
       const result = await generateAgentResult(message.text, undefined, {
         customerPhone: identity.customerPhone,
@@ -3063,6 +3094,7 @@ export async function processCloudWebhookBody(
         sellerId: identity.sellerId,
         phoneNumberId: identity.phoneNumberId,
         useMemory: true,
+        orderRuntimeEnabled: guardedRuntimeLiveSmokeActivation,
         interactiveSendChannel: "whatsapp_cloud",
       });
       const durationMs = result.meta?.durationMs ?? Date.now() - startedAt;
