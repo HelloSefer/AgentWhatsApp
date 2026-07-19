@@ -59,6 +59,7 @@ import {
   classifyOrderMessageDisposition,
   isSideQuestionDisposition,
 } from "./order-understanding/message-disposition.service";
+import { processGuardedOrderRuntimeTurn } from "./order/runtime/order-runtime-router.service";
 
 export type GenerateAgentOptions = {
   customerId?: string;
@@ -70,6 +71,8 @@ export type GenerateAgentOptions = {
   useMemory?: boolean;
   interactiveSendChannel?: InteractiveSendChannel;
   interactiveEnabledOverride?: boolean;
+  /** Guarded API/runtime validation only; never set by normal transport paths. */
+  orderRuntimeEnabled?: boolean;
 };
 
 export type GenerateAgentDependencies = {
@@ -1566,6 +1569,59 @@ export async function generateAgentResult(
 
   if (!userMessage) {
     throw new Error("Message is required");
+  }
+
+  // Phase 6.3 runtime is an opt-in seller-scoped boundary. A disabled seller
+  // deliberately continues through the legacy conversation path below.
+  if (activeOptions?.useMemory && normalized.identity) {
+    try {
+      const runtimeResult = await processGuardedOrderRuntimeTurn({
+        sellerId: normalized.identity.sellerId,
+        customerPhone: normalized.identity.customerPhone,
+        conversationKey: normalized.identity.conversationKey,
+        productId: activeOptions.productId,
+        message: userMessage,
+        activationRequested: activeOptions.orderRuntimeEnabled === true,
+      });
+      if (runtimeResult.handled && runtimeResult.reply) {
+        const naturalReplyStatus = getNaturalReplyStatus();
+        const whatsappInteractivePreview = whatsappInteractiveMapper.toCloudInteractivePreview({
+          replyText: runtimeResult.reply,
+          replyUi: runtimeResult.replyUi,
+        });
+        const interactiveSendDecision = interactiveSendDecisionService.decide({
+          channel: activeOptions.interactiveSendChannel || "test",
+          interactiveEnabled: getRuntimeInteractiveEnabled(activeOptions),
+          whatsappInteractivePreview,
+        });
+        return {
+          reply: runtimeResult.reply,
+          actions: [],
+          source: "direct",
+          meta: {
+            durationMs: Date.now() - startedAt,
+            source: "direct",
+            naturalReplyEnabled: naturalReplyStatus.enabled,
+            naturalReplyUsed: false,
+            naturalReplyTimedOut: false,
+            naturalReplyCircuitOpen: false,
+            aiUsed: false,
+            identity: normalized.identity,
+            replyUi: runtimeResult.replyUi,
+            whatsappInteractivePreview,
+            interactiveSendDecision,
+            orderRuntime: {
+              stage: runtimeResult.stage || "RECOVERY_REQUIRED",
+              confirmedSnapshotId: runtimeResult.confirmedSnapshotId,
+              receiptReady: runtimeResult.receiptReady,
+            },
+          },
+        };
+      }
+    } catch (error) {
+      // The guarded runtime must not take down the legacy agent path.
+      console.error("❌ Guarded order runtime failed", error);
+    }
   }
 
   await appendMessageToMemory(activeOptions, "customer", userMessage);

@@ -34,10 +34,18 @@ import {
   getAgentRequiredFields,
   postAgentFirstEntryIntentPreview,
 } from "./config/agent-config.controller";
+import {
+  evaluateOrderRuntimeController,
+  getOrderRuntimeReadinessController,
+  resetOrderRuntimeController,
+} from "./order/runtime/order-runtime.controller";
 
 const router = Router();
 
 router.post("/test", testAgentReply);
+router.get("/order-runtime/readiness", getOrderRuntimeReadinessController);
+router.post("/order-runtime/reset", resetOrderRuntimeController);
+router.post("/order-runtime/eval", evaluateOrderRuntimeController);
 router.post("/first-entry-dry-run", firstEntryDryRun);
 router.post("/first-entry-click-preview", firstEntryClickPreview);
 router.get("/first-entry-readiness", getFirstEntryReadiness);

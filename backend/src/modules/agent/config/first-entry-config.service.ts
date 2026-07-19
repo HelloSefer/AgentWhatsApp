@@ -5,6 +5,8 @@ import type {
   FirstEntryCtaMode,
   FirstEntryPolicy,
   GreetingStyle,
+  MultiItemOrderFlowConfig,
+  MultiItemOrderRuntimeMode,
   SellerConfig,
 } from "./seller-config.types";
 
@@ -46,6 +48,12 @@ const validDeliveryWordingStyles: DeliveryWordingStyle[] = [
   "short",
   "clear",
   "professional",
+];
+
+const validMultiItemRuntimeModes: MultiItemOrderRuntimeMode[] = [
+  "disabled",
+  "dry_run",
+  "guarded",
 ];
 
 function hasProductPrice(productPrice: unknown): boolean {
@@ -107,6 +115,23 @@ function cleanDeliveryWordingStyle(value: unknown): DeliveryWordingStyle {
   return validDeliveryWordingStyles.includes(value as DeliveryWordingStyle)
     ? (value as DeliveryWordingStyle)
     : "clear";
+}
+
+export function normalizeMultiItemOrderFlow(
+  value: Partial<MultiItemOrderFlowConfig> | undefined,
+): MultiItemOrderFlowConfig {
+  const runtimeMode = validMultiItemRuntimeModes.includes(
+    value?.runtimeMode as MultiItemOrderRuntimeMode,
+  )
+    ? (value?.runtimeMode as MultiItemOrderRuntimeMode)
+    : "disabled";
+  const allowedSellerIds = cleanStringList(value?.allowedSellerIds);
+
+  return {
+    enabled: value?.enabled === true && runtimeMode !== "disabled",
+    runtimeMode,
+    ...(allowedSellerIds ? { allowedSellerIds } : {}),
+  };
 }
 
 export function getDefaultFirstEntryPolicy(
@@ -248,6 +273,9 @@ export function normalizeSellerConfig(
     deliveryPolicy: normalizeDeliveryPolicy(
       sellerConfig.deliveryPolicy,
       sellerConfig.delivery,
+    ),
+    multiItemOrderFlow: normalizeMultiItemOrderFlow(
+      sellerConfig.multiItemOrderFlow,
     ),
   };
 }

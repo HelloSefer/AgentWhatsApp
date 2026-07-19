@@ -141,6 +141,8 @@ export interface ConversationSession {
     pendingOrderSelections?: Pick<OrderEntities, "size" | "color">;
     lastUpdatedAt?: string;
   };
+  /** Guarded Phase 6.3 workflow state. It is separate from legacy orderState. */
+  orderRuntime?: import("./order/runtime/order-runtime.types").OrderRuntimeSession;
   createdAt: string;
   updatedAt: string;
   expiresAt?: string;

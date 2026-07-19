@@ -145,6 +145,11 @@ export const demoSellerConfigs: SellerConfig[] = [
       mode: "hybrid",
       naturalReplyEnabled: false,
     },
+    multiItemOrderFlow: {
+      enabled: false,
+      runtimeMode: "guarded",
+      allowedSellerIds: ["seller_demo_sandals"],
+    },
   },
   {
     sellerId: "seller_demo_medical",

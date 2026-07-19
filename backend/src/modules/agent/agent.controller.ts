@@ -842,6 +842,7 @@ export async function testAgentReply(req: Request, res: Response) {
       productId: getOptionalString(req.body?.productId),
       phoneNumberId: getOptionalString(req.body?.phoneNumberId),
       useMemory: req.body?.useMemory === true,
+      orderRuntimeEnabled: req.body?.orderRuntimeEnabled === true,
     });
 
     return res.status(200).json({

@@ -2,6 +2,18 @@ export type LanguageStyle = "darija" | "arabic" | "french" | "mixed";
 
 export type DisplayMode = "buttons" | "list" | "text" | "auto";
 
+/**
+ * The deterministic multi-item runtime is intentionally opt-in per seller.
+ * Transport dispatch remains governed by its own Cloud safety checks.
+ */
+export type MultiItemOrderRuntimeMode = "disabled" | "dry_run" | "guarded";
+
+export type MultiItemOrderFlowConfig = {
+  enabled: boolean;
+  runtimeMode: MultiItemOrderRuntimeMode;
+  allowedSellerIds?: string[];
+};
+
 export type GreetingStyle = "short" | "friendly" | "professional";
 
 export type FirstEntryCtaMode =
@@ -177,4 +189,5 @@ export type SellerConfig = {
     mode: "direct" | "hybrid" | "ai";
     naturalReplyEnabled: boolean;
   };
+  multiItemOrderFlow?: MultiItemOrderFlowConfig;
 };
