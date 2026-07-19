@@ -7,7 +7,8 @@ export type AgentReplyUiHintPurpose =
   | "field_options"
   | "info_menu"
   | "first_entry"
-  | "cart_review";
+  | "cart_review"
+  | "delivery_confirmation";
 
 export type AgentReplyUiHint = {
   kind: AgentReplyUiHintKind;

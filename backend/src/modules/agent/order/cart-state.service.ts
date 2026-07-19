@@ -723,6 +723,38 @@ export function setOrderLevelField(input: {
   return { cart, accepted: true };
 }
 
+/**
+ * Trusted configuration-aware boundary for shared order fields. Domain flows
+ * decide when a field may be collected; this boundary guarantees it can never
+ * become an item option or an unknown cart property.
+ */
+export function setConfiguredOrderLevelField(input: {
+  cart: CartDraft;
+  fields: RequiredOrderField[];
+  fieldKey: string;
+  value: SupportedOrderFieldValue;
+}): CartMutationResult {
+  const normalizedFieldKey = normalizeKey(input.fieldKey);
+  const field = input.fields.find(
+    (candidate) => normalizeKey(candidate.key) === normalizedFieldKey,
+  );
+
+  if (
+    !field ||
+    !field.enabled ||
+    field.requirement === "DISABLED" ||
+    resolveCartFieldScope(field) !== "ORDER"
+  ) {
+    return { cart: cloneCart(input.cart), accepted: false, invalidPaths: ["orderLevelFields"] };
+  }
+
+  return setOrderLevelField({
+    cart: input.cart,
+    fieldKey: field.key,
+    value: input.value,
+  });
+}
+
 export function setTargetItemCount(input: {
   cart: CartDraft;
   targetItemCount?: number;

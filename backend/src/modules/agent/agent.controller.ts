@@ -61,11 +61,13 @@ import { requiredFieldsService } from "./config/required-fields.service";
 import { runCartPlanningPreview } from "./order/planning/preview/cart-planning-preview.service";
 import { runItemCollectionPreview } from "./order/item-collection/preview/item-collection-preview.service";
 import { runCartReviewPreview } from "./order/cart-review/cart-review-preview.service";
+import { runDeliveryConfirmationPreview } from "./order/delivery-confirmation/delivery-confirmation-preview.service";
 import type { CartDraft } from "./order/cart-state.types";
 import type { CartPlanningPreviewState } from "./order/planning/quantity/flow/cart-custom-quantity-flow.types";
 import type { SameAsPreviousPreviewState } from "./order/item-collection/shortcuts/same-as-previous.types";
 import type { CartReviewPreviewState } from "./order/cart-review/cart-review.types";
 import type { CartItemEditPreviewState } from "./order/cart-review/item-edit/cart-item-edit.types";
+import type { DeliveryConfirmationPreviewState } from "./order/delivery-confirmation/delivery-confirmation.types";
 
 function isAIIntentRouterIntent(value: unknown): boolean {
   return (
@@ -169,6 +171,14 @@ function isCartReviewPreviewRequested(body: unknown): boolean {
   return (body as Record<string, unknown>).cartReviewMode === "preview";
 }
 
+function isDeliveryConfirmationPreviewRequested(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return false;
+  }
+
+  return (body as Record<string, unknown>).deliveryConfirmationMode === "preview";
+}
+
 function getCartPlanningPreviewActionInput(body: unknown): unknown {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return "";
@@ -210,6 +220,44 @@ function getCartReviewPreviewText(body: unknown): unknown {
   }
 
   return (body as Record<string, unknown>).cartReviewText;
+}
+
+function getDeliveryConfirmationPreviewActionInput(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+
+  const candidate = body as Record<string, unknown>;
+  return candidate.deliveryConfirmationActionId || candidate.interactiveReplyId;
+}
+
+function getDeliveryConfirmationPreviewText(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+
+  return (body as Record<string, unknown>).deliveryConfirmationText;
+}
+
+function getDeliveryConfirmationPreviewState(
+  value: unknown,
+): DeliveryConfirmationPreviewState | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as DeliveryConfirmationPreviewState;
+}
+
+function getDeliveryConfirmationOptionalFieldKeys(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const keys = value.filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return keys.length ? keys : undefined;
 }
 
 function getCartReviewPreviewState(value: unknown): CartReviewPreviewState | undefined {
@@ -469,17 +517,18 @@ export async function testAgentReply(req: Request, res: Response) {
   const cartPlanningPreviewRequested = isCartPlanningPreviewRequested(req.body);
   const itemCollectionPreviewRequested = isItemCollectionPreviewRequested(req.body);
   const cartReviewPreviewRequested = isCartReviewPreviewRequested(req.body);
+  const deliveryConfirmationPreviewRequested = isDeliveryConfirmationPreviewRequested(req.body);
   const firstEntryClickPreviewRequested = isFirstEntryClickPreviewRequested(
     req.body,
   );
 
-  if (!message.trim() && !firstEntryClickPreviewRequested && !cartPlanningPreviewRequested && !cartReviewPreviewRequested) {
+  if (!message.trim() && !firstEntryClickPreviewRequested && !cartPlanningPreviewRequested && !cartReviewPreviewRequested && !deliveryConfirmationPreviewRequested) {
     return res.status(400).json({
       message: "Message is required",
     });
   }
 
-  if (cartPlanningPreviewRequested || cartReviewPreviewRequested) {
+  if (cartPlanningPreviewRequested || cartReviewPreviewRequested || deliveryConfirmationPreviewRequested) {
     const sellerId = getOptionalString(req.body?.sellerId) || "seller_demo_sandals";
     const customerPhone =
       getOptionalString(req.body?.customerPhone) ||
@@ -510,7 +559,28 @@ export async function testAgentReply(req: Request, res: Response) {
         ),
         productContext,
       });
-      const result = cartReviewPreviewRequested
+      const result = deliveryConfirmationPreviewRequested
+        ? runDeliveryConfirmationPreview({
+            previewEnabled: true,
+            rawActionId: getDeliveryConfirmationPreviewActionInput(req.body),
+            deliveryConfirmationText: getDeliveryConfirmationPreviewText(req.body),
+            previewState: getDeliveryConfirmationPreviewState(
+              req.body?.deliveryConfirmationPreviewState,
+            ),
+            includeOptionalFieldKeys: getDeliveryConfirmationOptionalFieldKeys(
+              req.body?.deliveryConfirmationOptionalFieldKeys,
+            ),
+            cartReviewPreviewState: getCartReviewPreviewState(req.body?.cartReviewPreviewState),
+            cartItemEditPreviewState: getCartItemEditPreviewState(req.body?.cartItemEditPreviewState),
+            sellerId: productContext.sellerId,
+            conversationScopeId: customerPhone,
+            productContext,
+            requiredFields,
+            offerLookup,
+            cart: getCartPlanningPreviewCart(req.body?.previewCart),
+            now: new Date(),
+          })
+        : cartReviewPreviewRequested
         ? runCartReviewPreview({
             previewEnabled: true,
             rawActionId: getCartReviewPreviewActionInput(req.body),
@@ -556,7 +626,9 @@ export async function testAgentReply(req: Request, res: Response) {
         mode: "agent_test",
         previewOnly: true,
         dryRun: true,
-        handledBy: cartReviewPreviewRequested
+        handledBy: deliveryConfirmationPreviewRequested
+          ? "delivery_confirmation_preview"
+          : cartReviewPreviewRequested
           ? "cart_review_preview"
           : itemCollectionPreviewRequested
             ? "item_collection_preview"

@@ -48,6 +48,23 @@ function extractQuantity(message: string): number | undefined {
   })?.[1];
 }
 
+function extractTrailingQuantityAfterConfiguredSelection(
+  message: string,
+  candidates: readonly FieldCandidate[],
+): number | undefined {
+  const trailing = message.match(/(?:^|\s)(\d+)\s*$/)?.[1];
+  if (!trailing || extractPhone(message)) return undefined;
+
+  // A numeric configured value, such as a shoe size, remains that option.
+  if (candidates.some((entry) => String(entry.value) === trailing)) return undefined;
+
+  // This supports concise values such as "أسود 1" without treating arbitrary
+  // address numbers as quantities.
+  return candidates.some((entry) => entry.fieldKey !== "quantity")
+    ? Number(trailing)
+    : undefined;
+}
+
 function isPlausibleLocation(message: string): boolean {
   const trimmed = message.trim();
   const normalized = normalizeUnderstandingText(trimmed);
@@ -247,7 +264,7 @@ export function extractDeterministicFieldCandidates(
     candidates.push(candidate("fullName", labeledName, "deterministic_contextual", correction ? "REPLACE" : "SET", 0.94));
   }
 
-  const quantity = extractQuantity(message);
+  const quantity = extractQuantity(message) || extractTrailingQuantityAfterConfiguredSelection(message, candidates);
   const numericOnly = /^\d+$/.test(normalizeUnderstandingText(message));
   const quantityIsAwaited = context.awaitedField?.key === "quantity";
   if (
@@ -288,9 +305,9 @@ export function extractDeterministicFieldCandidates(
   const canAcceptVoluntaryCity =
     context.fields.some((field) => field.key === "city" && field.enabled) &&
     !collected.city &&
-    Boolean(collected.fullName && collected.phone && collected.address) &&
+    Boolean(context.awaitedField?.options?.length) &&
     !candidates.some((entry) => entry.fieldKey === "city") &&
-    !candidates.some((entry) => entry.fieldKey === "phone" || entry.fieldKey === "quantity") &&
+    !candidates.some((entry) => entry.fieldKey !== "city") &&
     !isOrderSideQuestion(message) &&
     isPlausibleLocation(message);
 
