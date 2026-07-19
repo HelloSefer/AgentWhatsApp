@@ -62,12 +62,16 @@ import { runCartPlanningPreview } from "./order/planning/preview/cart-planning-p
 import { runItemCollectionPreview } from "./order/item-collection/preview/item-collection-preview.service";
 import { runCartReviewPreview } from "./order/cart-review/cart-review-preview.service";
 import { runDeliveryConfirmationPreview } from "./order/delivery-confirmation/delivery-confirmation-preview.service";
+import { runConfirmedOrderReceiptPreview } from "./order/confirmed-order/confirmed-order-preview.service";
 import type { CartDraft } from "./order/cart-state.types";
 import type { CartPlanningPreviewState } from "./order/planning/quantity/flow/cart-custom-quantity-flow.types";
 import type { SameAsPreviousPreviewState } from "./order/item-collection/shortcuts/same-as-previous.types";
 import type { CartReviewPreviewState } from "./order/cart-review/cart-review.types";
 import type { CartItemEditPreviewState } from "./order/cart-review/item-edit/cart-item-edit.types";
-import type { DeliveryConfirmationPreviewState } from "./order/delivery-confirmation/delivery-confirmation.types";
+import type {
+  ConfirmedOrderPreview,
+  DeliveryConfirmationPreviewState,
+} from "./order/delivery-confirmation/delivery-confirmation.types";
 
 function isAIIntentRouterIntent(value: unknown): boolean {
   return (
@@ -179,6 +183,14 @@ function isDeliveryConfirmationPreviewRequested(body: unknown): boolean {
   return (body as Record<string, unknown>).deliveryConfirmationMode === "preview";
 }
 
+function isConfirmedOrderReceiptPreviewRequested(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return false;
+  }
+
+  return (body as Record<string, unknown>).confirmedOrderMode === "receipt_preview";
+}
+
 function getCartPlanningPreviewActionInput(body: unknown): unknown {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return "";
@@ -247,6 +259,25 @@ function getDeliveryConfirmationPreviewState(
   }
 
   return value as DeliveryConfirmationPreviewState;
+}
+
+function getConfirmedOrderPreview(value: unknown): ConfirmedOrderPreview | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as ConfirmedOrderPreview;
+}
+
+function getConfirmedOrderPreviewFromBody(body: unknown): ConfirmedOrderPreview | undefined {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return undefined;
+  }
+
+  const candidate = body as Record<string, unknown>;
+  return getConfirmedOrderPreview(
+    candidate.confirmedPreview || candidate.confirmedOrderPreview,
+  );
 }
 
 function getDeliveryConfirmationOptionalFieldKeys(value: unknown): string[] | undefined {
@@ -518,17 +549,18 @@ export async function testAgentReply(req: Request, res: Response) {
   const itemCollectionPreviewRequested = isItemCollectionPreviewRequested(req.body);
   const cartReviewPreviewRequested = isCartReviewPreviewRequested(req.body);
   const deliveryConfirmationPreviewRequested = isDeliveryConfirmationPreviewRequested(req.body);
+  const confirmedOrderReceiptPreviewRequested = isConfirmedOrderReceiptPreviewRequested(req.body);
   const firstEntryClickPreviewRequested = isFirstEntryClickPreviewRequested(
     req.body,
   );
 
-  if (!message.trim() && !firstEntryClickPreviewRequested && !cartPlanningPreviewRequested && !cartReviewPreviewRequested && !deliveryConfirmationPreviewRequested) {
+  if (!message.trim() && !firstEntryClickPreviewRequested && !cartPlanningPreviewRequested && !cartReviewPreviewRequested && !deliveryConfirmationPreviewRequested && !confirmedOrderReceiptPreviewRequested) {
     return res.status(400).json({
       message: "Message is required",
     });
   }
 
-  if (cartPlanningPreviewRequested || cartReviewPreviewRequested || deliveryConfirmationPreviewRequested) {
+  if (cartPlanningPreviewRequested || cartReviewPreviewRequested || deliveryConfirmationPreviewRequested || confirmedOrderReceiptPreviewRequested) {
     const sellerId = getOptionalString(req.body?.sellerId) || "seller_demo_sandals";
     const customerPhone =
       getOptionalString(req.body?.customerPhone) ||
@@ -552,14 +584,47 @@ export async function testAgentReply(req: Request, res: Response) {
         sellerId: productContext.sellerId,
         productId: productContext.productId,
       });
+      const sellerConfig = normalizeSellerConfig(
+        sellerConfigService.getSellerConfig(productContext.sellerId),
+        productContext.price,
+      );
       const requiredFields = requiredFieldsService.getOrderFields({
-        sellerConfig: normalizeSellerConfig(
-          sellerConfigService.getSellerConfig(productContext.sellerId),
-          productContext.price,
-        ),
+        sellerConfig,
         productContext,
       });
-      const result = deliveryConfirmationPreviewRequested
+      const result = confirmedOrderReceiptPreviewRequested
+        ? await runConfirmedOrderReceiptPreview({
+            previewEnabled: true,
+            previewState: getDeliveryConfirmationPreviewState(
+              req.body?.deliveryConfirmationPreviewState,
+            ),
+            confirmedPreview: getConfirmedOrderPreviewFromBody(req.body),
+            sellerId: productContext.sellerId,
+            conversationScopeId: customerPhone,
+            productContext,
+            requiredFields,
+            offerLookup,
+            cart: getCartPlanningPreviewCart(req.body?.previewCart),
+            receiptContext: {
+              storeName:
+                sellerConfig.receipt.branding?.storeName || sellerConfig.businessName,
+              ...(sellerConfig.receipt.paymentMethodLabel || sellerConfig.delivery.paymentText
+                ? {
+                    paymentMethodLabel:
+                      sellerConfig.receipt.paymentMethodLabel || sellerConfig.delivery.paymentText,
+                  }
+                : {}),
+              ...(sellerConfig.delivery.text
+                ? { deliveryText: sellerConfig.delivery.text }
+                : {}),
+            },
+            snapshotId: getOptionalString(req.body?.snapshotId),
+            confirmedAt:
+              getOptionalString(req.body?.confirmedAt) ||
+              getConfirmedOrderPreviewFromBody(req.body)?.confirmedAt,
+            now: new Date(),
+          })
+        : deliveryConfirmationPreviewRequested
         ? runDeliveryConfirmationPreview({
             previewEnabled: true,
             rawActionId: getDeliveryConfirmationPreviewActionInput(req.body),
@@ -626,7 +691,9 @@ export async function testAgentReply(req: Request, res: Response) {
         mode: "agent_test",
         previewOnly: true,
         dryRun: true,
-        handledBy: deliveryConfirmationPreviewRequested
+        handledBy: confirmedOrderReceiptPreviewRequested
+          ? "confirmed_order_receipt_preview"
+          : deliveryConfirmationPreviewRequested
           ? "delivery_confirmation_preview"
           : cartReviewPreviewRequested
           ? "cart_review_preview"
@@ -651,8 +718,12 @@ export async function testAgentReply(req: Request, res: Response) {
         mode: "agent_test",
         previewOnly: true,
         dryRun: true,
-        handledBy: "cart_planning_preview_blocked",
-        message: "Cart planning preview failed",
+        handledBy: confirmedOrderReceiptPreviewRequested
+          ? "confirmed_order_receipt_preview_blocked"
+          : "cart_planning_preview_blocked",
+        message: confirmedOrderReceiptPreviewRequested
+          ? "Confirmed order receipt preview failed"
+          : "Cart planning preview failed",
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }

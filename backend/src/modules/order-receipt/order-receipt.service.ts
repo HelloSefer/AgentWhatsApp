@@ -865,6 +865,47 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
 </html>`;
 }
 
+/**
+ * Shared, in-memory PDF adapter for guarded Preview flows. It never writes or
+ * dispatches a document, while keeping Puppeteer configuration consistent with
+ * the established receipt renderer.
+ */
+export async function renderOrderReceiptHtmlToPdfBuffer(html: string): Promise<Buffer> {
+  const { default: puppeteer } = await import("puppeteer");
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "load" });
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await Promise.all(
+        Array.from(document.images).map(
+          (image) =>
+            image.complete
+              ? Promise.resolve()
+              : new Promise<void>((resolve) => {
+                  image.addEventListener("load", () => resolve(), { once: true });
+                  image.addEventListener("error", () => resolve(), { once: true });
+                }),
+        ),
+      );
+    });
+    return Buffer.from(await page.pdf({
+      format: "A4",
+      printBackground: true,
+      preferCSSPageSize: true,
+      displayHeaderFooter: false,
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+    }));
+  } finally {
+    await browser.close();
+  }
+}
+
 export async function generateOrderReceiptPdf(
   order: OrderReceiptOrder,
 ): Promise<GenerateReceiptResult> {
@@ -910,46 +951,7 @@ export async function generateOrderReceiptPdf(
     }
 
     const html = await buildReceiptHtml(order);
-    const { default: puppeteer } = await import("puppeteer");
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
-
-    try {
-      const page = await browser.newPage();
-      await page.setContent(html, {
-        waitUntil: "load",
-      });
-      await page.evaluate(async () => {
-        await document.fonts.ready;
-        await Promise.all(
-          Array.from(document.images).map(
-            (image) =>
-              image.complete
-                ? Promise.resolve()
-                : new Promise<void>((resolve) => {
-                    image.addEventListener("load", () => resolve(), {
-                      once: true,
-                    });
-                    image.addEventListener("error", () => resolve(), {
-                      once: true,
-                    });
-                  }),
-          ),
-        );
-      });
-      await page.pdf({
-        path: pdfPath,
-        format: "A4",
-        printBackground: true,
-        preferCSSPageSize: true,
-        displayHeaderFooter: false,
-        margin: { top: 0, right: 0, bottom: 0, left: 0 },
-      });
-    } finally {
-      await browser.close();
-    }
+    await fs.writeFile(pdfPath, await renderOrderReceiptHtmlToPdfBuffer(html));
 
     const sizeBytes = await getFileSize(pdfPath);
 
