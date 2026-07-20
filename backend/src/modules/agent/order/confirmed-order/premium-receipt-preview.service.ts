@@ -21,6 +21,12 @@ export type PremiumReceiptPreviewSet = Readonly<{
   offerAndDelivery: PremiumReceiptPreviewArtifact;
 }>;
 
+export type GroupedPremiumReceiptPreviewSet = Readonly<{
+  sameProductTwoColors: PremiumReceiptPreviewArtifact;
+  sameProductThreeVariants: PremiumReceiptPreviewArtifact;
+  twoProductsTwoVariantsEach: PremiumReceiptPreviewArtifact;
+}>;
+
 const BRANDING = {
   storeName: "Élégance Boutique",
   slogan: "Style, qualité et confiance",
@@ -195,6 +201,75 @@ export function buildPremiumReceiptPreviewModels(): Readonly<{
   };
 }
 
+export function buildGroupedPremiumReceiptPreviewModels(): Readonly<{
+  sameProductTwoColors: PremiumOrderReceiptViewModel;
+  sameProductThreeVariants: PremiumOrderReceiptViewModel;
+  twoProductsTwoVariantsEach: PremiumOrderReceiptViewModel;
+}> {
+  const freeDelivery = {
+    type: "FREE" as const,
+    amountMinor: 0,
+    amount: 0,
+    currency: "MAD",
+  };
+  const sameProductTwoColors = snapshot({
+    id: "R4-TWO-COLORS",
+    items: [
+      item({ id: "internal-r4-black", quantity: 1, size: "37", color: "أسود" }),
+      item({ id: "internal-r4-pink", quantity: 1, size: "37", color: "وردي" }),
+    ],
+    deliveryFee: freeDelivery,
+  });
+  const sameProductThreeVariants = snapshot({
+    id: "R4-THREE-VARIANTS",
+    items: [
+      item({ id: "internal-r4-v1", quantity: 1, size: "36", color: "أسود" }),
+      item({ id: "internal-r4-v2", quantity: 2, size: "37", color: "وردي" }),
+      item({
+        id: "internal-r4-v3",
+        quantity: 1,
+        size: "40",
+        color: "أسود",
+        extraOptions: [{ key: "finish", label: "Finition", value: "Premium mate" }],
+        unitPriceMinor: 21_900,
+      }),
+    ],
+    deliveryFee: freeDelivery,
+  });
+  const twoProductsTwoVariantsEach = snapshot({
+    id: "R4-TWO-PRODUCTS",
+    items: [
+      item({ id: "internal-r4-sandal-black", quantity: 1, size: "37", color: "أسود" }),
+      item({ id: "internal-r4-sandal-pink", quantity: 1, size: "38", color: "وردي" }),
+      item({
+        id: "internal-r4-bag-black",
+        productId: "prod_demo_bag_001",
+        productName: "حقيبة نسائية",
+        quantity: 1,
+        size: "M",
+        color: "أسود",
+        unitPriceMinor: 25_900,
+      }),
+      item({
+        id: "internal-r4-bag-pink",
+        productId: "prod_demo_bag_001",
+        productName: "حقيبة نسائية",
+        quantity: 2,
+        size: "L",
+        color: "وردي",
+        unitPriceMinor: 25_900,
+      }),
+    ],
+    deliveryFee: freeDelivery,
+  });
+
+  return {
+    sameProductTwoColors: modelFromSnapshot(sameProductTwoColors),
+    sameProductThreeVariants: modelFromSnapshot(sameProductThreeVariants),
+    twoProductsTwoVariantsEach: modelFromSnapshot(twoProductsTwoVariantsEach),
+  };
+}
+
 async function renderHtmlFirstPagePng(html: string, outputPath: string): Promise<void> {
   const { default: puppeteer } = await import("puppeteer");
   const browser = await puppeteer.launch({
@@ -228,6 +303,22 @@ async function renderHtmlFirstPagePng(html: string, outputPath: string): Promise
   }
 }
 
+async function renderPremiumPreview(
+  model: PremiumOrderReceiptViewModel,
+  outputDir: string,
+  filename: string,
+): Promise<PremiumReceiptPreviewArtifact> {
+  const pdfPath = path.join(outputDir, `${filename}.pdf`);
+  const pngPath = path.join(outputDir, `${filename}.png`);
+  const [pdfBuffer, html] = await Promise.all([
+    renderPremiumOrderReceiptPdfBuffer(model),
+    buildPremiumOrderReceiptHtml(model),
+  ]);
+  await fs.writeFile(pdfPath, pdfBuffer);
+  await renderHtmlFirstPagePng(html, pngPath);
+  return { pdfPath, pngPath, pdfByteLength: pdfBuffer.length };
+}
+
 export async function generatePremiumReceiptPreviews(): Promise<PremiumReceiptPreviewSet> {
   const models = buildPremiumReceiptPreviewModels();
   const outputDir = path.join(getOrderReceiptOutputDir(), "previews");
@@ -236,22 +327,36 @@ export async function generatePremiumReceiptPreviews(): Promise<PremiumReceiptPr
   const render = async (
     key: keyof typeof models,
     filename: string,
-  ): Promise<PremiumReceiptPreviewArtifact> => {
-    const model = models[key];
-    const pdfPath = path.join(outputDir, `${filename}.pdf`);
-    const pngPath = path.join(outputDir, `${filename}.png`);
-    const [pdfBuffer, html] = await Promise.all([
-      renderPremiumOrderReceiptPdfBuffer(model),
-      buildPremiumOrderReceiptHtml(model),
-    ]);
-    await fs.writeFile(pdfPath, pdfBuffer);
-    await renderHtmlFirstPagePng(html, pngPath);
-    return { pdfPath, pngPath, pdfByteLength: pdfBuffer.length };
-  };
+  ): Promise<PremiumReceiptPreviewArtifact> =>
+    renderPremiumPreview(models[key], outputDir, filename);
 
   return {
     oneItem: await render("oneItem", "premium-receipt-one-item"),
     twoVariants: await render("twoVariants", "premium-receipt-two-variants"),
     offerAndDelivery: await render("offerAndDelivery", "premium-receipt-offer-delivery"),
+  };
+}
+
+export async function generateGroupedPremiumReceiptPreviews(): Promise<GroupedPremiumReceiptPreviewSet> {
+  const models = buildGroupedPremiumReceiptPreviewModels();
+  const outputDir = path.join(getOrderReceiptOutputDir(), "previews");
+  await fs.mkdir(outputDir, { recursive: true });
+
+  return {
+    sameProductTwoColors: await renderPremiumPreview(
+      models.sameProductTwoColors,
+      outputDir,
+      "premium-receipt-grouped-two-colors",
+    ),
+    sameProductThreeVariants: await renderPremiumPreview(
+      models.sameProductThreeVariants,
+      outputDir,
+      "premium-receipt-grouped-three-variants",
+    ),
+    twoProductsTwoVariantsEach: await renderPremiumPreview(
+      models.twoProductsTwoVariantsEach,
+      outputDir,
+      "premium-receipt-grouped-two-products",
+    ),
   };
 }

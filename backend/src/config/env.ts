@@ -35,7 +35,7 @@ export const env = {
     process.env.NATURAL_REPLY_WARMUP_ENABLED === "true",
   valkeyUrl: process.env.VALKEY_URL || "redis://localhost:6379",
   sessionTtlSeconds: Number(process.env.SESSION_TTL_SECONDS) || 172800,
-  whatsappProvider: process.env.WHATSAPP_PROVIDER || "baileys",
+  whatsappProvider: process.env.WHATSAPP_PROVIDER || "cloud_api",
   whatsappCloudApiVersion:
     process.env.WHATSAPP_CLOUD_API_VERSION || "v25.0",
   whatsappCloudAccessToken: process.env.WHATSAPP_CLOUD_ACCESS_TOKEN || "",

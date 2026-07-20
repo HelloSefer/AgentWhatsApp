@@ -20,6 +20,8 @@ export type PremiumReceiptBranding = Readonly<{
 }>;
 
 export type PremiumReceiptItem = Readonly<{
+  /** Opaque presentation-group identity. It is never rendered to the receipt. */
+  productGroupKey?: string;
   productName: string;
   quantity: number;
   options: readonly Readonly<{

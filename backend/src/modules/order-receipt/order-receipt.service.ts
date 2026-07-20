@@ -20,6 +20,12 @@ import type {
   PremiumReceiptItem,
 } from "./premium-order-receipt.types";
 import {
+  groupPremiumReceiptItems,
+} from "./premium-order-receipt-grouping.service";
+import type {
+  PremiumReceiptProductGroup,
+} from "./premium-order-receipt-grouping.service";
+import {
   validateConfirmedOrderReceiptSnapshot,
 } from "./order-receipt-validation.service";
 
@@ -689,14 +695,40 @@ function getCustomerFieldIcon(field: PremiumReceiptCustomerField): ReceiptIconKi
   return "info";
 }
 
-function renderReceiptItem(item: PremiumReceiptItem, currency: string): string {
-  const options = item.options
+function renderVariantOptions(
+  item: PremiumReceiptItem,
+  variantIndex: number,
+  variantCount: number,
+): string {
+  if (!item.options.length) {
+    const label = variantCount > 1 ? `Article ${variantIndex + 1}` : "Standard";
+    return `<span class="variant-empty">${label}</span>`;
+  }
+
+  return `<div class="variant-options">${item.options
     .map(
-      (option) =>
-        `<div class="attribute-row"><span class="attribute-label">${escapeHtml(option.label)} :</span><span class="attribute-value dynamic-value" dir="auto">${escapeHtml(option.value)}</span></div>`,
+      (option, optionIndex) =>
+        `${optionIndex > 0 ? '<span class="variant-separator" aria-hidden="true">·</span>' : ""}<span class="variant-option"><span class="variant-option-label" dir="auto">${escapeHtml(option.label)} :</span><span class="variant-option-value dynamic-value" dir="auto">${escapeHtml(option.value)}</span></span>`,
     )
+    .join("")}</div>`;
+}
+
+function renderReceiptProductGroup(
+  group: PremiumReceiptProductGroup,
+  currency: string,
+): string {
+  const groupSizeClass = group.variants.length <= 3
+    ? " item-group-compact"
+    : " item-group-large";
+  const titleRow = `<div class="item-group-title-cell item-product-cell column-product"><div class="item-product-name dynamic-value" dir="auto">${escapeHtml(group.productName)}</div></div><div class="item-group-title-cell column-quantity" aria-hidden="true"></div><div class="item-group-title-cell column-unit-price" aria-hidden="true"></div><div class="item-group-title-cell column-total" aria-hidden="true"></div>`;
+  const variantRows = group.variants
+    .map((item, variantIndex) => {
+      const continuationClass = variantIndex > 0 ? " variant-continuation" : "";
+      return `<div class="variant-cell variant-product-cell column-product${continuationClass}">${renderVariantOptions(item, variantIndex, group.variants.length)}</div><div class="variant-cell variant-numeric-cell column-quantity${continuationClass}">${escapeHtml(item.quantity)}</div><div class="variant-cell variant-numeric-cell column-unit-price${continuationClass}">${escapeHtml(formatMoney(item.unitPrice, currency))}</div><div class="variant-cell variant-numeric-cell column-total${continuationClass}">${escapeHtml(formatMoney(item.lineTotal, currency))}</div>`;
+    })
     .join("");
-  return `<div class="item-grid item-row"><div class="item-product-cell"><div class="item-product-name dynamic-value" dir="auto">${escapeHtml(item.productName)}</div>${options ? `<div class="attributes">${options}</div>` : ""}</div><div>${escapeHtml(item.quantity)}</div><div>${escapeHtml(formatMoney(item.unitPrice, currency))}</div><div>${escapeHtml(formatMoney(item.lineTotal, currency))}</div></div>`;
+
+  return `<div class="item-group-row${groupSizeClass}">${titleRow}${variantRows}</div>`;
 }
 
 export async function buildPremiumOrderReceiptHtml(
@@ -757,7 +789,10 @@ export async function buildPremiumOrderReceiptHtml(
         `<div class="customer-row"><span class="customer-label-group">${receiptIcon(getCustomerFieldIcon(field))}<span class="customer-label">${escapeHtml(field.label)}</span></span><span class="customer-value dynamic-value" dir="auto">${escapeHtml(field.value)}</span></div>`,
     )
     .join("");
-  const itemRows = model.lines.map((item) => renderReceiptItem(item, currency)).join("");
+  const productGroups = groupPremiumReceiptItems(model.lines);
+  const itemRows = productGroups
+    .map((group) => renderReceiptProductGroup(group, currency))
+    .join("");
   const densityClass =
     model.lines.length > 1 || model.deliveryFields.length > 4 || model.selectedOffer
       ? " receipt-dense"
@@ -853,22 +888,31 @@ export async function buildPremiumOrderReceiptHtml(
       .details { flex: 0 0 auto; margin-top: 20px; padding-top: 43px; border-color: ${mixHexColor(primaryColor, "#FFFFFF", 0.78)}; border-radius: 12px; }
       .details .section-heading { top: -1px; left: -1px; min-width: 286px; height: 44px; padding: 0 21px; gap: 11px; border-radius: 12px 12px 0 0; box-shadow: inset 0 -2px 0 ${accentColor}; }
       .details .section-heading svg { width: 20px; height: 20px; flex-basis: 20px; }
-      .item-grid { display: grid; grid-template-columns: minmax(0, 2.4fr) .72fr 1.14fr 1.04fr; align-items: stretch; }
+      .item-grid, .item-group-row { display: grid; grid-template-columns: minmax(0, 2.4fr) .72fr 1.14fr 1.04fr; align-items: stretch; }
       .item-grid > div { min-width: 0; padding: 12px 20px; }
       .item-grid > div + div { border-left: 1px solid ${borderColor}; }
       .item-head { min-height: 39px; color: #fff; font-size: 10.5px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; background: linear-gradient(100deg, ${primaryDark}, ${primaryColor}); }
       .item-head > div { display: flex; align-items: center; }
       .item-head > div:not(:first-child) { justify-content: center; text-align: center; }
-      .item-row { min-height: 106px; background: #fff; break-inside: avoid; page-break-inside: avoid; }
-      .item-row + .item-row { border-top: 1px solid ${borderColor}; }
-      .item-row > div { display: flex; align-items: center; }
-      .item-row > div:not(:first-child) { justify-content: center; color: ${primaryDark}; font-size: 12px; line-height: 1.4; font-weight: 600; text-align: center; }
-      .item-product-cell { flex-direction: column; align-items: flex-start !important; justify-content: center; direction: ltr; background: linear-gradient(100deg, ${softBackground}, #fff 42%); }
+      .item-group-row { min-width: 0; background: #fff; }
+      .item-group-row + .item-group-row { border-top: 1px solid ${borderColor}; }
+      .item-group-compact { break-inside: avoid; page-break-inside: avoid; }
+      .item-group-large { break-inside: auto; page-break-inside: auto; }
+      .item-group-row > div { min-width: 0; }
+      .column-quantity, .column-unit-price, .column-total { border-left: 1px solid ${borderColor}; }
+      .item-group-title-cell { min-height: 36px; padding: 8px 20px 3px; display: flex; align-items: center; }
+      .item-product-cell { direction: ltr; background: linear-gradient(100deg, ${softBackground}, #fff 42%); }
       .item-product-name { width: 100%; color: ${primaryDark}; font-size: 16.5px; line-height: 1.35; font-weight: 700; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: left; }
-      .attributes { display: grid; gap: 5px; width: fit-content; margin-top: 8px; color: ${primaryDark}; font-size: 11px; line-height: 1.4; }
-      .attribute-row { display: grid; grid-template-columns: 58px minmax(0, auto); align-items: baseline; column-gap: 7px; direction: ltr; }
-      .attribute-label { direction: ltr; unicode-bidi: isolate; font-weight: 600; white-space: nowrap; }
-      .attribute-value { min-width: 0; font-weight: 500; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: left; }
+      .variant-cell { min-height: 37px; padding: 6px 20px; display: flex; align-items: center; break-inside: avoid; page-break-inside: avoid; }
+      .variant-continuation { border-top: 1px dashed ${borderColor}; }
+      .variant-product-cell { direction: ltr; background: linear-gradient(100deg, ${softBackground}, #fff 42%); }
+      .variant-numeric-cell { justify-content: center; color: ${primaryDark}; font-size: 12px; line-height: 1.4; font-weight: 600; text-align: center; }
+      .variant-options { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 7px; min-width: 0; color: ${primaryDark}; font-size: 11px; line-height: 1.45; }
+      .variant-option { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; direction: ltr; }
+      .variant-option-label { font-weight: 600; white-space: nowrap; unicode-bidi: plaintext; }
+      .variant-option-value { min-width: 0; font-weight: 500; overflow-wrap: anywhere; unicode-bidi: plaintext; }
+      .variant-separator { color: ${accentColor}; font-weight: 700; }
+      .variant-empty { color: #5a6b82; font-size: 10.5px; font-style: italic; }
       .summary-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 22px; margin-top: 22px; align-items: stretch; break-inside: avoid; page-break-inside: avoid; }
       .summary-card, .payment-card { position: relative; min-height: 170px; padding-top: 38px; border: 1px solid ${borderColor}; border-radius: 12px; overflow: hidden; background: #fff; }
       .summary-card .section-heading { min-width: 188px; }
@@ -911,18 +955,22 @@ export async function buildPremiumOrderReceiptHtml(
       .receipt-dense .product-visual { flex-basis: 193px; height: 193px; min-height: 193px; max-height: 193px; padding-top: 38px; }
       .receipt-dense .details { margin-top: 16px; padding-top: 39px; }
       .receipt-dense .details .section-heading { height: 40px; }
-      .receipt-dense .item-grid > div { padding-top: 9px; padding-bottom: 9px; }
-      .receipt-dense .item-row { min-height: 86px; }
+      .receipt-dense .item-head > div { padding-top: 9px; padding-bottom: 9px; }
+      .receipt-dense .item-group-title-cell { min-height: 33px; padding-top: 6px; }
+      .receipt-dense .variant-cell { min-height: 33px; padding-top: 4px; padding-bottom: 4px; }
       .receipt-dense .summary-grid { margin-top: 16px; }
       .receipt-dense .summary-body { padding-top: 8px; padding-bottom: 10px; }
       .receipt-dense .summary-line { padding-top: 5px; padding-bottom: 5px; }
       .receipt-dense .summary-total { min-height: 45px; margin-top: 8px; padding-top: 7px; padding-bottom: 7px; }
+      .receipt-dense .information-strip { margin-bottom: 8px; }
       .receipt-extra-dense .title-block { margin-top: 8px; margin-bottom: 10px; }
       .receipt-extra-dense .meta { min-height: 62px; }
       .receipt-extra-dense .top-grid { margin-top: 16px; }
       .receipt-extra-dense .customer-list { min-height: 193px; padding-top: 37px; padding-bottom: 4px; }
       .receipt-extra-dense .customer-row { min-height: 31px; }
-      .receipt-extra-dense .item-grid > div { padding-top: 7px; padding-bottom: 7px; }
+      .receipt-extra-dense .item-head > div { padding-top: 7px; padding-bottom: 7px; }
+      .receipt-extra-dense .item-group-title-cell { min-height: 31px; padding-top: 5px; }
+      .receipt-extra-dense .variant-cell { min-height: 31px; padding-top: 3px; padding-bottom: 3px; }
       .receipt-extra-dense .summary-body { padding-top: 6px; padding-bottom: 8px; }
       .receipt-extra-dense .summary-line { padding-top: 3px; padding-bottom: 3px; }
       .receipt-extra-dense .summary-total { min-height: 42px; margin-top: 6px; padding-top: 6px; padding-bottom: 6px; }

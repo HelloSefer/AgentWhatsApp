@@ -3,7 +3,6 @@ import app from "./app";
 import { env } from "./config/env";
 import { warmNaturalReplyModel } from "./modules/agent/natural-reply/natural-reply-generator.service";
 import { cleanupOldOrderReceiptPdfs } from "./modules/order-receipt/order-receipt.service";
-import { startWhatsApp } from "./modules/whatsapp/whatsapp.service";
 
 const logger = pino({
   transport:
@@ -29,10 +28,11 @@ app.listen(env.port, () => {
   });
 
   if (env.whatsappProvider === "cloud_api") {
-    logger.info("WhatsApp provider is Cloud API; Baileys socket startup skipped");
+    logger.info("WhatsApp provider is Cloud API");
   } else {
-    startWhatsApp().catch((error) => {
-      logger.error({ error }, "Failed to start WhatsApp");
-    });
+    logger.error(
+      { configuredProvider: env.whatsappProvider },
+      "Unsupported WhatsApp provider; messaging startup disabled because Cloud API is the only active runtime transport",
+    );
   }
 });

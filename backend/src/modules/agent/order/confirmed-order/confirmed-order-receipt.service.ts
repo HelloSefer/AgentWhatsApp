@@ -23,6 +23,13 @@ function safeText(value: unknown, maxLength: number): string {
   return text.length <= maxLength ? text : `${text.slice(0, Math.max(1, maxLength - 1))}…`;
 }
 
+function buildProductGroupKey(productId: string): string {
+  return createHash("sha256")
+    .update(`premium-receipt-product:${productId}`)
+    .digest("hex")
+    .slice(0, 24);
+}
+
 function freeze<T>(value: T): T {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
   for (const child of Object.values(value as Record<string, unknown>)) freeze(child);
@@ -113,6 +120,7 @@ export function buildConfirmedOrderReceiptModel(
         : {}),
     },
     lines: snapshot.items.map((item) => ({
+      productGroupKey: buildProductGroupKey(item.productId),
       productName: safeText(item.productName, 200),
       quantity: item.quantity,
       options: item.selectedOptions.map((option) => ({
