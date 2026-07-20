@@ -1,46 +1,18 @@
 import type { ConfirmedOrderSnapshot } from "./confirmed-order-snapshot.types";
 import type { ConfirmedOrderSnapshotInput } from "./confirmed-order-snapshot.types";
+import type {
+  PremiumOrderReceiptViewModel,
+  PremiumReceiptCustomerField,
+  PremiumReceiptItem,
+} from "../../../order-receipt/premium-order-receipt.types";
 
 export const CONFIRMED_ORDER_RECEIPT_MODEL_VERSION = 1 as const;
 
-export type ConfirmedOrderReceiptLine = Readonly<{
-  productName: string;
-  quantity: number;
-  options: readonly Readonly<{ label: string; value: string }>[];
-  unitPrice: number;
-  lineTotal: number;
-}>;
+export type ConfirmedOrderReceiptLine = PremiumReceiptItem;
 
-export type ConfirmedOrderReceiptField = Readonly<{
-  label: string;
-  value: string;
-}>;
+export type ConfirmedOrderReceiptField = PremiumReceiptCustomerField;
 
-export type ConfirmedOrderReceiptModel = Readonly<{
-  schemaVersion: typeof CONFIRMED_ORDER_RECEIPT_MODEL_VERSION;
-  referenceId: string;
-  storeName: string;
-  confirmedAt: string;
-  statusLabel: string;
-  lines: readonly ConfirmedOrderReceiptLine[];
-  deliveryFields: readonly ConfirmedOrderReceiptField[];
-  currency: string;
-  standardSubtotal: number;
-  selectedOffer?: Readonly<{
-    label: string;
-    discountAmount: number;
-    total: number;
-  }>;
-  merchandiseTotal: number;
-  deliveryFee?: Readonly<{
-    type: "FREE" | "PAID";
-    amount: number;
-    currency: string;
-  }>;
-  finalTotal: number;
-  paymentMethodLabel?: string;
-  deliveryText?: string;
-}>;
+export type ConfirmedOrderReceiptModel = PremiumOrderReceiptViewModel;
 
 export type SafeReceiptDocumentMetadata = Readonly<{
   filename: string;

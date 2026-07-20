@@ -12,10 +12,30 @@ import type {
 
 export const CONFIRMED_ORDER_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 
+export type ConfirmedOrderReceiptBrandingContext = Readonly<{
+  storeName: string;
+  slogan?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  accentColor?: string;
+  phone?: string;
+  whatsapp?: string;
+  email?: string;
+  website?: string;
+  address?: string;
+  instagram?: string;
+  facebook?: string;
+  tiktok?: string;
+}>;
+
 export type ConfirmedOrderReceiptContext = Readonly<{
   storeName: string;
   paymentMethodLabel?: string;
   deliveryText?: string;
+  branding?: ConfirmedOrderReceiptBrandingContext;
+  productImageRef?: string;
+  footerMessage?: string;
 }>;
 
 export type ConfirmedOrderSnapshotOption = Readonly<{

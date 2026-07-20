@@ -11,6 +11,15 @@ import type {
   ReceiptSendStatus,
 } from "./order-receipt.types";
 import {
+  PREMIUM_ORDER_RECEIPT_RENDERER_ID,
+} from "./premium-order-receipt.types";
+import type {
+  PremiumOrderReceiptViewModel,
+  PremiumReceiptBranding,
+  PremiumReceiptCustomerField,
+  PremiumReceiptItem,
+} from "./premium-order-receipt.types";
+import {
   validateConfirmedOrderReceiptSnapshot,
 } from "./order-receipt-validation.service";
 
@@ -540,6 +549,63 @@ function getReceiptProduct(order: OrderReceiptOrder): ReceiptProductSnapshot {
   };
 }
 
+/** Adapts legacy confirmed orders to the same premium model used by Phase 6.3. */
+export function buildLegacyPremiumReceiptModel(
+  order: OrderReceiptOrder,
+): PremiumOrderReceiptViewModel {
+  const branding = getReceiptBranding(order);
+  const product = getReceiptProduct(order);
+  const confirmedAt = order.confirmedAt || order.createdAt;
+  const notes = (order as OrderReceiptOrder & { notes?: string }).notes?.trim();
+
+  return {
+    schemaVersion: 1,
+    rendererId: PREMIUM_ORDER_RECEIPT_RENDERER_ID,
+    referenceId: order.publicOrderCode,
+    storeName: branding.storeName,
+    confirmedAt,
+    statusLabel: "Commande confirmée",
+    branding: {
+      ...branding,
+      storeName: branding.storeName,
+    },
+    lines: [
+      {
+        productName: order.productName,
+        quantity: order.pricing.quantity,
+        options: product.attributes.map((attribute) => ({
+          label: attribute.label,
+          value: attribute.value,
+        })),
+        unitPrice: order.pricing.unitPrice,
+        lineTotal: order.pricing.subtotal,
+        ...(product.imageRef ? { imageRef: product.imageRef } : {}),
+      },
+    ],
+    deliveryFields: [
+      { key: "fullName", label: "Nom complet", value: order.fullName },
+      { key: "phone", label: "Téléphone", value: order.phone },
+      { key: "city", label: "Ville", value: order.city },
+      { key: "address", label: "Adresse", value: order.address },
+    ],
+    currency: order.pricing.currency || order.currency || "MAD",
+    standardSubtotal: order.pricing.subtotal,
+    merchandiseTotal: order.pricing.subtotal,
+    deliveryFee: {
+      type: order.pricing.deliveryPrice === 0 ? "FREE" : "PAID",
+      amount: order.pricing.deliveryPrice,
+      currency: order.pricing.currency || order.currency || "MAD",
+    },
+    finalTotal: order.pricing.total,
+    ...(branding.paymentMethodLabel
+      ? { paymentMethodLabel: branding.paymentMethodLabel }
+      : {}),
+    ...(product.imageRef ? { productImageRef: product.imageRef } : {}),
+    ...(branding.footerMessage ? { footerMessage: branding.footerMessage } : {}),
+    ...(notes ? { notes } : {}),
+  };
+}
+
 type ReceiptIconKind =
   | "phone"
   | "mail"
@@ -579,7 +645,7 @@ function receiptIcon(kind: ReceiptIconKind, className = "receipt-icon"): string 
   return `<svg class="${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[kind]}</svg>`;
 }
 
-function buildHeaderContacts(branding: ReceiptBrandingSnapshot): string {
+function buildHeaderContacts(branding: PremiumReceiptBranding): string {
   const phone = branding.whatsapp || branding.phone;
   const contacts = [
     phone && { icon: "phone" as const, value: phone },
@@ -601,7 +667,7 @@ function buildHeaderContacts(branding: ReceiptBrandingSnapshot): string {
     .join("");
 }
 
-function buildSocialItems(branding: ReceiptBrandingSnapshot): string {
+function buildSocialItems(branding: PremiumReceiptBranding): string {
   const social = branding.instagram
     ? { icon: "instagram" as const, value: branding.instagram }
     : branding.facebook
@@ -615,9 +681,28 @@ function buildSocialItems(branding: ReceiptBrandingSnapshot): string {
     : "";
 }
 
-async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
-  const branding = getReceiptBranding(order);
-  const product = getReceiptProduct(order);
+function getCustomerFieldIcon(field: PremiumReceiptCustomerField): ReceiptIconKind {
+  const key = `${field.key || ""} ${field.label}`.toLocaleLowerCase();
+  if (/phone|téléphone|telephone|هاتف/.test(key)) return "phone";
+  if (/name|nom|اسم/.test(key)) return "customer";
+  if (/city|ville|address|adresse|location|مدينة|عنوان/.test(key)) return "location";
+  return "info";
+}
+
+function renderReceiptItem(item: PremiumReceiptItem, currency: string): string {
+  const options = item.options
+    .map(
+      (option) =>
+        `<div class="attribute-row"><span class="attribute-label">${escapeHtml(option.label)} :</span><span class="attribute-value dynamic-value" dir="auto">${escapeHtml(option.value)}</span></div>`,
+    )
+    .join("");
+  return `<div class="item-grid item-row"><div class="item-product-cell"><div class="item-product-name dynamic-value" dir="auto">${escapeHtml(item.productName)}</div>${options ? `<div class="attributes">${options}</div>` : ""}</div><div>${escapeHtml(item.quantity)}</div><div>${escapeHtml(formatMoney(item.unitPrice, currency))}</div><div>${escapeHtml(formatMoney(item.lineTotal, currency))}</div></div>`;
+}
+
+export async function buildPremiumOrderReceiptHtml(
+  model: PremiumOrderReceiptViewModel,
+): Promise<string> {
+  const branding = model.branding;
   const primaryColor = isSafeColor(
     branding.primaryColor,
     DEFAULT_PRIMARY_COLOR,
@@ -644,40 +729,55 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
     "order_receipt.logo.fallback",
   );
   const productImageDataUri = await readImageAsDataUri(
-    product.imageRef,
+    model.productImageRef || model.lines.find((line) => line.imageRef)?.imageRef,
     "order_receipt.product_image.fallback",
   );
-  const currency = order.currency === "درهم" ? "MAD" : order.currency || "MAD";
-  const productAttributes = product.attributes
-    .map(
-      (attribute) =>
-        `<div class="attribute-row"><span class="attribute-label">${escapeHtml(attribute.label)} :</span><span class="attribute-value dynamic-value" dir="auto">${escapeHtml(attribute.value)}</span></div>`,
-    )
-    .join("");
-  const pricing = order.pricing;
-  const deliveryText = pricing.deliveryPrice === 0
+  const currency = model.currency === "درهم" ? "MAD" : model.currency || "MAD";
+  const deliveryText = !model.deliveryFee
+    ? "À confirmer"
+    : model.deliveryFee.type === "FREE" || model.deliveryFee.amount === 0
     ? "Gratuit"
-    : formatMoney(pricing.deliveryPrice, currency);
-  const totalText = formatMoney(pricing.total, currency);
+    : formatMoney(model.deliveryFee.amount, model.deliveryFee.currency || currency);
+  const totalText = formatMoney(model.finalTotal, currency);
   const logoHtml = logoDataUri
     ? `<img class="logo-image" src="${logoDataUri}" alt="Logo ${escapeHtml(branding.storeName)}" />`
     : `<div class="logo-fallback" aria-label="Logo de secours">${escapeHtml(getStoreInitials(branding.storeName))}</div>`;
+  const primaryProductName = model.lines[0]?.productName || "Produit";
   const productVisual = productImageDataUri
-    ? `<img class="product-image" src="${productImageDataUri}" alt="${escapeHtml(order.productName)}" />`
-    : `<div class="product-placeholder"><span class="product-placeholder-badge">${escapeHtml(getStoreInitials(order.productName))}</span><strong class="dynamic-value" dir="auto">${escapeHtml(order.productName)}</strong><small>Visuel du produit non disponible</small></div>`;
-  const footerMessage = branding.footerMessage || "Merci pour votre commande !";
-  const paymentMethod = branding.paymentMethodLabel || "Paiement à la livraison";
+    ? `<img class="product-image" src="${productImageDataUri}" alt="${escapeHtml(primaryProductName)}" />`
+    : `<div class="product-placeholder"><span class="product-placeholder-badge">${escapeHtml(getStoreInitials(primaryProductName))}</span><strong class="dynamic-value" dir="auto">${escapeHtml(primaryProductName)}</strong><small>Visuel du produit non disponible</small></div>`;
+  const footerMessage = model.footerMessage || branding.footerMessage || "Merci pour votre commande !";
+  const paymentMethod = model.paymentMethodLabel || branding.paymentMethodLabel || "Paiement à la livraison";
   const headerContacts = buildHeaderContacts(branding);
   const socialItems = buildSocialItems(branding);
-  const confirmedAt = (order as OrderReceiptOrder & { confirmedAt?: string }).confirmedAt;
-  const specificNote = (order as OrderReceiptOrder & { notes?: string }).notes?.trim();
+  const specificNote = model.notes?.trim();
+  const customerRows = model.deliveryFields
+    .map(
+      (field) =>
+        `<div class="customer-row"><span class="customer-label-group">${receiptIcon(getCustomerFieldIcon(field))}<span class="customer-label">${escapeHtml(field.label)}</span></span><span class="customer-value dynamic-value" dir="auto">${escapeHtml(field.value)}</span></div>`,
+    )
+    .join("");
+  const itemRows = model.lines.map((item) => renderReceiptItem(item, currency)).join("");
+  const densityClass =
+    model.lines.length > 1 || model.deliveryFields.length > 4 || model.selectedOffer
+      ? " receipt-dense"
+      : "";
+  const paginationClass = model.lines.length > 4 ? " receipt-multipage" : "";
+  const extraDensityClass =
+    model.selectedOffer || model.deliveryFields.length > 4
+      ? " receipt-extra-dense"
+      : "";
+  const offerRows = model.selectedOffer
+    ? `<div class="summary-line offer-line"><span>Réduction - ${escapeHtml(model.selectedOffer.label)}</span><strong>- ${escapeHtml(formatMoney(model.selectedOffer.discountAmount, currency))}</strong></div><div class="summary-line"><span>Total après offre</span><strong>${escapeHtml(formatMoney(model.merchandiseTotal, currency))}</strong></div>`
+    : "";
   const productImageRenderMode = productImageDataUri
     ? "real_image_rendered"
     : "fallback_rendered";
 
   logJson({
     event: "order_receipt.branding.resolved",
-    orderId: order.id,
+    publicOrderCode: model.referenceId,
+    rendererId: model.rendererId,
     storeName: branding.storeName,
     logoResolved: Boolean(logoDataUri),
     productImageResolved: Boolean(productImageDataUri),
@@ -685,14 +785,14 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
   });
   logJson({
     event: "order_receipt.product_image.rendered",
-    orderId: order.id,
+    publicOrderCode: model.referenceId,
     mode: productImageRenderMode,
   });
   logJson({
     event: productImageDataUri
       ? "order_receipt.product_image.real_rendered"
       : "order_receipt.product_image.fallback_rendered",
-    orderId: order.id,
+    publicOrderCode: model.referenceId,
     productImageResolved: Boolean(productImageDataUri),
   });
 
@@ -703,9 +803,9 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
     <style>
       @page { size: A4 portrait; margin: 0; }
       * { box-sizing: border-box; }
-      html, body { width: 210mm; height: 297mm; }
+      html, body { width: 210mm; min-height: 297mm; }
       body { margin: 0; color: #071d43; font-family: "Inter", "Noto Sans Arabic", "Segoe UI", Arial, sans-serif; font-size: 10.5px; font-weight: 400; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .receipt-page { width: 210mm; height: 297mm; padding: 9mm 10mm 0; display: flex; flex-direction: column; overflow: hidden; background: #fff; }
+      .receipt-page { width: 210mm; min-height: 297mm; padding: 9mm 10mm 0; display: flex; flex-direction: column; overflow: visible; background: #fff; }
       .header { display: grid; grid-template-columns: minmax(0, 1fr) 245px; gap: 30px; align-items: center; min-height: 88px; }
       .header.no-contacts { grid-template-columns: 1fr; }
       .brand { display: flex; align-items: center; gap: 18px; min-width: 0; }
@@ -732,7 +832,7 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       .meta-label { display: block; margin-bottom: 4px; color: ${primaryColor}; font-size: 9.5px; font-weight: 600; letter-spacing: .35px; text-transform: uppercase; }
       .meta-value { color: ${primaryDark}; font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
       .status-badge { display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 999px; background: #dcf5e5; color: #187342; font-size: 10.5px; font-weight: 600; white-space: nowrap; }
-      .top-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 23px; align-items: stretch; }
+      .top-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 23px; align-items: stretch; break-inside: avoid; page-break-inside: avoid; }
       .panel { position: relative; min-width: 0; border: 1px solid ${borderColor}; border-radius: 12px; background: #fff; overflow: hidden; }
       .section-heading { position: absolute; z-index: 1; top: 0; left: 0; display: inline-flex; align-items: center; gap: 9px; min-width: 230px; height: 38px; margin: 0; padding: 0 17px; border-radius: 10px 10px 10px 0; background: linear-gradient(105deg, ${primaryDark}, ${primaryColor}); color: #fff; font-size: 11.5px; font-weight: 600; letter-spacing: .25px; }
       .section-heading svg { width: 19px; height: 19px; flex: 0 0 19px; }
@@ -744,7 +844,7 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       .customer-label { color: ${primaryDark}; font-size: 11px; font-weight: 500; }
       .customer-value { color: ${primaryDark}; font-size: 12.5px; font-weight: 500; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: right; }
       .product-panel { display: flex; flex-direction: column; min-height: 220px; border-color: ${mixHexColor(primaryColor, "#FFFFFF", 0.87)}; }
-      .product-visual { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 218px; padding: 40px 11px 8px; background: linear-gradient(180deg, #fff 72%, ${softBackground}); }
+      .product-visual { flex: 0 0 218px; height: 218px; min-height: 218px; max-height: 218px; display: flex; align-items: center; justify-content: center; padding: 40px 11px 8px; background: linear-gradient(180deg, #fff 72%, ${softBackground}); }
       .product-image { width: 92%; height: 92%; max-width: 92%; max-height: 92%; object-fit: contain; }
       .product-placeholder { width: 88%; min-height: 145px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 8px; color: ${primaryDark}; border: 1px dashed ${borderColor}; border-radius: 10px; background: rgba(244,248,253,.8); }
       .product-placeholder-badge { width: 54px; height: 54px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: ${primaryColor}; color: ${accentColor}; border: 1px solid ${accentColor}; font-family: Georgia, "Times New Roman", serif; font-size: 18px; font-weight: 700; }
@@ -759,7 +859,8 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       .item-head { min-height: 39px; color: #fff; font-size: 10.5px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; background: linear-gradient(100deg, ${primaryDark}, ${primaryColor}); }
       .item-head > div { display: flex; align-items: center; }
       .item-head > div:not(:first-child) { justify-content: center; text-align: center; }
-      .item-row { min-height: 106px; background: #fff; }
+      .item-row { min-height: 106px; background: #fff; break-inside: avoid; page-break-inside: avoid; }
+      .item-row + .item-row { border-top: 1px solid ${borderColor}; }
       .item-row > div { display: flex; align-items: center; }
       .item-row > div:not(:first-child) { justify-content: center; color: ${primaryDark}; font-size: 12px; line-height: 1.4; font-weight: 600; text-align: center; }
       .item-product-cell { flex-direction: column; align-items: flex-start !important; justify-content: center; direction: ltr; background: linear-gradient(100deg, ${softBackground}, #fff 42%); }
@@ -768,19 +869,20 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       .attribute-row { display: grid; grid-template-columns: 58px minmax(0, auto); align-items: baseline; column-gap: 7px; direction: ltr; }
       .attribute-label { direction: ltr; unicode-bidi: isolate; font-weight: 600; white-space: nowrap; }
       .attribute-value { min-width: 0; font-weight: 500; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: left; }
-      .summary-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 22px; margin-top: 22px; align-items: stretch; }
-      .summary-card, .payment-card { position: relative; min-height: 183px; padding-top: 38px; border: 1px solid ${borderColor}; border-radius: 12px; overflow: hidden; background: #fff; }
+      .summary-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 22px; margin-top: 22px; align-items: stretch; break-inside: avoid; page-break-inside: avoid; }
+      .summary-card, .payment-card { position: relative; min-height: 170px; padding-top: 38px; border: 1px solid ${borderColor}; border-radius: 12px; overflow: hidden; background: #fff; }
       .summary-card .section-heading { min-width: 188px; }
       .summary-body { padding: 11px 15px 15px; }
       .summary-line { display: flex; justify-content: space-between; gap: 18px; padding: 9px 2px; color: ${primaryDark}; border-bottom: 1px solid ${borderColor}; font-size: 10.5px; }
       .summary-line strong { color: ${primaryDark}; font-weight: 600; }
+      .summary-line.offer-line, .summary-line.offer-line strong { color: #187342; }
       .summary-line .free-delivery { color: #15813f; }
       .summary-total { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-top: 11px; min-height: 53px; padding: 10px 13px; border: 1px solid ${accentColor}; border-radius: 8px; background: linear-gradient(120deg, #fffaf0, ${softBackground}); color: ${primaryDark}; }
       .total-label { font-size: 13px; font-weight: 700; }
       .total-value { margin-left: auto; color: ${accentColor}; font-size: 22px; font-weight: 700; text-align: right; white-space: nowrap; }
       .payment-card { background: linear-gradient(145deg, #fff, ${softBackground}); }
       .payment-card .section-heading { min-width: 209px; }
-      .payment-content { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 16px; align-items: center; min-height: 142px; padding: 10px 18px 14px; }
+      .payment-content { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 16px; align-items: center; min-height: 129px; padding: 10px 18px 14px; }
       .payment-icon { width: 66px; height: 66px; display: flex; align-items: center; justify-content: center; border: 1.5px solid ${accentColor}; border-radius: 50%; background: #fff; color: ${primaryColor}; }
       .payment-icon svg { width: 39px; height: 39px; }
       .payment-value { color: ${primaryDark}; font-size: 15px; line-height: 1.2; font-weight: 700; }
@@ -788,7 +890,7 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       .keep-note { margin: 10px 0 0; padding: 8px 11px; border: 1px solid ${borderColor}; border-radius: 8px; background: #fff; color: #41536d; font-size: 9.5px; unicode-bidi: plaintext; }
       .information-strip { display: flex; align-items: center; gap: 10px; min-height: 35px; margin: 12px 0 11px; padding: 7px 12px; border: 1px solid ${borderColor}; border-radius: 9px; background: ${softBackground}; color: ${primaryDark}; font-size: 9.5px; }
       .information-strip svg { width: 18px; height: 18px; flex: 0 0 18px; color: ${primaryColor}; }
-      .footer { margin: auto -10mm 0; min-height: 29mm; padding: 9px 10mm 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px; align-items: center; background: linear-gradient(108deg, ${primaryDark}, ${primaryColor}); color: #fff; }
+      .footer { margin: auto -10mm 0; min-height: 26mm; padding: 8px 10mm 9px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px; align-items: center; background: linear-gradient(108deg, ${primaryDark}, ${primaryColor}); color: #fff; break-inside: avoid; page-break-inside: avoid; }
       .footer.no-social { grid-template-columns: 1fr; }
       .footer-thanks { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 17px; align-items: center; }
       .footer-heart { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; border: 1.5px solid ${accentColor}; border-radius: 50%; color: ${accentColor}; }
@@ -799,11 +901,38 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       .footer-social { min-width: 205px; min-height: 60px; padding-left: 27px; border-left: 1px solid ${accentColor}; display: flex; align-items: center; justify-content: center; gap: 11px; color: #fff; font-size: 11px; }
       .footer-social-icon { width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; color: ${accentColor}; }
       .footer-social-icon svg { width: 31px; height: 31px; }
+      .receipt-dense .header { min-height: 80px; }
+      .receipt-dense .title-block { margin: 10px 0 12px; }
+      .receipt-dense .meta { min-height: 66px; }
+      .receipt-dense .top-grid { margin-top: 18px; }
+      .receipt-dense .customer-list { min-height: 195px; padding-top: 42px; }
+      .receipt-dense .customer-row { min-height: 35px; }
+      .receipt-dense .product-panel { min-height: 195px; }
+      .receipt-dense .product-visual { flex-basis: 193px; height: 193px; min-height: 193px; max-height: 193px; padding-top: 38px; }
+      .receipt-dense .details { margin-top: 16px; padding-top: 39px; }
+      .receipt-dense .details .section-heading { height: 40px; }
+      .receipt-dense .item-grid > div { padding-top: 9px; padding-bottom: 9px; }
+      .receipt-dense .item-row { min-height: 86px; }
+      .receipt-dense .summary-grid { margin-top: 16px; }
+      .receipt-dense .summary-body { padding-top: 8px; padding-bottom: 10px; }
+      .receipt-dense .summary-line { padding-top: 5px; padding-bottom: 5px; }
+      .receipt-dense .summary-total { min-height: 45px; margin-top: 8px; padding-top: 7px; padding-bottom: 7px; }
+      .receipt-extra-dense .title-block { margin-top: 8px; margin-bottom: 10px; }
+      .receipt-extra-dense .meta { min-height: 62px; }
+      .receipt-extra-dense .top-grid { margin-top: 16px; }
+      .receipt-extra-dense .customer-list { min-height: 193px; padding-top: 37px; padding-bottom: 4px; }
+      .receipt-extra-dense .customer-row { min-height: 31px; }
+      .receipt-extra-dense .item-grid > div { padding-top: 7px; padding-bottom: 7px; }
+      .receipt-extra-dense .summary-body { padding-top: 6px; padding-bottom: 8px; }
+      .receipt-extra-dense .summary-line { padding-top: 3px; padding-bottom: 3px; }
+      .receipt-extra-dense .summary-total { min-height: 42px; margin-top: 6px; padding-top: 6px; padding-bottom: 6px; }
+      .receipt-extra-dense .information-strip { margin-top: 8px; margin-bottom: 7px; }
+      .receipt-multipage { min-height: 297mm; height: auto; overflow: visible; }
       .dynamic-value { unicode-bidi: plaintext; }
     </style>
   </head>
   <body>
-    <main class="receipt-page">
+    <main class="receipt-page${densityClass}${extraDensityClass}${paginationClass}">
       <header class="header${headerContacts ? "" : " no-contacts"}">
         <div class="brand">
           <div class="logo-wrap">${logoHtml}</div>
@@ -822,20 +951,15 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       </div>
 
       <section class="meta">
-        <div class="meta-item"><span class="meta-icon">${receiptIcon("order")}</span><div><span class="meta-label">Commande N°</span><span class="meta-value">${escapeHtml(order.publicOrderCode)}</span></div></div>
-        <div class="meta-item"><span class="meta-icon">${receiptIcon("calendar")}</span><div><span class="meta-label">Date</span><span class="meta-value">${escapeHtml(formatDate(confirmedAt || order.createdAt, Boolean(confirmedAt)))}</span></div></div>
-        <div class="meta-item"><span class="meta-icon">${receiptIcon("status")}</span><div><span class="meta-label">Statut</span><span class="status-badge">Commande confirmée</span></div></div>
+        <div class="meta-item"><span class="meta-icon">${receiptIcon("order")}</span><div><span class="meta-label">Commande N°</span><span class="meta-value">${escapeHtml(model.referenceId)}</span></div></div>
+        <div class="meta-item"><span class="meta-icon">${receiptIcon("calendar")}</span><div><span class="meta-label">Date</span><span class="meta-value">${escapeHtml(formatDate(model.confirmedAt, true))}</span></div></div>
+        <div class="meta-item"><span class="meta-icon">${receiptIcon("status")}</span><div><span class="meta-label">Statut</span><span class="status-badge">${escapeHtml(model.statusLabel)}</span></div></div>
       </section>
 
       <section class="top-grid">
         <div class="panel">
           <h2 class="section-heading">${receiptIcon("customer")}<span>INFORMATIONS DU CLIENT</span></h2>
-          <div class="customer-list">
-            <div class="customer-row"><span class="customer-label-group">${receiptIcon("customer")}<span class="customer-label">Nom complet</span></span><span class="customer-value dynamic-value" dir="auto">${escapeHtml(order.fullName)}</span></div>
-            <div class="customer-row"><span class="customer-label-group">${receiptIcon("phone")}<span class="customer-label">Téléphone</span></span><span class="customer-value" dir="ltr">${escapeHtml(order.phone)}</span></div>
-            <div class="customer-row"><span class="customer-label-group">${receiptIcon("location")}<span class="customer-label">Ville</span></span><span class="customer-value dynamic-value" dir="auto">${escapeHtml(order.city)}</span></div>
-            <div class="customer-row"><span class="customer-label-group">${receiptIcon("location")}<span class="customer-label">Adresse</span></span><span class="customer-value dynamic-value" dir="auto">${escapeHtml(order.address)}</span></div>
-          </div>
+          <div class="customer-list">${customerRows}</div>
         </div>
         <div class="panel product-panel">
           <h2 class="section-heading">${receiptIcon("product")}<span>PRODUIT COMMANDÉ</span></h2>
@@ -846,13 +970,13 @@ async function buildReceiptHtml(order: OrderReceiptOrder): Promise<string> {
       <section class="panel details">
         <h2 class="section-heading">${receiptIcon("cart")}<span>DÉTAILS DE LA COMMANDE</span></h2>
         <div class="item-grid item-head"><div>Produit</div><div>Quantité</div><div>Prix unitaire</div><div>Total</div></div>
-        <div class="item-grid item-row"><div class="item-product-cell"><div class="item-product-name dynamic-value" dir="auto">${escapeHtml(order.productName)}</div>${productAttributes ? `<div class="attributes">${productAttributes}</div>` : ""}</div><div>${escapeHtml(pricing.quantity)}</div><div>${escapeHtml(formatMoney(pricing.unitPrice, currency))}</div><div>${escapeHtml(formatMoney(pricing.subtotal, currency))}</div></div>
+        ${itemRows}
       </section>
 
       <section class="summary-grid">
         <div class="summary-card">
           <h2 class="section-heading">${receiptIcon("recap")}<span>RÉCAPITULATIF</span></h2>
-          <div class="summary-body"><div class="summary-line"><span>Sous-total</span><strong>${escapeHtml(formatMoney(pricing.subtotal, currency))}</strong></div><div class="summary-line"><span>Frais de livraison</span><strong class="${pricing.deliveryPrice === 0 ? "free-delivery" : ""}">${escapeHtml(deliveryText)}</strong></div><div class="summary-total"><span class="total-label">TOTAL FINAL</span><span class="total-value">${escapeHtml(totalText)}</span></div></div>
+          <div class="summary-body"><div class="summary-line"><span>Sous-total</span><strong>${escapeHtml(formatMoney(model.standardSubtotal, currency))}</strong></div>${offerRows}<div class="summary-line"><span>Frais de livraison</span><strong class="${model.deliveryFee?.type === "FREE" || model.deliveryFee?.amount === 0 ? "free-delivery" : ""}">${escapeHtml(deliveryText)}</strong></div><div class="summary-total"><span class="total-label">TOTAL FINAL</span><span class="total-value">${escapeHtml(totalText)}</span></div></div>
         </div>
         <div class="payment-card"><h2 class="section-heading">${receiptIcon("payment")}<span>MODE DE PAIEMENT</span></h2><div class="payment-content"><div class="payment-icon">${receiptIcon("payment")}</div><div><div class="payment-value">${escapeHtml(paymentMethod)}</div><div class="payment-note">Vous réglez le montant total au moment de la livraison.</div></div></div></div>
       </section>
@@ -906,6 +1030,18 @@ export async function renderOrderReceiptHtmlToPdfBuffer(html: string): Promise<B
   }
 }
 
+/** The single customer-facing premium receipt engine for every confirmed order path. */
+export async function renderPremiumOrderReceiptPdfBuffer(
+  model: PremiumOrderReceiptViewModel,
+): Promise<Buffer> {
+  if (model.rendererId !== PREMIUM_ORDER_RECEIPT_RENDERER_ID) {
+    throw new Error("Unsupported receipt renderer");
+  }
+  return renderOrderReceiptHtmlToPdfBuffer(
+    await buildPremiumOrderReceiptHtml(model),
+  );
+}
+
 export async function generateOrderReceiptPdf(
   order: OrderReceiptOrder,
 ): Promise<GenerateReceiptResult> {
@@ -950,8 +1086,10 @@ export async function generateOrderReceiptPdf(
       };
     }
 
-    const html = await buildReceiptHtml(order);
-    await fs.writeFile(pdfPath, await renderOrderReceiptHtmlToPdfBuffer(html));
+    await fs.writeFile(
+      pdfPath,
+      await renderPremiumOrderReceiptPdfBuffer(buildLegacyPremiumReceiptModel(order)),
+    );
 
     const sizeBytes = await getFileSize(pdfPath);
 

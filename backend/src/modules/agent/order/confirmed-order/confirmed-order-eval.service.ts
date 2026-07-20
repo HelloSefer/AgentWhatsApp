@@ -48,7 +48,7 @@ function product(overrides: Partial<ProductContext> = {}): ProductContext {
     price: 199,
     currency: "MAD",
     active: true,
-    images: [],
+    images: ["src/modules/order-receipt/fixtures/demo-sandal-product-cropped.png"],
     benefits: [],
     optionGroups: [
       { key: "size", label: "Taille", required: true, options: ["36", "38", "40"], display: "buttons" },
@@ -193,6 +193,20 @@ function input(overrides: Partial<ConfirmedOrderSnapshotInput> = {}): ConfirmedO
       storeName: "Élégance Boutique",
       paymentMethodLabel: "Paiement à la livraison",
       deliveryText: "Livraison disponible au Maroc",
+      footerMessage: "Merci pour votre commande !",
+      productImageRef: productContext.images[0],
+      branding: {
+        storeName: "Élégance Boutique",
+        slogan: "Style, qualité et confiance",
+        logoUrl: "src/modules/order-receipt/fixtures/demo-logo.svg",
+        primaryColor: "#062E67",
+        secondaryColor: "#F4F8FD",
+        accentColor: "#C78A22",
+        phone: "06 00 00 00 00",
+        email: "contact@example.com",
+        address: "Marrakech, Maroc",
+        instagram: "@eleganceboutique",
+      },
     },
     now: NOW,
     snapshotId: SNAPSHOT_ID,
@@ -306,7 +320,7 @@ export async function evaluateConfirmedOrderSnapshot(): Promise<ConfirmedOrderEv
   add(cases, "actual preview PDF has a valid signature", document.success && document.buffer?.subarray(0, 5).toString("ascii") === "%PDF-");
   add(cases, "preview PDF has a non-zero byte length", document.success && Boolean(document.byteLength && document.byteLength > 0));
   add(cases, "preview PDF declares application/pdf MIME type", document.mimeType === "application/pdf");
-  add(cases, "preview PDF uses a safe deterministic filename", document.filename === `order-${SNAPSHOT_ID}.pdf` && !document.filename.includes(SCOPE_ID));
+  add(cases, "preview PDF uses the premium deterministic filename", document.filename === `recu-commande-${SNAPSHOT_ID}.pdf` && !document.filename.includes(SCOPE_ID));
   add(cases, "preview PDF is generated for every receipt line", document.success && receipt.receiptModel?.lines.length === 2);
   add(cases, "repeated PDF generation is semantically idempotent", Boolean(documentAgain.success && documentAgain.filename === document.filename && documentAgain.mimeType === document.mimeType && documentAgain.byteLength && document.byteLength));
 
@@ -315,7 +329,7 @@ export async function evaluateConfirmedOrderSnapshot(): Promise<ConfirmedOrderEv
   add(cases, "confirmed-order module has no queue or notification dependency", !/from\s+["'][^"']*(?:bull|queue|notification)[^"']*/i.test(source));
   add(cases, "confirmed-order module has no Cloud or WhatsApp dependency", !/from\s+["'][^"']*(?:whatsapp|cloud|meta)[^"']*/i.test(source));
   add(cases, "confirmed-order module has no global mutable state", !/^(?:let|var)\s+/m.test(source));
-  add(cases, "confirmed-order module reuses the existing PDF engine", source.includes("renderOrderReceiptHtmlToPdfBuffer"));
+  add(cases, "confirmed-order module reuses the canonical premium receipt engine", source.includes("renderPremiumOrderReceiptPdfBuffer"));
   add(cases, "preview result never exposes raw PDF bytes", (() => {
     const safe = document.success ? {
       filename: document.filename,

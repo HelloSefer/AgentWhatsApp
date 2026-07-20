@@ -282,7 +282,33 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     else if (delivery.nextStep === "FINAL_ORDER_REVIEW") runtime.runtimeStage = "FINAL_ORDER_REVIEW";
     else if (delivery.nextStep === "CONFIRMED_ORDER_PREVIEW" && delivery.confirmedPreview && delivery.previewState) {
       const publicOrderCode = createPublicOrderCode();
-      const receipt = await prepareConfirmedOrderReceipt({ previewEnabled: true, cart: runtime.cart, previewState: delivery.previewState, confirmedPreview: delivery.confirmedPreview, sellerId: input.sellerId, conversationScopeId: input.conversationKey, productContext, requiredFields: fields, offerLookup: offers, deliveryPricing: sellerConfig.deliveryPolicy.pricing, receiptContext: { storeName: sellerConfig.businessName, paymentMethodLabel: sellerConfig.receipt.paymentMethodLabel, deliveryText: sellerConfig.delivery.text }, now, snapshotId: publicOrderCode, confirmedAt: now.toISOString() });
+      const receiptBranding = sellerConfig.receipt.branding;
+      const receipt = await prepareConfirmedOrderReceipt({
+        previewEnabled: true,
+        cart: runtime.cart,
+        previewState: delivery.previewState,
+        confirmedPreview: delivery.confirmedPreview,
+        sellerId: input.sellerId,
+        conversationScopeId: input.conversationKey,
+        productContext,
+        requiredFields: fields,
+        offerLookup: offers,
+        deliveryPricing: sellerConfig.deliveryPolicy.pricing,
+        receiptContext: {
+          storeName: receiptBranding?.storeName || sellerConfig.businessName,
+          paymentMethodLabel: sellerConfig.receipt.paymentMethodLabel,
+          deliveryText: sellerConfig.delivery.text,
+          footerMessage: sellerConfig.receipt.footerText,
+          productImageRef: productContext.images.find(Boolean),
+          branding: {
+            ...receiptBranding,
+            storeName: receiptBranding?.storeName || sellerConfig.businessName,
+          },
+        },
+        now,
+        snapshotId: publicOrderCode,
+        confirmedAt: now.toISOString(),
+      });
       if (!receipt.success || !receipt.snapshot || !receipt.receiptDocument || !receipt.buffer) return asTurnResult({ ...recoveryReply(), stage: runtime.runtimeStage, warnings: receipt.warnings, failureCode: receipt.failureCode });
       runtime.runtimeStage = "CONFIRMED";
       runtime.confirmed = {

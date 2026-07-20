@@ -363,7 +363,7 @@ export async function evaluateOrderRuntimeFinalReviewReceipt(): Promise<OrderRun
     add(assertions, "real receipt PDF has valid signature", hasPdfSignature(receipt?.bytes));
     add(assertions, "real receipt PDF byte length is non-zero", Boolean(receipt && receipt.bytes.length > 1000));
     add(assertions, "document MIME is application/pdf", receipt?.mimeType === "application/pdf" && receiptMessage?.mimeType === "application/pdf");
-    add(assertions, "receipt filename is safe and deterministic for snapshot", Boolean(receipt?.filename === `order-${runtime?.confirmed?.publicOrderCode}.pdf` && /^[A-Za-z0-9._-]+\.pdf$/.test(receipt.filename)));
+    add(assertions, "receipt filename is safe and deterministic for snapshot", Boolean(receipt?.filename === `recu-commande-${runtime?.confirmed?.publicOrderCode}.pdf` && /^[A-Za-z0-9._-]+\.pdf$/.test(receipt.filename)));
     add(assertions, "receipt metadata checksum and byte length are persisted", runtime?.confirmed?.receipt.byteLength === receipt?.bytes.length && Boolean(runtime?.confirmed?.receipt.checksum));
     add(assertions, "successful dispatch stores SENT metadata", runtime?.confirmed?.receipt.dispatchStatus === "SENT" && Boolean(runtime.confirmed.receipt.sentAt));
     const runtimeJson = JSON.stringify(runtime);

@@ -9,6 +9,7 @@ import {
   CONFIRMED_ORDER_SNAPSHOT_SCHEMA_VERSION,
 } from "./confirmed-order-snapshot.types";
 import type {
+  ConfirmedOrderReceiptContext,
   ConfirmedOrderRecommendedOfferSnapshot,
   ConfirmedOrderSelectedOfferSnapshot,
   ConfirmedOrderSnapshot,
@@ -43,6 +44,60 @@ function deepFreeze<T>(value: T): T {
     deepFreeze(child);
   }
   return Object.freeze(value);
+}
+
+function safeAssetReference(value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  const candidate = text(value, 1024);
+  if (!/^https?:\/\//i.test(candidate)) return candidate;
+  try {
+    const url = new URL(candidate);
+    if (url.username || url.password || url.search || url.hash) return undefined;
+    return url.toString();
+  } catch (_error) {
+    return undefined;
+  }
+}
+
+function buildReceiptContext(input: ConfirmedOrderSnapshotInput): ConfirmedOrderReceiptContext {
+  const branding = input.receiptContext.branding;
+  return {
+    storeName: text(input.receiptContext.storeName || "Boutique", 160),
+    ...(input.receiptContext.paymentMethodLabel
+      ? { paymentMethodLabel: text(input.receiptContext.paymentMethodLabel, 160) }
+      : {}),
+    ...(input.receiptContext.deliveryText
+      ? { deliveryText: text(input.receiptContext.deliveryText, 240) }
+      : {}),
+    ...(input.receiptContext.footerMessage
+      ? { footerMessage: text(input.receiptContext.footerMessage, 240) }
+      : {}),
+    ...(safeAssetReference(input.receiptContext.productImageRef)
+      ? { productImageRef: safeAssetReference(input.receiptContext.productImageRef) }
+      : {}),
+    ...(branding
+      ? {
+          branding: {
+            storeName: text(branding.storeName || input.receiptContext.storeName || "Boutique", 160),
+            ...(branding.slogan ? { slogan: text(branding.slogan, 200) } : {}),
+            ...(safeAssetReference(branding.logoUrl)
+              ? { logoUrl: safeAssetReference(branding.logoUrl) }
+              : {}),
+            ...(branding.primaryColor ? { primaryColor: text(branding.primaryColor, 16) } : {}),
+            ...(branding.secondaryColor ? { secondaryColor: text(branding.secondaryColor, 16) } : {}),
+            ...(branding.accentColor ? { accentColor: text(branding.accentColor, 16) } : {}),
+            ...(branding.phone ? { phone: text(branding.phone, 80) } : {}),
+            ...(branding.whatsapp ? { whatsapp: text(branding.whatsapp, 80) } : {}),
+            ...(branding.email ? { email: text(branding.email, 160) } : {}),
+            ...(branding.website ? { website: text(branding.website, 240) } : {}),
+            ...(branding.address ? { address: text(branding.address, 240) } : {}),
+            ...(branding.instagram ? { instagram: text(branding.instagram, 160) } : {}),
+            ...(branding.facebook ? { facebook: text(branding.facebook, 160) } : {}),
+            ...(branding.tiktok ? { tiktok: text(branding.tiktok, 160) } : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 function optionLabels(input: ConfirmedOrderSnapshotInput): Map<string, string> {
@@ -191,11 +246,7 @@ export function createConfirmedOrderSnapshot(
       productId: text(input.productContext.productId, 120),
       name: text(input.productContext.name, 200),
     },
-    receiptContext: {
-      storeName: text(input.receiptContext.storeName || "Boutique", 160),
-      ...(input.receiptContext.paymentMethodLabel ? { paymentMethodLabel: text(input.receiptContext.paymentMethodLabel, 160) } : {}),
-      ...(input.receiptContext.deliveryText ? { deliveryText: text(input.receiptContext.deliveryText, 240) } : {}),
-    },
+    receiptContext: buildReceiptContext(input),
     items,
     completedUnits: items.reduce((total, item) => total + item.quantity, 0),
     targetUnits: cart.targetItemCount || 0,
