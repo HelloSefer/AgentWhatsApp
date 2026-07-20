@@ -1,6 +1,6 @@
 import { env } from "../../../config/env";
 
-export type TypingSkipReason = "disabled" | "missing_message_id" | "not_cloud_provider" | "status_webhook" | "no_reply" | "duplicate" | "guard_blocked";
+export type TypingSkipReason = "disabled" | "missing_message_id" | "not_cloud_provider" | "status_webhook" | "no_reply" | "duplicate" | "guard_blocked" | "dry_run";
 export type TypingResult = { attempted: boolean; displayed: boolean; dryRun: boolean; skippedReason?: TypingSkipReason; failureCategory?: "timeout" | "graph_error" | "network_error" | "invalid_input"; durationMs: number };
 type TransportResult = { success: boolean; dryRun: boolean; errorMessage?: string };
 type Transport = (phoneNumberId: string, payload: unknown) => Promise<TransportResult>;
@@ -15,6 +15,10 @@ export async function activateTypingIndicator(input: { messageId?: string; phone
   if (!env.whatsappTypingIndicatorEnabled) { log({ event: "whatsapp.cloud.typing.skipped", reason: "disabled" }); return { attempted: false, displayed: false, dryRun: false, skippedReason: "disabled", durationMs: 0 }; }
   if (!input.messageId?.trim()) { log({ event: "whatsapp.cloud.typing.skipped", reason: "missing_message_id" }); return { attempted: false, displayed: false, dryRun: false, skippedReason: "missing_message_id", durationMs: 0 }; }
   if (!input.phoneNumberId.trim()) { log({ event: "whatsapp.cloud.typing.skipped", reason: "not_cloud_provider" }); return { attempted: false, displayed: false, dryRun: false, skippedReason: "not_cloud_provider", durationMs: 0 }; }
+  if (input.dryRun || env.whatsappCloudDryRun) {
+    log({ event: "whatsapp.cloud.typing.skipped", reason: "dry_run", dryRun: true });
+    return { attempted: false, displayed: false, dryRun: true, skippedReason: "dry_run", durationMs: 0 };
+  }
   const payload = { messaging_product: "whatsapp", status: "read", message_id: input.messageId, typing_indicator: { type: "text" } };
   log({ event: "whatsapp.cloud.typing.requested", sellerId: input.sellerId, messageId: shortId(input.messageId), messageType: input.messageType, dryRun: Boolean(input.dryRun || env.whatsappCloudDryRun) });
   try {

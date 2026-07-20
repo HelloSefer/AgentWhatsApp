@@ -33,8 +33,10 @@ import {
 import type { AgentIdentity } from "./identity/agent-identity.types";
 import { conversationKeyService } from "./identity/conversation-key.service";
 import { DEFAULT_DEMO_SELLER_ID } from "./identity/seller-resolver.service";
+import { AGENT_INTERNAL_RECEIPT_ARTIFACT } from "./agent-action.types";
 import type {
   AgentAction,
+  AgentInboundTransportInput,
   AgentOrderStateSummary,
   AgentResult,
 } from "./agent-action.types";
@@ -59,7 +61,10 @@ import {
   classifyOrderMessageDisposition,
   isSideQuestionDisposition,
 } from "./order-understanding/message-disposition.service";
-import { processGuardedOrderRuntimeTurn } from "./order/runtime/order-runtime-router.service";
+import {
+  isGuardedOrderRuntimeAction,
+  processGuardedOrderRuntimeTurn,
+} from "./order/runtime/order-runtime-router.service";
 
 export type GenerateAgentOptions = {
   customerId?: string;
@@ -71,8 +76,10 @@ export type GenerateAgentOptions = {
   useMemory?: boolean;
   interactiveSendChannel?: InteractiveSendChannel;
   interactiveEnabledOverride?: boolean;
-  /** Guarded API/runtime validation only; never set by normal transport paths. */
+  /** Explicit activation from API tests or a trusted server-side transport guard. */
   orderRuntimeEnabled?: boolean;
+  /** Trusted Cloud/Baileys metadata; never read from public request bodies. */
+  transportInput?: AgentInboundTransportInput;
 };
 
 export type GenerateAgentDependencies = {
@@ -1581,9 +1588,29 @@ export async function generateAgentResult(
         conversationKey: normalized.identity.conversationKey,
         productId: activeOptions.productId,
         message: userMessage,
+        actionId: activeOptions.transportInput?.actionId,
+        normalizedText:
+          activeOptions.transportInput?.normalizedText || userMessage,
+        sourceType: activeOptions.transportInput?.sourceType || "text",
         activationRequested: activeOptions.orderRuntimeEnabled === true,
       });
       if (runtimeResult.handled && runtimeResult.reply) {
+        console.info(JSON.stringify({
+          event: "agent.order_runtime.routed",
+          conversationScope:
+            normalized.identity.conversationKey.length > 8
+              ? `${normalized.identity.conversationKey.slice(0, 4)}***${normalized.identity.conversationKey.slice(-4)}`
+              : "***",
+          sourceType: activeOptions.transportInput?.sourceType || "text",
+          actionId: isGuardedOrderRuntimeAction(
+            activeOptions.transportInput?.actionId || "",
+          )
+            ? activeOptions.transportInput?.actionId
+            : undefined,
+          selectedRouter: "order_runtime",
+          runtimeStageAfter: runtimeResult.stage,
+          legacyFallbackPrevented: true,
+        }));
         const naturalReplyStatus = getNaturalReplyStatus();
         const whatsappInteractivePreview = whatsappInteractiveMapper.toCloudInteractivePreview({
           replyText: runtimeResult.reply,
@@ -1598,6 +1625,9 @@ export async function generateAgentResult(
           reply: runtimeResult.reply,
           actions: [],
           source: "direct",
+          ...(runtimeResult.receiptArtifact
+            ? { [AGENT_INTERNAL_RECEIPT_ARTIFACT]: runtimeResult.receiptArtifact }
+            : {}),
           meta: {
             durationMs: Date.now() - startedAt,
             source: "direct",
@@ -1610,6 +1640,9 @@ export async function generateAgentResult(
             replyUi: runtimeResult.replyUi,
             whatsappInteractivePreview,
             interactiveSendDecision,
+            orderConfirmationPresentation:
+              runtimeResult.orderConfirmationPresentation,
+            publicOrderCode: runtimeResult.publicOrderCode,
             orderRuntime: {
               stage: runtimeResult.stage || "RECOVERY_REQUIRED",
               confirmedSnapshotId: runtimeResult.confirmedSnapshotId,
@@ -1621,20 +1654,41 @@ export async function generateAgentResult(
     } catch (error) {
       // The guarded runtime must not take down the legacy agent path.
       console.error("❌ Guarded order runtime failed", error);
+      if (
+        isGuardedOrderRuntimeAction(
+          activeOptions.transportInput?.actionId || "",
+        )
+      ) {
+        return {
+          reply: "هاد الاختيار ما بقاش صالح دابا. رجع لآخر اختيار وبدا من جديد من فضلك.",
+          actions: [],
+          source: "direct",
+          meta: {
+            source: "direct",
+            naturalReplyEnabled: getNaturalReplyStatus().enabled,
+            naturalReplyUsed: false,
+            naturalReplySkippedReason: "guarded_runtime_error",
+          },
+        };
+      }
     }
   }
 
   await appendMessageToMemory(activeOptions, "customer", userMessage);
 
-  const productInfoRequest = resolveProductInfoRequest(userMessage);
+  const authoritativeRoutingMessage =
+    activeOptions?.transportInput?.actionId?.trim() || userMessage;
+  const productInfoRequest = resolveProductInfoRequest(
+    authoritativeRoutingMessage,
+  );
   const orderDisposition = classifyOrderMessageDisposition(userMessage);
   const orderRoutingMessage = orderDisposition.disposition === "NEW_ORDER"
     ? userMessage
     : isExplicitOrderStartRequest(userMessage)
       ? "first_entry:order_now"
-      : normalizeInfoOrderMessage(userMessage);
+      : normalizeInfoOrderMessage(authoritativeRoutingMessage);
 
-  if (isProductInfoContinueOrder(userMessage)) {
+  if (isProductInfoContinueOrder(authoritativeRoutingMessage)) {
     await clearProductInfoPendingSelection(activeOptions);
   }
 

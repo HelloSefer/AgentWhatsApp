@@ -1,4 +1,7 @@
-import type { AgentReplyUiHint } from "../../reply/reply-renderer.types";
+import type {
+  AgentReplyUiHint,
+  OrderConfirmationPresentation,
+} from "../../reply/reply-renderer.types";
 import type { CartDraft } from "../cart-state.types";
 import type { CartPlanningPreviewState } from "../planning/quantity/flow/cart-custom-quantity-flow.types";
 import type { SameAsPreviousPreviewState } from "../item-collection/shortcuts/same-as-previous.types";
@@ -8,6 +11,35 @@ import type { DeliveryConfirmationPreviewState } from "../delivery-confirmation/
 import type { SafeReceiptDocumentMetadata } from "../confirmed-order/confirmed-order-receipt.types";
 
 export const ORDER_RUNTIME_SESSION_VERSION = 1 as const;
+
+export type OrderRuntimeReceiptDispatchStatus =
+  | "PENDING"
+  | "SENT"
+  | "FAILED"
+  | "SKIPPED";
+
+export type OrderRuntimeReceiptState = SafeReceiptDocumentMetadata & {
+  dispatchStatus: OrderRuntimeReceiptDispatchStatus;
+  sentAt?: string;
+  failedAt?: string;
+  skippedAt?: string;
+  cloudMessageIdMasked?: string;
+  failureCode?: string;
+  failureMessage?: string;
+};
+
+export type OrderRuntimeReceiptArtifact = {
+  snapshotId: string;
+  publicOrderCode: string;
+  document: SafeReceiptDocumentMetadata;
+  buffer: Buffer;
+  runtimeIdentity: {
+    sellerId: string;
+    customerPhone: string;
+    conversationKey: string;
+    productId: string;
+  };
+};
 
 export type OrderRuntimeStage =
   | "FIRST_ENTRY"
@@ -36,8 +68,9 @@ export type OrderRuntimeSession = {
   lastHandledAction?: string;
   confirmed?: {
     snapshotId: string;
+    publicOrderCode: string;
     status: "CONFIRMED";
-    receipt: SafeReceiptDocumentMetadata;
+    receipt: OrderRuntimeReceiptState;
     confirmedAt: string;
   };
   updatedAt: string;
@@ -59,7 +92,10 @@ export type OrderRuntimeTurnInput = {
   conversationKey: string;
   productId?: string;
   message: string;
-  /** Explicit API/test activation; production transport never sets this. */
+  actionId?: string;
+  normalizedText?: string;
+  sourceType?: import("../../agent-action.types").AgentInboundSourceType;
+  /** Explicit activation after API-test or trusted transport scope validation. */
   activationRequested?: boolean;
 };
 
@@ -67,9 +103,12 @@ export type OrderRuntimeTurnResult = {
   handled: boolean;
   reply?: string;
   replyUi?: AgentReplyUiHint;
+  orderConfirmationPresentation?: OrderConfirmationPresentation;
   stage?: OrderRuntimeStage;
   warnings: string[];
   failureCode?: string;
   confirmedSnapshotId?: string;
   receiptReady?: boolean;
+  publicOrderCode?: string;
+  receiptArtifact?: OrderRuntimeReceiptArtifact;
 };

@@ -44,7 +44,7 @@ export function createDeliveryConfirmationResult(input: {
     cartBefore: cloneDeliveryCart(input.cartBefore),
     cartAfter: cloneDeliveryCart(input.cartAfter || input.cartBefore),
     ...(input.previewState ? { previewState: cloneDeliveryPreviewState(input.previewState) } : {}),
-    ...(input.presentation ? { presentation: { ...input.presentation, ...(input.presentation.field ? { field: { ...input.presentation.field } } : {}), ...(input.presentation.uiHints ? { uiHints: { ...input.presentation.uiHints, options: input.presentation.uiHints.options?.map((option) => ({ ...option })) } } : {}) } } : {}),
+    ...(input.presentation ? { presentation: { ...input.presentation, ...(input.presentation.field ? { field: { ...input.presentation.field } } : {}), ...(input.presentation.uiHints ? { uiHints: { ...input.presentation.uiHints, options: input.presentation.uiHints.options?.map((option) => ({ ...option })) } } : {}), ...(input.presentation.orderConfirmationPresentation ? { orderConfirmationPresentation: structuredClone(input.presentation.orderConfirmationPresentation) } : {}) } } : {}),
     ...(input.finalReview ? { finalReview: cloneFinalOrderReview(input.finalReview) } : {}),
     ...(input.confirmedPreview ? { confirmedPreview: cloneConfirmedOrderPreview(input.confirmedPreview) } : {}),
     ...(input.commercialEvaluation ? { commercialEvaluation: cloneDeliveryCommercialEvaluation(input.commercialEvaluation) } : {}),

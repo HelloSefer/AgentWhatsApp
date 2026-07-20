@@ -36,6 +36,8 @@ import {
 } from "./config/agent-config.controller";
 import {
   evaluateOrderRuntimeController,
+  evaluateOrderRuntimeFinalReviewReceiptController,
+  evaluateOrderRuntimeWebhookController,
   getOrderRuntimeReadinessController,
   resetOrderRuntimeController,
 } from "./order/runtime/order-runtime.controller";
@@ -46,6 +48,8 @@ router.post("/test", testAgentReply);
 router.get("/order-runtime/readiness", getOrderRuntimeReadinessController);
 router.post("/order-runtime/reset", resetOrderRuntimeController);
 router.post("/order-runtime/eval", evaluateOrderRuntimeController);
+router.post("/order-runtime/webhook-eval", evaluateOrderRuntimeWebhookController);
+router.post("/order-runtime/final-review-receipt-eval", evaluateOrderRuntimeFinalReviewReceiptController);
 router.post("/first-entry-dry-run", firstEntryDryRun);
 router.post("/first-entry-click-preview", firstEntryClickPreview);
 router.get("/first-entry-readiness", getFirstEntryReadiness);

@@ -1,7 +1,11 @@
 import type { ProductOfferLookupResult } from "../../config/offers/offer-config.service";
 import type { ProductContext } from "../../config/product-context.types";
 import type { RequiredOrderField } from "../../config/required-fields.types";
-import type { AgentReplyUiHint } from "../../reply/reply-renderer.types";
+import type {
+  AgentReplyUiHint,
+  OrderConfirmationPresentation,
+} from "../../reply/reply-renderer.types";
+import type { DeliveryPricingConfig } from "../../config/seller-config.types";
 import type { CartCommercialEvaluation } from "../commercial/cart-commercial-evaluation.types";
 import type { CartDraft, SupportedOrderFieldValue } from "../cart-state.types";
 import type { CartItemEditPreviewState } from "../cart-review/item-edit/cart-item-edit.types";
@@ -78,8 +82,20 @@ export type DeliveryOrderFieldSnapshot = Readonly<{
 export type DeliveryReviewItemSnapshot = Readonly<{
   id: string;
   productId: string;
+  productName: string;
   quantity: number;
   options: readonly Readonly<{ key: string; label: string; value: SupportedOrderFieldValue }>[];
+  unitPriceMinor: number;
+  lineTotalMinor: number;
+  unitPrice: number;
+  lineTotal: number;
+}>;
+
+export type DeliveryFeeSnapshot = Readonly<{
+  type: "FREE" | "PAID";
+  amountMinor: number;
+  amount: number;
+  currency: string;
 }>;
 
 export type FinalOrderReview = Readonly<{
@@ -87,10 +103,22 @@ export type FinalOrderReview = Readonly<{
   completedUnits: number;
   targetUnits: number;
   orderFields: readonly DeliveryOrderFieldSnapshot[];
+  standardSubtotalMinor: number;
   standardSubtotal: number;
   currency: string;
-  selectedOffer?: Readonly<{ offerId: string; total: number }>;
-  recommendedOffer?: Readonly<{ offerId: string; total: number }>;
+  selectedOffer?: Readonly<{
+    offerId: string;
+    label?: string;
+    totalMinor: number;
+    total: number;
+    discountMinor: number;
+    discountAmount: number;
+  }>;
+  recommendedOffer?: Readonly<{ offerId: string; label?: string; total: number }>;
+  merchandiseTotalMinor: number;
+  merchandiseTotal: number;
+  deliveryFee?: DeliveryFeeSnapshot;
+  finalTotalMinor: number;
   finalTotal: number;
   warnings: readonly string[];
   confirmationReady: boolean;
@@ -102,9 +130,14 @@ export type ConfirmedOrderPreview = Readonly<{
   items: readonly DeliveryReviewItemSnapshot[];
   completedUnits: number;
   orderFields: readonly DeliveryOrderFieldSnapshot[];
+  standardSubtotalMinor: number;
   standardSubtotal: number;
   currency: string;
-  selectedOffer?: Readonly<{ offerId: string; total: number }>;
+  selectedOffer?: FinalOrderReview["selectedOffer"];
+  merchandiseTotalMinor: number;
+  merchandiseTotal: number;
+  deliveryFee?: DeliveryFeeSnapshot;
+  finalTotalMinor: number;
   finalTotal: number;
   confirmedAt: string;
 }>;
@@ -127,6 +160,7 @@ export type DeliveryConfirmationPresentation = Readonly<{
   text?: string;
   field?: Readonly<{ key: string; label: string }>;
   uiHints?: AgentReplyUiHint;
+  orderConfirmationPresentation?: OrderConfirmationPresentation;
 }>;
 
 export type DeliveryConfirmationNextStep =
@@ -174,6 +208,7 @@ export type DeliveryConfirmationPreviewInput = {
   productContext: ProductContext;
   requiredFields: RequiredOrderField[];
   offerLookup: ProductOfferLookupResult;
+  deliveryPricing?: DeliveryPricingConfig;
   now: Date;
   includeOptionalFieldKeys?: readonly string[];
   cartReviewPreviewState?: CartReviewPreviewState;

@@ -31,6 +31,12 @@ export type ConfirmedOrderReceiptModel = Readonly<{
     discountAmount: number;
     total: number;
   }>;
+  merchandiseTotal: number;
+  deliveryFee?: Readonly<{
+    type: "FREE" | "PAID";
+    amount: number;
+    currency: string;
+  }>;
   finalTotal: number;
   paymentMethodLabel?: string;
   deliveryText?: string;
@@ -70,6 +76,16 @@ export type ConfirmedOrderReceiptPreviewResult = Readonly<{
   receiptModel?: ConfirmedOrderReceiptModel;
   receiptDocument?: SafeReceiptDocumentMetadata;
   nextStep?: "RECEIPT_PREVIEW_READY" | "BLOCKED";
+  failureCode?: string;
+  warnings: readonly string[];
+}>;
+
+export type ConfirmedOrderReceiptPreparationResult = Readonly<{
+  success: boolean;
+  snapshot?: ConfirmedOrderSnapshot;
+  receiptModel?: ConfirmedOrderReceiptModel;
+  receiptDocument?: SafeReceiptDocumentMetadata;
+  buffer?: Buffer;
   failureCode?: string;
   warnings: readonly string[];
 }>;

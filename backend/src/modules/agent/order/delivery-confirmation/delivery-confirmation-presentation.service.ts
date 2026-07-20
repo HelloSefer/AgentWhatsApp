@@ -4,6 +4,7 @@ import type {
   DeliveryRequirement,
   FinalOrderReview,
 } from "./delivery-confirmation.types";
+import { renderFinalOrderReview } from "./final-order-review-renderer.service";
 
 const MAX_BUTTON_OPTIONS = 3;
 const MAX_ACTION_ID_LENGTH = 200;
@@ -105,22 +106,24 @@ export function buildDeliveryFieldPresentation(
 export function buildFinalOrderReviewPresentation(
   review: FinalOrderReview,
 ): DeliveryConfirmationPresentation {
+  const rendered = renderFinalOrderReview(review);
   const uiHints: AgentReplyUiHint = {
     kind: "buttons",
     purpose: "delivery_confirmation",
-    body: `راجع الطلب ديالك: ${review.completedUnits} قطعة`,
+    body: rendered.confirmationText,
     options: [
       { id: "order_checkout:confirm", label: "أكد الطلب" },
-      { id: "order_checkout:edit_delivery", label: "بدل معلومات التوصيل" },
-      { id: "order_checkout:back_to_cart", label: "رجع للسلة" },
+      { id: "order_checkout:back_to_cart", label: "بدل المنتجات" },
+      { id: "order_checkout:edit_delivery", label: "بدل التوصيل" },
     ],
     previewOnly: true,
   };
   return result({
     kind: "FINAL_ORDER_REVIEW",
     promptKey: "FINAL_ORDER_REVIEW",
-    text: "راجع معلومات الطلب ومن بعد أكد الطلب",
+    text: rendered.text,
     uiHints,
+    orderConfirmationPresentation: rendered.presentation,
   });
 }
 

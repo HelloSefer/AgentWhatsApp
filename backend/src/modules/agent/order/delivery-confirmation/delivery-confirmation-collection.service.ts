@@ -1,4 +1,5 @@
 import type { RequiredOrderField } from "../../config/required-fields.types";
+import type { DeliveryPricingConfig } from "../../config/seller-config.types";
 import { setCartStatus, setConfiguredOrderLevelField } from "../cart-state.service";
 import type { CartDraft } from "../cart-state.types";
 import type { CartCommercialEvaluation } from "../commercial/cart-commercial-evaluation.types";
@@ -39,6 +40,7 @@ export function buildDeliveryCollectionResult(input: {
   requirements: readonly DeliveryRequirement[];
   requiredFields: RequiredOrderField[];
   productContext: DeliveryConfirmationPreviewInput["productContext"];
+  deliveryPricing?: DeliveryPricingConfig;
   commercial: CartCommercialEvaluation;
   changed: boolean;
   action?: DeliveryConfirmationAction;
@@ -96,7 +98,9 @@ export function buildDeliveryCollectionResult(input: {
     cart: lifecycle.cart,
     requirements: input.requirements,
     requiredFields: input.requiredFields,
+    productContext: input.productContext,
     commercial: input.commercial,
+    deliveryPricing: input.deliveryPricing,
   });
   if (!review) {
     return createDeliveryConfirmationBlockedResult({
@@ -204,7 +208,9 @@ export function renderDeliveryFinalReview(input: {
     cart: lifecycle.cart,
     requirements: input.requirements,
     requiredFields: input.source.requiredFields,
+    productContext: input.source.productContext,
     commercial,
+    deliveryPricing: input.source.deliveryPricing,
   });
   if (!finalReview) {
     return createDeliveryConfirmationBlockedResult({
@@ -311,6 +317,7 @@ export function receiveDeliveryFieldValue(input: {
     requirements,
     requiredFields: input.source.requiredFields,
     productContext: input.source.productContext,
+    deliveryPricing: input.source.deliveryPricing,
     commercial,
     changed,
     action: input.action,
@@ -370,6 +377,7 @@ export function startDeliveryCollection(input: {
     requirements: getDeliveryRequirementsFor(input.source, lifecycle.cart),
     requiredFields: input.source.requiredFields,
     productContext: input.source.productContext,
+    deliveryPricing: input.source.deliveryPricing,
     commercial,
     changed: true,
     warnings: [...commercial.warnings],

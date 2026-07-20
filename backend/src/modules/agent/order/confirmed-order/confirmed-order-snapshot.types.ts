@@ -1,10 +1,12 @@
 import type { ProductOfferLookupResult } from "../../config/offers/offer-config.service";
 import type { ProductContext } from "../../config/product-context.types";
 import type { RequiredOrderField } from "../../config/required-fields.types";
+import type { DeliveryPricingConfig } from "../../config/seller-config.types";
 import type { CartCommercialEvaluation } from "../commercial/cart-commercial-evaluation.types";
 import type { CartDraft, SupportedOrderFieldValue } from "../cart-state.types";
 import type {
   ConfirmedOrderPreview,
+  DeliveryFeeSnapshot,
   DeliveryConfirmationPreviewState,
 } from "../delivery-confirmation/delivery-confirmation.types";
 
@@ -76,6 +78,9 @@ export type ConfirmedOrderSnapshot = Readonly<{
   standardSubtotal: number;
   selectedOffer?: ConfirmedOrderSelectedOfferSnapshot;
   recommendedOffer?: ConfirmedOrderRecommendedOfferSnapshot;
+  merchandiseTotalMinor: number;
+  merchandiseTotal: number;
+  deliveryFee?: DeliveryFeeSnapshot;
   finalTotalMinor: number;
   finalTotal: number;
   commercialWarnings: readonly string[];
@@ -111,6 +116,7 @@ export type ConfirmedOrderSnapshotInput = Readonly<{
   conversationScopeId: string;
   productContext: ProductContext;
   requiredFields: RequiredOrderField[];
+  deliveryPricing?: DeliveryPricingConfig;
   offerLookup: ProductOfferLookupResult;
   receiptContext: ConfirmedOrderReceiptContext;
   now: Date;

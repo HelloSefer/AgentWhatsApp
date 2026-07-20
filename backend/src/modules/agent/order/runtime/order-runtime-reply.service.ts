@@ -1,10 +1,17 @@
-import type { AgentReplyUiHint } from "../../reply/reply-renderer.types";
+import type {
+  AgentReplyUiHint,
+  OrderConfirmationPresentation,
+} from "../../reply/reply-renderer.types";
 import type { CartPlanningPreviewResult } from "../planning/preview/cart-planning-preview.types";
 import type { ItemCollectionPreviewResult } from "../item-collection/preview/item-collection-preview.types";
 import type { CartReviewPreviewResult } from "../cart-review/cart-review.types";
 import type { DeliveryConfirmationPreviewResult } from "../delivery-confirmation/delivery-confirmation.types";
 
-export type RuntimeReply = { text: string; replyUi?: AgentReplyUiHint };
+export type RuntimeReply = {
+  text: string;
+  replyUi?: AgentReplyUiHint;
+  orderConfirmationPresentation?: OrderConfirmationPresentation;
+};
 
 const retryText = "وقع مشكل فاختيارك. عاود اختار من الخيارات اللي باينين ليك.";
 
@@ -35,7 +42,16 @@ export function replyFromCartReview(result: CartReviewPreviewResult): RuntimeRep
 }
 
 export function replyFromDelivery(result: DeliveryConfirmationPreviewResult): RuntimeReply {
-  return reply(result.presentation?.text, result.presentation?.uiHints);
+  return {
+    ...reply(result.presentation?.text, result.presentation?.uiHints),
+    ...(result.presentation?.orderConfirmationPresentation
+      ? {
+          orderConfirmationPresentation: structuredClone(
+            result.presentation.orderConfirmationPresentation,
+          ),
+        }
+      : {}),
+  };
 }
 
 export function staleActionReply(): RuntimeReply {

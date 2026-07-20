@@ -95,9 +95,19 @@ export function buildConfirmedOrderReceiptModel(
     ...(snapshot.selectedOffer
       ? {
           selectedOffer: {
-            label: safeText(snapshot.selectedOffer.label || snapshot.selectedOffer.offerId, 160),
+            label: safeText(snapshot.selectedOffer.label || "Offre appliquée", 160),
             discountAmount: snapshot.selectedOffer.discountAmount,
             total: snapshot.selectedOffer.offerTotal,
+          },
+        }
+      : {}),
+    merchandiseTotal: snapshot.merchandiseTotal,
+    ...(snapshot.deliveryFee
+      ? {
+          deliveryFee: {
+            type: snapshot.deliveryFee.type,
+            amount: snapshot.deliveryFee.amount,
+            currency: safeText(snapshot.deliveryFee.currency, 16),
           },
         }
       : {}),
@@ -130,7 +140,10 @@ function buildReceiptHtml(model: ConfirmedOrderReceiptModel): string {
     ? model.deliveryFields.map((field) => `<div class="field"><span>${escapeHtml(field.label)}</span><b dir="auto">${escapeHtml(field.value)}</b></div>`).join("")
     : '<div class="field"><span>Informations</span><b>Non renseignées</b></div>';
   const offer = model.selectedOffer
-    ? `<div class="total-row offer"><span>Offre: ${escapeHtml(model.selectedOffer.label)}</span><b>- ${escapeHtml(formatMoney(model.selectedOffer.discountAmount, model.currency))}</b></div>`
+    ? `<div class="total-row offer"><span>Offre: ${escapeHtml(model.selectedOffer.label)}</span><b>- ${escapeHtml(formatMoney(model.selectedOffer.discountAmount, model.currency))}</b></div><div class="total-row"><span>Total produits après offre</span><b>${escapeHtml(formatMoney(model.merchandiseTotal, model.currency))}</b></div>`
+    : "";
+  const delivery = model.deliveryFee
+    ? `<div class="total-row"><span>Livraison</span><b>${model.deliveryFee.type === "FREE" ? "Gratuite" : escapeHtml(formatMoney(model.deliveryFee.amount, model.deliveryFee.currency))}</b></div>`
     : "";
   const supplementary = [
     model.paymentMethodLabel && `<div><b>Paiement:</b> ${escapeHtml(model.paymentMethodLabel)}</div>`,
@@ -172,7 +185,7 @@ footer { margin-top: 13mm; padding-top: 5mm; border-top: 1px solid #bdcee8; colo
   <section class="meta"><div><b>Date de confirmation</b><br/>${escapeHtml(formatDate(model.confirmedAt))}</div><div><b>Total articles</b><br/>${model.lines.reduce((total, line) => total + line.quantity, 0)}</div></section>
   <section class="panel"><h2>INFORMATIONS DE LIVRAISON</h2><div class="fields">${fields}</div></section>
   <section class="panel"><h2>DÉTAILS DE LA COMMANDE</h2><table><thead><tr><th>Produit</th><th>Quantité</th><th>Prix unitaire</th><th>Total</th></tr></thead><tbody>${model.lines.map((item) => renderLine(item, model.currency)).join("")}</tbody></table></section>
-  <section class="summary"><div class="total-row"><span>Sous-total standard</span><b>${escapeHtml(formatMoney(model.standardSubtotal, model.currency))}</b></div>${offer}<div class="total-row final"><span>TOTAL À PAYER</span><b>${escapeHtml(formatMoney(model.finalTotal, model.currency))}</b></div></section>
+  <section class="summary"><div class="total-row"><span>Sous-total standard</span><b>${escapeHtml(formatMoney(model.standardSubtotal, model.currency))}</b></div>${offer}${delivery}<div class="total-row final"><span>TOTAL À PAYER</span><b>${escapeHtml(formatMoney(model.finalTotal, model.currency))}</b></div></section>
   ${supplementary ? `<section class="notes">${supplementary}</section>` : ""}
   <footer>Merci pour votre commande. Ce reçu confirme l’enregistrement de votre demande.</footer>
 </main></body></html>`;

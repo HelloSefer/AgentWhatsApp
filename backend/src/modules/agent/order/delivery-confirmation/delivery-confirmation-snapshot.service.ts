@@ -11,6 +11,12 @@ import type {
   DeliveryReviewItemSnapshot,
   FinalOrderReview,
 } from "./delivery-confirmation.types";
+import {
+  resolveReviewDeliveryFee,
+  toMinorMoney,
+} from "./delivery-review-pricing.service";
+import type { ProductContext } from "../../config/product-context.types";
+import type { DeliveryPricingConfig } from "../../config/seller-config.types";
 
 export function cloneDeliveryCart(cart: CartDraft): CartDraft {
   return {
@@ -61,6 +67,7 @@ export function cloneFinalOrderReview(review: FinalOrderReview): FinalOrderRevie
     orderFields: review.orderFields.map((field) => ({ ...field })),
     ...(review.selectedOffer ? { selectedOffer: { ...review.selectedOffer } } : {}),
     ...(review.recommendedOffer ? { recommendedOffer: { ...review.recommendedOffer } } : {}),
+    ...(review.deliveryFee ? { deliveryFee: { ...review.deliveryFee } } : {}),
     warnings: [...review.warnings],
   };
 }
@@ -71,6 +78,7 @@ export function cloneConfirmedOrderPreview(preview: ConfirmedOrderPreview): Conf
     items: preview.items.map(cloneReviewItem),
     orderFields: preview.orderFields.map((field) => ({ ...field })),
     ...(preview.selectedOffer ? { selectedOffer: { ...preview.selectedOffer } } : {}),
+    ...(preview.deliveryFee ? { deliveryFee: { ...preview.deliveryFee } } : {}),
   };
 }
 
@@ -82,21 +90,52 @@ function normalizeKey(value: string): string {
   return value.trim().toLocaleLowerCase().replace(/[\s_-]+/g, "");
 }
 
-function snapshotItems(cart: CartDraft, fields: RequiredOrderField[]): DeliveryReviewItemSnapshot[] {
+function snapshotItems(input: {
+  cart: CartDraft;
+  fields: RequiredOrderField[];
+  productContext: ProductContext;
+  commercial: CartCommercialEvaluation;
+}): DeliveryReviewItemSnapshot[] | undefined {
   const labels = new Map(
-    fields.filter((field) => resolveCartFieldScope(field) === "ITEM")
+    input.fields.filter((field) => resolveCartFieldScope(field) === "ITEM")
       .map((field) => [normalizeKey(field.key), field.label || field.key]),
   );
-  return cart.items.map((item) => ({
-    id: item.id,
-    productId: item.productId,
-    quantity: item.quantity,
-    options: Object.entries(item.selectedOptions).map(([key, value]) => ({
-      key,
-      label: labels.get(normalizeKey(key)) || key,
-      value,
-    })),
-  }));
+  const lines = new Map(
+    input.commercial.standardPricing?.lines.map((line) => [line.cartItemId, line]) || [],
+  );
+  const items: DeliveryReviewItemSnapshot[] = [];
+
+  for (const item of input.cart.items) {
+    const line = lines.get(item.id);
+    if (!line || line.productId !== item.productId || line.quantity !== item.quantity) {
+      return undefined;
+    }
+    const unitPriceMinor = toMinorMoney(line.unitPrice);
+    const lineTotalMinor = toMinorMoney(line.standardLineTotal);
+    if (
+      unitPriceMinor === undefined ||
+      lineTotalMinor === undefined ||
+      unitPriceMinor * item.quantity !== lineTotalMinor
+    ) return undefined;
+
+    items.push({
+      id: item.id,
+      productId: item.productId,
+      productName: input.productContext.name,
+      quantity: item.quantity,
+      options: Object.entries(item.selectedOptions).map(([key, value]) => ({
+        key,
+        label: labels.get(normalizeKey(key)) || key,
+        value,
+      })),
+      unitPriceMinor,
+      lineTotalMinor,
+      unitPrice: unitPriceMinor / 100,
+      lineTotal: lineTotalMinor / 100,
+    });
+  }
+
+  return items;
 }
 
 function snapshotOrderFields(
@@ -114,25 +153,70 @@ export function buildFinalOrderReview(input: {
   cart: CartDraft;
   requirements: readonly DeliveryRequirement[];
   requiredFields: RequiredOrderField[];
+  productContext: ProductContext;
   commercial: CartCommercialEvaluation;
+  deliveryPricing?: DeliveryPricingConfig;
 }): FinalOrderReview | undefined {
   const standard = input.commercial.standardPricing;
   if (!standard) return undefined;
   const selectedPricing = input.commercial.selectedOffer?.pricing;
+  const items = snapshotItems({
+    cart: input.cart,
+    fields: input.requiredFields,
+    productContext: input.productContext,
+    commercial: input.commercial,
+  });
+  const standardSubtotalMinor = toMinorMoney(standard.standardSubtotal);
+  const merchandiseTotal = selectedPricing?.merchandiseTotal || standard.merchandiseTotal;
+  const merchandiseTotalMinor = toMinorMoney(merchandiseTotal);
+  const delivery = resolveReviewDeliveryFee({
+    cart: input.cart,
+    requiredFields: input.requiredFields,
+    deliveryPricing: input.deliveryPricing,
+  });
+  if (!items || standardSubtotalMinor === undefined || merchandiseTotalMinor === undefined) {
+    return undefined;
+  }
+  if (delivery.configured && !delivery.fee) return undefined;
+  if (delivery.fee && delivery.fee.currency !== standard.currency) return undefined;
+  const finalTotalMinor = merchandiseTotalMinor + (delivery.fee?.amountMinor || 0);
+
   return {
-    items: snapshotItems(input.cart, input.requiredFields),
+    items,
     completedUnits: completedDeliveryUnits(input.cart),
     targetUnits: input.cart.targetItemCount || 0,
     orderFields: snapshotOrderFields(input.requirements, input.cart),
-    standardSubtotal: standard.standardSubtotal,
+    standardSubtotalMinor,
+    standardSubtotal: standardSubtotalMinor / 100,
     currency: standard.currency,
     ...(input.commercial.selectedOffer?.eligible && selectedPricing
-      ? { selectedOffer: { offerId: input.commercial.selectedOffer.offerId, total: selectedPricing.merchandiseTotal } }
+      ? {
+          selectedOffer: {
+            offerId: input.commercial.selectedOffer.offerId,
+            ...(selectedPricing.appliedOfferLabel ? { label: selectedPricing.appliedOfferLabel } : {}),
+            totalMinor: merchandiseTotalMinor,
+            total: merchandiseTotalMinor / 100,
+            discountMinor: toMinorMoney(selectedPricing.discountAmount) || 0,
+            discountAmount: (toMinorMoney(selectedPricing.discountAmount) || 0) / 100,
+          },
+        }
       : {}),
     ...(input.commercial.recommendedOffer
-      ? { recommendedOffer: { offerId: input.commercial.recommendedOffer.offerId, total: input.commercial.recommendedOffer.pricing.merchandiseTotal } }
+      ? {
+          recommendedOffer: {
+            offerId: input.commercial.recommendedOffer.offerId,
+            ...(input.commercial.recommendedOffer.pricing.appliedOfferLabel
+              ? { label: input.commercial.recommendedOffer.pricing.appliedOfferLabel }
+              : {}),
+            total: input.commercial.recommendedOffer.pricing.merchandiseTotal,
+          },
+        }
       : {}),
-    finalTotal: selectedPricing?.merchandiseTotal || standard.merchandiseTotal,
+    merchandiseTotalMinor,
+    merchandiseTotal: merchandiseTotalMinor / 100,
+    ...(delivery.fee ? { deliveryFee: { ...delivery.fee } } : {}),
+    finalTotalMinor,
+    finalTotal: finalTotalMinor / 100,
     warnings: [...input.commercial.warnings],
     confirmationReady: true,
   };
@@ -150,9 +234,14 @@ export function buildConfirmedOrderPreview(input: {
     items: input.finalReview.items.map(cloneReviewItem),
     completedUnits: input.finalReview.completedUnits,
     orderFields: input.finalReview.orderFields.map((field) => ({ ...field })),
+    standardSubtotalMinor: input.finalReview.standardSubtotalMinor,
     standardSubtotal: input.finalReview.standardSubtotal,
     currency: input.finalReview.currency,
     ...(input.finalReview.selectedOffer ? { selectedOffer: { ...input.finalReview.selectedOffer } } : {}),
+    merchandiseTotalMinor: input.finalReview.merchandiseTotalMinor,
+    merchandiseTotal: input.finalReview.merchandiseTotal,
+    ...(input.finalReview.deliveryFee ? { deliveryFee: { ...input.finalReview.deliveryFee } } : {}),
+    finalTotalMinor: input.finalReview.finalTotalMinor,
     finalTotal: input.finalReview.finalTotal,
     confirmedAt: input.confirmedAt,
   };

@@ -38,7 +38,7 @@ export type OrderConfirmationPresentation = {
       text: string;
       fallbackText: string;
       buttons: Array<{
-        id: "order:confirm" | "order:edit";
+        id: string;
         label: string;
       }>;
     },

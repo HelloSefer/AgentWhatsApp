@@ -4,6 +4,7 @@ import {
 } from "./confirmed-order-receipt.service";
 import { createConfirmedOrderSnapshot } from "./confirmed-order-snapshot.service";
 import type {
+  ConfirmedOrderReceiptPreparationResult,
   ConfirmedOrderReceiptPreviewInput,
   ConfirmedOrderReceiptPreviewResult,
 } from "./confirmed-order-receipt.types";
@@ -20,22 +21,16 @@ function blocked(
   };
 }
 
-/**
- * Controller-only preview adapter. It intentionally builds a detached snapshot
- * and an in-memory document; it has no persistence, session, or transport side effects.
- */
-export async function runConfirmedOrderReceiptPreview(
+/** Builds the immutable snapshot and real in-memory PDF without persistence or transport. */
+export async function prepareConfirmedOrderReceipt(
   input: ConfirmedOrderReceiptPreviewInput,
-): Promise<ConfirmedOrderReceiptPreviewResult> {
-  if (!input.previewEnabled) return blocked(input);
+): Promise<ConfirmedOrderReceiptPreparationResult> {
+  if (!input.previewEnabled) return { success: false, warnings: [] };
 
   const snapshotResult = createConfirmedOrderSnapshot(input);
   if (!snapshotResult.success || !snapshotResult.snapshot) {
     return {
-      handled: true,
       success: false,
-      previewOnly: true,
-      dryRun: true,
       ...(snapshotResult.failureCode ? { failureCode: snapshotResult.failureCode } : {}),
       warnings: [...snapshotResult.warnings],
     };
@@ -44,10 +39,7 @@ export async function runConfirmedOrderReceiptPreview(
   const receiptResult = buildConfirmedOrderReceiptModel(snapshotResult.snapshot);
   if (!receiptResult.success || !receiptResult.receiptModel) {
     return {
-      handled: true,
       success: false,
-      previewOnly: true,
-      dryRun: true,
       failureCode: receiptResult.failureCode,
       snapshot: snapshotResult.snapshot,
       warnings: [...snapshotResult.warnings, ...receiptResult.warnings],
@@ -59,10 +51,7 @@ export async function runConfirmedOrderReceiptPreview(
   );
   if (!documentResult.success) {
     return {
-      handled: true,
       success: false,
-      previewOnly: true,
-      dryRun: true,
       failureCode: documentResult.failureCode,
       snapshot: snapshotResult.snapshot,
       receiptModel: receiptResult.receiptModel,
@@ -78,13 +67,11 @@ export async function runConfirmedOrderReceiptPreview(
     !documentResult.filename ||
     !documentResult.mimeType ||
     documentResult.byteLength === undefined ||
-    !documentResult.checksum
+    !documentResult.checksum ||
+    !documentResult.buffer
   ) {
     return {
-      handled: true,
       success: false,
-      previewOnly: true,
-      dryRun: true,
       failureCode: "PDF_GENERATION_FAILED",
       snapshot: snapshotResult.snapshot,
       receiptModel: receiptResult.receiptModel,
@@ -93,10 +80,7 @@ export async function runConfirmedOrderReceiptPreview(
   }
 
   return {
-    handled: true,
     success: true,
-    previewOnly: true,
-    dryRun: true,
     snapshot: snapshotResult.snapshot,
     receiptModel: receiptResult.receiptModel,
     receiptDocument: {
@@ -105,10 +89,29 @@ export async function runConfirmedOrderReceiptPreview(
       byteLength: documentResult.byteLength,
       checksum: documentResult.checksum,
     },
+    buffer: documentResult.buffer,
     warnings: [
       ...snapshotResult.warnings,
       ...receiptResult.warnings,
       ...documentResult.warnings,
     ],
+  };
+}
+
+export async function runConfirmedOrderReceiptPreview(
+  input: ConfirmedOrderReceiptPreviewInput,
+): Promise<ConfirmedOrderReceiptPreviewResult> {
+  if (!input.previewEnabled) return blocked(input);
+  const prepared = await prepareConfirmedOrderReceipt(input);
+  return {
+    handled: true,
+    success: prepared.success,
+    previewOnly: true,
+    dryRun: true,
+    ...(prepared.snapshot ? { snapshot: prepared.snapshot } : {}),
+    ...(prepared.receiptModel ? { receiptModel: prepared.receiptModel } : {}),
+    ...(prepared.receiptDocument ? { receiptDocument: prepared.receiptDocument } : {}),
+    ...(prepared.failureCode ? { failureCode: prepared.failureCode } : {}),
+    warnings: [...prepared.warnings],
   };
 }

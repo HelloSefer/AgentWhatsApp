@@ -7,6 +7,11 @@ import type {
   OrderConfirmationPresentation,
 } from "./reply/reply-renderer.types";
 import type { WhatsAppInteractivePreview } from "./reply/whatsapp-interactive.types";
+import type { OrderRuntimeReceiptArtifact } from "./order/runtime/order-runtime.types";
+
+export const AGENT_INTERNAL_RECEIPT_ARTIFACT: unique symbol = Symbol(
+  "agent.internal.receiptArtifact",
+);
 
 export type AgentActionType = "send_product_images" | "choice_list";
 
@@ -57,10 +62,24 @@ export type AgentResultSource =
   | "ai_fallback"
   | "seller_brain";
 
+export type AgentInboundSourceType =
+  | "text"
+  | "button_reply"
+  | "list_reply"
+  | "native_flow_reply";
+
+/** Trusted transport metadata. HTTP agent-test requests never populate this. */
+export interface AgentInboundTransportInput {
+  actionId?: string;
+  normalizedText: string;
+  sourceType: AgentInboundSourceType;
+}
+
 export interface AgentResult {
   reply: string;
   actions: AgentAction[];
   source: AgentResultSource;
+  [AGENT_INTERNAL_RECEIPT_ARTIFACT]?: OrderRuntimeReceiptArtifact;
   meta?: {
     naturalReplyUsed?: boolean;
     naturalReplyTimedOut?: boolean;

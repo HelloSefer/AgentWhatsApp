@@ -8,6 +8,7 @@ import type {
   AgentResult,
   ChoiceListAction,
 } from "../../agent/agent-action.types";
+import { AGENT_INTERNAL_RECEIPT_ARTIFACT } from "../../agent/agent-action.types";
 import type { WhatsAppInteractivePreview } from "../../agent/reply/whatsapp-interactive.types";
 import type { AgentIdentity } from "../../agent/identity/agent-identity.types";
 import { conversationKeyService } from "../../agent/identity/conversation-key.service";
@@ -29,6 +30,9 @@ import {
   type ConfirmedOrder,
 } from "../../agent/order/confirmed-order-store.service";
 import { updateConversationOrderState } from "../../agent/session/conversation-session.service";
+import { isGuardedOrderRuntimeAction } from "../../agent/order/runtime/order-runtime-router.service";
+import { recordOrderRuntimeReceiptDispatch } from "../../agent/order/runtime/order-runtime-session.service";
+import type { OrderRuntimeReceiptArtifact } from "../../agent/order/runtime/order-runtime.types";
 import {
   buildOrderFormUrl,
   resolveOrderFormBaseUrl,
@@ -36,6 +40,7 @@ import {
 import {
   deleteLocalReceiptPdf,
   generateOrderReceiptPdf,
+  getOrderReceiptOutputDir,
   getOrderReceiptDiagnostics,
   getOrderReceiptRecord,
   recordOrderReceiptDocumentFailed,
@@ -133,15 +138,33 @@ type ProcessCloudWebhookResult = {
   ok: boolean;
   handled: boolean;
   identity?: AgentIdentity;
+  agentSource?: AgentResult["source"];
   agentReplyPreview?: string;
   actionsCount: number;
   sendAttempted: boolean;
   sendSuccess: boolean;
+  inputSourceType?: WhatsAppCloudIncomingMessage["sourceType"];
+  normalizedActionId?: string;
+  outboundMessages: Array<{
+    kind: "text" | "interactive" | "document";
+    text: string;
+    actionIds: string[];
+    dryRun: boolean;
+    success: boolean;
+    filename?: string;
+    mimeType?: string;
+    byteLength?: number;
+    checksum?: string;
+  }>;
 };
 
 type ProcessCloudWebhookOptions = {
   publicBaseUrl?: string;
   allowUnknownPhoneNumberId?: boolean;
+  /** Internal evaluator transport guard. This is not exposed by an HTTP request. */
+  forceDryRun?: boolean;
+  /** Internal evaluator-only document transport injection. */
+  runtimeDocumentTransport?: typeof sendDocument;
 };
 
 type ReplyButtonPreset = "order_confirmation" | "color_choice" | "after_price";
@@ -596,18 +619,41 @@ function getInteractiveMessageInfo(message: any): {
     return {
       text: normalized.normalizedText,
       sourceType: normalized.interactiveType,
-      buttonReplyId:
-        normalized.interactiveType === "button_reply"
-          ? normalized.replyId
-          : undefined,
-      buttonReplyTitle:
-        normalized.interactiveType === "button_reply"
-          ? normalized.replyTitle
-          : undefined,
+      buttonReplyId: normalized.replyId,
+      buttonReplyTitle: normalized.replyTitle,
     };
   }
 
   return { text: "", sourceType: "native_flow_reply" };
+}
+
+function getGuardedRuntimeActionId(
+  message: WhatsAppCloudIncomingMessage,
+): string | undefined {
+  const actionId = message.buttonReplyId?.trim() || "";
+
+  return isGuardedOrderRuntimeAction(actionId)
+    ? actionId
+    : undefined;
+}
+
+function getAuthoritativeAgentActionId(
+  message: WhatsAppCloudIncomingMessage,
+): string | undefined {
+  const actionId = message.buttonReplyId?.trim() || "";
+
+  return (
+    isGuardedOrderRuntimeAction(actionId) ||
+    /^(?:first_entry:more_info|info:(?:price|sizes|colors|delivery_payment|availability|how_to_order|menu|more_info|continue_order))$/.test(actionId)
+  )
+    ? actionId
+    : undefined;
+}
+
+function getReplyActionIds(result: AgentResult): string[] {
+  return (result.meta?.replyUi?.options || [])
+    .map((option) => option.id?.trim())
+    .filter((id): id is string => Boolean(id));
 }
 
 function getStringField(
@@ -1266,11 +1312,12 @@ export async function uploadMedia(input: {
   phoneNumberId?: string;
   filePath: string;
   mimeType: string;
+  forceDryRun?: boolean;
 }): Promise<WhatsAppCloudSendResult> {
   const phoneNumberId =
     input.phoneNumberId || env.whatsappCloudPhoneNumberId || "";
 
-  if (env.whatsappCloudDryRun) {
+  if (input.forceDryRun || env.whatsappCloudDryRun) {
     return {
       success: true,
       dryRun: true,
@@ -1388,7 +1435,7 @@ export async function uploadMedia(input: {
     pushDiagnosticError("upload_media", errorMessage);
     return {
       success: false,
-      dryRun: env.whatsappCloudDryRun,
+      dryRun: Boolean(input.forceDryRun || env.whatsappCloudDryRun),
       payload: {
         filePath: input.filePath,
         mimeType: input.mimeType,
@@ -1404,6 +1451,8 @@ export async function sendDocument(input: {
   filePath: string;
   filename: string;
   caption?: string;
+  forceDryRun?: boolean;
+  sendUploadFailureText?: boolean;
 }): Promise<WhatsAppCloudSendResult> {
   const phoneNumberId =
     input.phoneNumberId || env.whatsappCloudPhoneNumberId || "";
@@ -1411,6 +1460,7 @@ export async function sendDocument(input: {
     phoneNumberId,
     filePath: input.filePath,
     mimeType: "application/pdf",
+    forceDryRun: input.forceDryRun,
   });
 
   if (!uploadResult.success || !uploadResult.mediaId) {
@@ -1421,11 +1471,14 @@ export async function sendDocument(input: {
       errorMessage: uploadResult.errorMessage,
     });
 
-    await sendCloudText({
-      to: input.to,
-      phoneNumberId,
-      text: "تم تأكيد الطلب ✅ وغادي نرسل لك وصل الطلب بعد قليل.",
-    });
+    if (input.sendUploadFailureText !== false) {
+      await sendCloudText({
+        to: input.to,
+        phoneNumberId,
+        text: "تم تأكيد الطلب ✅ وغادي نرسل لك وصل الطلب بعد قليل.",
+        forceDryRun: input.forceDryRun,
+      });
+    }
 
     return uploadResult;
   }
@@ -1441,6 +1494,19 @@ export async function sendDocument(input: {
       caption: input.caption || "هذا وصل الطلب ديالك ✅",
     },
   };
+  if (input.forceDryRun) {
+    return {
+      success: true,
+      dryRun: true,
+      payload,
+      response: {
+        dryRun: true,
+        forced: true,
+        messages: [{ id: `dryrun_document_${Date.now()}` }],
+      },
+      mediaId: uploadResult.mediaId,
+    };
+  }
   const result = await postCloudMessage(phoneNumberId, payload);
 
   logJson({
@@ -1458,6 +1524,141 @@ export async function sendDocument(input: {
     ...result,
     mediaId: uploadResult.mediaId,
   };
+}
+
+type RuntimeReceiptDispatchResult = {
+  attempted: boolean;
+  success: boolean;
+  dryRun: boolean;
+  errorMessage?: string;
+};
+
+function getSafeCloudMessageId(response: unknown): string | undefined {
+  if (!response || typeof response !== "object") return undefined;
+  const messages = (response as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return undefined;
+  const id = (messages[0] as { id?: unknown } | undefined)?.id;
+  if (typeof id !== "string" || !id.trim()) return undefined;
+  const value = id.trim();
+  return value.length <= 10
+    ? "***"
+    : `${value.slice(0, 4)}***${value.slice(-4)}`;
+}
+
+async function updateRuntimeReceiptDispatch(
+  artifact: OrderRuntimeReceiptArtifact,
+  input: {
+    status: "SENT" | "FAILED" | "SKIPPED";
+    cloudMessageIdMasked?: string;
+    failureCode?: string;
+    failureMessage?: string;
+  },
+): Promise<void> {
+  try {
+    await recordOrderRuntimeReceiptDispatch({
+      ...artifact.runtimeIdentity,
+      snapshotId: artifact.snapshotId,
+      status: input.status,
+      at: new Date().toISOString(),
+      cloudMessageIdMasked: input.cloudMessageIdMasked,
+      failureCode: input.failureCode,
+      failureMessage: input.failureMessage,
+    });
+  } catch (error) {
+    logJson({
+      event: "order_runtime.receipt_dispatch_metadata_failed",
+      publicOrderCode: artifact.publicOrderCode,
+      errorMessage: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+}
+
+async function dispatchRuntimeReceiptArtifact(input: {
+  artifact: OrderRuntimeReceiptArtifact;
+  to: string;
+  phoneNumberId: string;
+  forceDryRun?: boolean;
+  transport?: typeof sendDocument;
+}): Promise<RuntimeReceiptDispatchResult> {
+  const target = input.to.replace(/\D/g, "");
+  const expectedTarget = input.artifact.runtimeIdentity.customerPhone.replace(/\D/g, "");
+  if (!target || target !== expectedTarget) {
+    const errorMessage = "Receipt recipient does not match the confirmed runtime conversation";
+    await updateRuntimeReceiptDispatch(input.artifact, {
+      status: "FAILED",
+      failureCode: "RECIPIENT_MISMATCH",
+      failureMessage: errorMessage,
+    });
+    return { attempted: false, success: false, dryRun: Boolean(input.forceDryRun), errorMessage };
+  }
+
+  const outputDir = path.resolve(getOrderReceiptOutputDir());
+  const safeFilename = path.basename(input.artifact.document.filename)
+    .replace(/[^A-Za-z0-9._-]/g, "_");
+  const filePath = path.resolve(outputDir, safeFilename);
+  if (!safeFilename || path.dirname(filePath) !== outputDir) {
+    const errorMessage = "Unsafe runtime receipt filename";
+    await updateRuntimeReceiptDispatch(input.artifact, {
+      status: "FAILED",
+      failureCode: "UNSAFE_FILENAME",
+      failureMessage: errorMessage,
+    });
+    return { attempted: false, success: false, dryRun: Boolean(input.forceDryRun), errorMessage };
+  }
+
+  try {
+    await fs.mkdir(outputDir, { recursive: true });
+    await fs.writeFile(filePath, input.artifact.buffer, { flag: "wx" });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unable to stage receipt PDF";
+    await updateRuntimeReceiptDispatch(input.artifact, {
+      status: "FAILED",
+      failureCode: "TEMP_FILE_WRITE_FAILED",
+      failureMessage: errorMessage,
+    });
+    return { attempted: false, success: false, dryRun: Boolean(input.forceDryRun), errorMessage };
+  }
+
+  try {
+    const transport = input.transport || sendDocument;
+    const result = await transport({
+      to: input.to,
+      phoneNumberId: input.phoneNumberId,
+      filePath,
+      filename: safeFilename,
+      caption: `هذا وصل الطلب ديالك ✅\nرقم الطلب: ${input.artifact.publicOrderCode}`,
+      forceDryRun: input.forceDryRun,
+      sendUploadFailureText: false,
+    });
+    if (result.success) {
+      await updateRuntimeReceiptDispatch(input.artifact, {
+        status: "SENT",
+        cloudMessageIdMasked: getSafeCloudMessageId(result.response),
+      });
+    } else {
+      await updateRuntimeReceiptDispatch(input.artifact, {
+        status: "FAILED",
+        failureCode: result.graphCode ? `CLOUD_${result.graphCode}` : "DOCUMENT_SEND_FAILED",
+        failureMessage: result.errorMessage || result.graphDetails || "Document send failed",
+      });
+    }
+    return {
+      attempted: true,
+      success: result.success,
+      dryRun: result.dryRun,
+      ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Document send failed";
+    await updateRuntimeReceiptDispatch(input.artifact, {
+      status: "FAILED",
+      failureCode: "DOCUMENT_SEND_FAILED",
+      failureMessage: errorMessage,
+    });
+    return { attempted: true, success: false, dryRun: Boolean(input.forceDryRun), errorMessage };
+  } finally {
+    await fs.unlink(filePath).catch(() => undefined);
+  }
 }
 
 export async function sendOrderReceiptDocumentForOrder(input: {
@@ -2629,6 +2830,7 @@ export async function processCloudWebhookBody(
       actionsCount: 0,
       sendAttempted: false,
       sendSuccess: false,
+      outboundMessages: [],
     };
   }
 
@@ -2638,6 +2840,7 @@ export async function processCloudWebhookBody(
     actionsCount: 0,
     sendAttempted: false,
     sendSuccess: false,
+    outboundMessages: [],
   };
 
   const prepareReply = async (
@@ -2652,14 +2855,16 @@ export async function processCloudWebhookBody(
       phoneNumberId: message.phoneNumberId,
       messageType: message.type,
       sellerId,
-      dryRun: env.whatsappCloudDryRun,
+      dryRun: options.forceDryRun === true || env.whatsappCloudDryRun,
       guardBlocked,
       transport: postCloudMessage,
     });
-    await applyReplyPacing({
-      replyText,
-      processingDurationMs: processingDurationMs + typing.durationMs,
-    });
+    if (options.forceDryRun !== true) {
+      await applyReplyPacing({
+        replyText,
+        processingDurationMs: processingDurationMs + typing.durationMs,
+      });
+    }
     return typing;
   };
 
@@ -2752,6 +2957,10 @@ export async function processCloudWebhookBody(
     }
 
     try {
+      const transportActionId = getAuthoritativeAgentActionId(message);
+      const runtimeActionId = getGuardedRuntimeActionId(message);
+      processResult.inputSourceType = message.sourceType;
+      processResult.normalizedActionId = transportActionId;
       const firstEntryLiveSmoke = await buildFirstEntryLiveSmokeResult({
         customerPhone: identity.customerPhone,
         phoneNumberId: identity.phoneNumberId || message.phoneNumberId,
@@ -2764,10 +2973,12 @@ export async function processCloudWebhookBody(
         firstEntryLiveSmoke.readiness.liveEnabled === true;
       const liveSmokeDispatchAllowed =
         liveSmokeModeArmed &&
-        env.whatsappInteractiveEnabled === true &&
+        (env.whatsappInteractiveEnabled === true || options.forceDryRun === true) &&
         firstEntryLiveSmoke.readiness.recipientAllowed === true &&
         firstEntryLiveSmoke.readiness.sellerIdConfigured === true &&
         firstEntryLiveSmoke.readiness.expectedSellerId === identity.sellerId;
+      const bypassFirstEntryLiveSmoke =
+        runtimeActionId !== undefined && runtimeActionId !== "first_entry:order_now";
 
       if (liveSmokeModeArmed && !liveSmokeDispatchAllowed) {
         logJson({
@@ -2786,16 +2997,17 @@ export async function processCloudWebhookBody(
         continue;
       }
 
-      if (!firstEntryLiveSmoke.handled) {
-        const routedToAgent = firstEntryLiveSmoke.blockedReason.includes(
-          "_routes_to_",
-        );
+      if (!firstEntryLiveSmoke.handled || bypassFirstEntryLiveSmoke) {
+        const routingReason = firstEntryLiveSmoke.handled
+          ? "guarded_runtime_action_routes_to_agent"
+          : firstEntryLiveSmoke.blockedReason;
+        const routedToAgent = routingReason.includes("_routes_to_");
 
         logJson({
           event: routedToAgent
             ? "first_entry.live_smoke.routed_to_agent"
             : "first_entry.live_smoke.blocked",
-          reason: firstEntryLiveSmoke.blockedReason,
+          reason: routingReason,
           customerPhone: maskPhone(identity.customerPhone),
           sellerId: identity.sellerId,
           conversationKey: maskConversationKey(identity.conversationKey),
@@ -2807,10 +3019,11 @@ export async function processCloudWebhookBody(
           cloudGuardEnabled: firstEntryLiveSmoke.readiness.cloudGuardEnabled,
           cloudDryRunDisabled:
             firstEntryLiveSmoke.readiness.cloudDryRunDisabled,
+          runtimeActionId,
         });
       }
 
-      if (firstEntryLiveSmoke.handled) {
+      if (firstEntryLiveSmoke.handled && !bypassFirstEntryLiveSmoke) {
         const startedAt = Date.now();
         const splitMessages = getFirstEntryLiveSmokeMessages(
           firstEntryLiveSmoke.result,
@@ -2838,6 +3051,7 @@ export async function processCloudWebhookBody(
                 firstEntryLiveSmoke.result,
                 infoMessage.text,
               ),
+              forceDryRun: options.forceDryRun,
             })
           : undefined;
 
@@ -2853,8 +3067,11 @@ export async function processCloudWebhookBody(
         }
 
         let sendResult: CloudReplyDispatchResult;
+        const shouldSendCta = Boolean(
+          ctaMessage && (!infoMessage || firstSendResult?.ok),
+        );
 
-        if (ctaMessage && (!infoMessage || firstSendResult?.ok)) {
+        if (ctaMessage && shouldSendCta) {
           sendResult = await sendAgentCloudResult({
             to: message.waId,
             phoneNumberId: message.phoneNumberId,
@@ -2864,6 +3081,7 @@ export async function processCloudWebhookBody(
               ...firstEntryLiveSmoke.result,
               reply: ctaMessage.text,
             },
+            forceDryRun: options.forceDryRun,
           });
         } else if (firstSendResult) {
           sendResult = firstSendResult;
@@ -2874,6 +3092,7 @@ export async function processCloudWebhookBody(
             customerId,
             userMessage: message.text,
             result: firstEntryLiveSmoke.result,
+            forceDryRun: options.forceDryRun,
           });
         }
 
@@ -2922,6 +3141,34 @@ export async function processCloudWebhookBody(
             reason: sendResult.reason,
             error: sendResult.error,
             firstEntryShownMarked: true,
+          });
+        }
+
+
+        if (infoMessage && firstSendResult) {
+          processResult.outboundMessages.push({
+            kind: firstSendResult.mode === "interactive" ? "interactive" : "text",
+            text: infoMessage.text,
+            actionIds: [],
+            dryRun: firstSendResult.dryRun,
+            success: firstSendResult.ok,
+          });
+        }
+        if (ctaMessage && shouldSendCta) {
+          processResult.outboundMessages.push({
+            kind: sendResult.mode === "interactive" ? "interactive" : "text",
+            text: ctaMessage.text,
+            actionIds: ctaMessage.buttons?.map((button) => button.id) || [],
+            dryRun: sendResult.dryRun,
+            success: sendResult.ok,
+          });
+        } else if (!infoMessage) {
+          processResult.outboundMessages.push({
+            kind: sendResult.mode === "interactive" ? "interactive" : "text",
+            text: firstEntryLiveSmoke.result.reply,
+            actionIds: getReplyActionIds(firstEntryLiveSmoke.result),
+            dryRun: sendResult.dryRun,
+            success: sendResult.ok,
           });
         }
 
@@ -3095,6 +3342,11 @@ export async function processCloudWebhookBody(
         phoneNumberId: identity.phoneNumberId,
         useMemory: true,
         orderRuntimeEnabled: guardedRuntimeLiveSmokeActivation,
+        transportInput: {
+          actionId: transportActionId,
+          normalizedText: message.text,
+          sourceType: message.sourceType || "text",
+        },
         interactiveSendChannel: "whatsapp_cloud",
       });
       const durationMs = result.meta?.durationMs ?? Date.now() - startedAt;
@@ -3115,6 +3367,7 @@ export async function processCloudWebhookBody(
         messagePreview: previewText(message.text),
         replyPreview: previewText(result.reply),
         source: result.source,
+        runtimeActionId,
         durationMs,
         actionsCount: result.actions.length,
         orderStateSummary: result.meta?.orderStateSummary,
@@ -3126,8 +3379,47 @@ export async function processCloudWebhookBody(
         customerId,
         userMessage: message.text,
         result,
+        forceDryRun: options.forceDryRun,
       });
       const sendResult = dispatchFlow.dispatchResult;
+      const splitMessages = getOrderConfirmationMessages(result);
+
+      if (dispatchFlow.orderConfirmationSplit && splitMessages) {
+        if (dispatchFlow.reviewDispatchResult) {
+          processResult.outboundMessages.push({
+            kind: "text",
+            text: splitMessages.review.text,
+            actionIds: [],
+            dryRun: dispatchFlow.reviewDispatchResult.dryRun,
+            success: dispatchFlow.reviewDispatchResult.ok,
+          });
+        }
+        if (dispatchFlow.reviewFailureFallbackResult) {
+          processResult.outboundMessages.push({
+            kind: dispatchFlow.reviewFailureFallbackResult.mode === "interactive" ? "interactive" : "text",
+            text: `${splitMessages.review.text}\n\n${splitMessages.confirmation.fallbackText}`,
+            actionIds: [],
+            dryRun: dispatchFlow.reviewFailureFallbackResult.dryRun,
+            success: dispatchFlow.reviewFailureFallbackResult.ok,
+          });
+        } else {
+          processResult.outboundMessages.push({
+            kind: sendResult.mode === "interactive" ? "interactive" : "text",
+            text: splitMessages.confirmation.text,
+            actionIds: splitMessages.confirmation.buttons.map((button) => button.id),
+            dryRun: sendResult.dryRun,
+            success: sendResult.ok,
+          });
+        }
+      } else {
+        processResult.outboundMessages.push({
+          kind: sendResult.mode === "interactive" ? "interactive" : "text",
+          text: result.reply,
+          actionIds: getReplyActionIds(result),
+          dryRun: sendResult.dryRun,
+          success: sendResult.ok,
+        });
+      }
 
       if (dispatchFlow.orderConfirmationSplit) {
         logJson({
@@ -3143,12 +3435,45 @@ export async function processCloudWebhookBody(
       }
 
       processResult.handled = true;
+      processResult.agentSource = result.source;
       processResult.agentReplyPreview = previewText(result.reply);
       processResult.actionsCount = result.actions.length;
       processResult.sendAttempted = true;
+      let runtimeReceiptSuccess = true;
+      const runtimeReceiptArtifact = result[AGENT_INTERNAL_RECEIPT_ARTIFACT];
+      if (runtimeReceiptArtifact) {
+        if (sendResult.ok) {
+          const receiptDispatch = await dispatchRuntimeReceiptArtifact({
+            artifact: runtimeReceiptArtifact,
+            to: message.waId,
+            phoneNumberId: message.phoneNumberId,
+            forceDryRun: options.forceDryRun,
+            transport: options.runtimeDocumentTransport,
+          });
+          runtimeReceiptSuccess = receiptDispatch.success;
+          processResult.outboundMessages.push({
+            kind: "document",
+            text: `وصل الطلب ${runtimeReceiptArtifact.publicOrderCode}`,
+            actionIds: [],
+            dryRun: receiptDispatch.dryRun,
+            success: receiptDispatch.success,
+            filename: runtimeReceiptArtifact.document.filename,
+            mimeType: runtimeReceiptArtifact.document.mimeType,
+            byteLength: runtimeReceiptArtifact.document.byteLength,
+            checksum: runtimeReceiptArtifact.document.checksum,
+          });
+        } else {
+          runtimeReceiptSuccess = false;
+          await updateRuntimeReceiptDispatch(runtimeReceiptArtifact, {
+            status: "FAILED",
+            failureCode: "CONFIRMATION_TEXT_FAILED",
+            failureMessage: sendResult.error || "Confirmation text dispatch failed",
+          });
+        }
+      }
       processResult.sendSuccess = Boolean(
         (dispatchFlow.reviewDispatchResult?.ok ?? true) && sendResult.ok,
-      );
+      ) && runtimeReceiptSuccess;
 
       if (
         (result.meta?.orderJustConfirmed || result.meta?.receiptRetryRequested) &&

@@ -129,19 +129,36 @@ function preview(currentCart: CartDraft, currentFields: readonly RequiredOrderFi
     items: currentCart.items.map((entry) => ({
       id: entry.id,
       productId: entry.productId,
+      productName: "Untrusted product label",
       quantity: entry.quantity,
       options: Object.entries(entry.selectedOptions).map(([key, value]) => ({
         key,
         label: itemFields.get(key)?.label || key,
         value,
       })),
+      unitPriceMinor: 1,
+      lineTotalMinor: entry.quantity,
+      unitPrice: 0.01,
+      lineTotal: entry.quantity / 100,
     })),
     completedUnits: currentCart.items.reduce((total, entry) => total + entry.quantity, 0),
     orderFields,
     // Deliberately untrusted request-style values. Snapshot pricing must ignore them.
+    standardSubtotalMinor: 100,
     standardSubtotal: 1,
     currency: "USD",
-    selectedOffer: currentCart.selectedOfferId ? { offerId: currentCart.selectedOfferId, total: 1 } : undefined,
+    selectedOffer: currentCart.selectedOfferId
+      ? {
+          offerId: currentCart.selectedOfferId,
+          totalMinor: 100,
+          total: 1,
+          discountMinor: 0,
+          discountAmount: 0,
+        }
+      : undefined,
+    merchandiseTotalMinor: 100,
+    merchandiseTotal: 1,
+    finalTotalMinor: 100,
     finalTotal: 1,
     confirmedAt: CONFIRMED_AT,
   };

@@ -50,7 +50,9 @@ function renderConfirmedPreview(input: {
     cart: input.cartBefore,
     requirements,
     requiredFields: input.source.requiredFields,
+    productContext: input.source.productContext,
     commercial,
+    deliveryPricing: input.source.deliveryPricing,
   });
   if (!review) {
     return createDeliveryConfirmationBlockedResult({
@@ -187,6 +189,7 @@ export function runDeliveryConfirmationService(
         requirements,
         requiredFields: input.requiredFields,
         productContext: input.productContext,
+        deliveryPricing: input.deliveryPricing,
         commercial: evaluateDeliveryCommercial(input, cartBefore),
         changed: false,
       });
@@ -366,7 +369,14 @@ export function runDeliveryConfirmationService(
       warnings: [...commercial.warnings],
     });
   }
-  const finalReview = buildFinalOrderReview({ cart: cartBefore, requirements, requiredFields: input.requiredFields, commercial });
+  const finalReview = buildFinalOrderReview({
+    cart: cartBefore,
+    requirements,
+    requiredFields: input.requiredFields,
+    productContext: input.productContext,
+    commercial,
+    deliveryPricing: input.deliveryPricing,
+  });
   if (!finalReview) {
     return createDeliveryConfirmationBlockedResult({
       cartBefore,

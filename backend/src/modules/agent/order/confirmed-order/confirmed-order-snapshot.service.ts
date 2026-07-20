@@ -1,6 +1,7 @@
 import { resolveCartFieldScope } from "../cart-state.service";
 import type { CartCommercialEvaluation } from "../commercial/cart-commercial-evaluation.types";
 import type { CartPricingQuote } from "../pricing/cart-pricing.types";
+import { resolveReviewDeliveryFee } from "../delivery-confirmation/delivery-review-pricing.service";
 import {
   validateConfirmedOrderSnapshotInput,
 } from "./confirmed-order-snapshot-validator.service";
@@ -154,19 +155,32 @@ export function createConfirmedOrderSnapshot(
   const items = buildItems({ source: { ...input, cart }, quote: standard });
   const standardSubtotalMinor = toMinor(standard.standardSubtotal);
   const finalQuote = selectedPricing || standard;
-  const finalTotalMinor = toMinor(finalQuote.merchandiseTotal);
+  const merchandiseTotalMinor = toMinor(finalQuote.merchandiseTotal);
+  const delivery = resolveReviewDeliveryFee({
+    cart,
+    requiredFields: input.requiredFields,
+    deliveryPricing: input.deliveryPricing,
+  });
   const selectedOffer = selectedPricing ? buildSelectedOffer(selectedPricing) : undefined;
   const recommendedOffer = buildRecommendedOffer({
     source: input,
     commercial: validation.commercialEvaluation,
   });
-  if (!items || standardSubtotalMinor === undefined || finalTotalMinor === undefined || (selectedPricing && !selectedOffer)) {
+  if (
+    !items ||
+    standardSubtotalMinor === undefined ||
+    merchandiseTotalMinor === undefined ||
+    (selectedPricing && !selectedOffer) ||
+    (delivery.configured && !delivery.fee) ||
+    (delivery.fee && delivery.fee.currency !== standard.currency)
+  ) {
     return { success: false, failureCode: "UNSAFE_MONEY_VALUE", warnings: [...validation.warnings] };
   }
   if (items.reduce((total, item) => total + item.lineTotalMinor, 0) !== standardSubtotalMinor) {
     return { success: false, failureCode: "UNSAFE_MONEY_VALUE", warnings: [...validation.warnings] };
   }
 
+  const finalTotalMinor = merchandiseTotalMinor + (delivery.fee?.amountMinor || 0);
   const snapshot: ConfirmedOrderSnapshot = {
     schemaVersion: CONFIRMED_ORDER_SNAPSHOT_SCHEMA_VERSION,
     id: validation.snapshotId,
@@ -197,6 +211,9 @@ export function createConfirmedOrderSnapshot(
     standardSubtotal: fromMinor(standardSubtotalMinor),
     ...(selectedOffer ? { selectedOffer } : {}),
     ...(recommendedOffer ? { recommendedOffer } : {}),
+    merchandiseTotalMinor,
+    merchandiseTotal: fromMinor(merchandiseTotalMinor),
+    ...(delivery.fee ? { deliveryFee: { ...delivery.fee } } : {}),
     finalTotalMinor,
     finalTotal: fromMinor(finalTotalMinor),
     commercialWarnings: [...validation.commercialEvaluation.warnings].map((warning) => text(warning, 160)),
