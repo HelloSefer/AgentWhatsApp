@@ -7,6 +7,7 @@ import {
   type CartCompatibilityResult,
   type CartDraft,
   type CartFieldScope,
+  type CartInitialCollectionMode,
   type CartIntegrityResult,
   type CartItem,
   type CartItemStatus,
@@ -238,6 +239,11 @@ export function areCartItemsMergeCompatible(left: CartItem, right: CartItem): bo
   );
 }
 
+/** True only for a fresh first-entry plan; cart-review edits deliberately clear it. */
+export function usesImplicitPlannedPieceSlots(cart: CartDraft): boolean {
+  return cart.initialCollectionMode === "IMPLICIT_PLANNED_PIECE_SLOTS";
+}
+
 export function getItemRequiredOptionKeys(fields: RequiredOrderField[]): string[] {
   return fields
     .filter(
@@ -265,7 +271,10 @@ function validateCurrentItemCompleteness(input: {
   }
 
   const quantityRequired = isQuantityRequired(input.fields);
-  if (quantityRequired && !input.item.quantityExplicitlySet) {
+  const implicitlyPlannedOnePiece =
+    input.item.quantitySource === "IMPLICIT_PLANNED_SLOT" &&
+    input.item.quantity === 1;
+  if (quantityRequired && !input.item.quantityExplicitlySet && !implicitlyPlannedOnePiece) {
     invalidPaths.push("currentItemDraft.quantity_not_collected");
   }
 
@@ -302,6 +311,13 @@ export function evaluateCartIntegrity(input: {
     invalidPaths.push("targetItemCount");
   }
 
+  if (
+    cart.initialCollectionMode !== undefined &&
+    cart.initialCollectionMode !== "IMPLICIT_PLANNED_PIECE_SLOTS"
+  ) {
+    invalidPaths.push("initialCollectionMode");
+  }
+
   const itemIds = new Set<string>();
   const itemFingerprints = new Set<string>();
   const orderFieldKeys = new Set(
@@ -335,6 +351,13 @@ export function evaluateCartIntegrity(input: {
 
     if (!isValidQuantity(item.quantity)) {
       invalidPaths.push(`${path}.quantity`);
+    }
+    if (
+      item.quantitySource !== undefined &&
+      item.quantitySource !== "EXPLICIT_CUSTOMER" &&
+      item.quantitySource !== "IMPLICIT_PLANNED_SLOT"
+    ) {
+      invalidPaths.push(`${path}.quantitySource`);
     }
 
     if (!item.selectedOptions || Array.isArray(item.selectedOptions) || typeof item.selectedOptions !== "object") {
@@ -466,6 +489,7 @@ export function setCurrentItemQuantity(input: {
   cart: CartDraft;
   productId: string;
   quantity: number;
+  quantitySource?: "EXPLICIT_CUSTOMER" | "IMPLICIT_PLANNED_SLOT";
 }): CartMutationResult {
   const start = input.cart.currentItemDraft
     ? { cart: cloneCart(input.cart), accepted: true }
@@ -480,7 +504,12 @@ export function setCurrentItemQuantity(input: {
   }
 
   start.cart.currentItemDraft.quantity = input.quantity;
-  start.cart.currentItemDraft.quantityExplicitlySet = true;
+  const quantitySource = input.quantitySource || "EXPLICIT_CUSTOMER";
+  if (quantitySource === "IMPLICIT_PLANNED_SLOT" && input.quantity !== 1) {
+    return { cart: start.cart, accepted: false, invalidPaths: ["currentItemDraft.quantity"] };
+  }
+  start.cart.currentItemDraft.quantityExplicitlySet = quantitySource === "EXPLICIT_CUSTOMER";
+  start.cart.currentItemDraft.quantitySource = quantitySource;
   start.cart.status = "COLLECTING_ITEM";
 
   return start;
@@ -571,6 +600,7 @@ export function updateItem(input: {
   if (input.quantity !== undefined) {
     item.quantity = input.quantity;
     item.quantityExplicitlySet = true;
+    item.quantitySource = "EXPLICIT_CUSTOMER";
   }
 
   return { cart, accepted: true };
@@ -644,6 +674,7 @@ export function setCartPlanning(input: {
   mode: CartMode;
   targetItemCount: number;
   selectedOfferId?: string;
+  initialCollectionMode?: CartInitialCollectionMode | null;
 }): CartMutationResult {
   if (!isValidPositiveInteger(input.targetItemCount, MAX_CART_TARGET_ITEM_COUNT)) {
     return { cart: cloneCart(input.cart), accepted: false, invalidPaths: ["targetItemCount"] };
@@ -661,6 +692,11 @@ export function setCartPlanning(input: {
   const cart = cloneCart(input.cart);
   cart.mode = input.mode;
   cart.targetItemCount = input.targetItemCount;
+  if (input.initialCollectionMode === "IMPLICIT_PLANNED_PIECE_SLOTS") {
+    cart.initialCollectionMode = input.initialCollectionMode;
+  } else if (input.initialCollectionMode === null) {
+    delete cart.initialCollectionMode;
+  }
   if (selectedOfferId) {
     cart.selectedOfferId = selectedOfferId;
   } else {
@@ -679,6 +715,7 @@ export function clearCartPlanning(input: { cart: CartDraft }): CartMutationResul
   const cart = cloneCart(input.cart);
   cart.mode = "STANDARD";
   delete cart.targetItemCount;
+  delete cart.initialCollectionMode;
   delete cart.selectedOfferId;
 
   if (cart.items.length === 0 && !cart.currentItemDraft) {

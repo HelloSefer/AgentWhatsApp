@@ -1,4 +1,4 @@
-import { MAX_CART_ITEM_QUANTITY } from "../../cart-state.service";
+import { MAX_CART_ITEM_QUANTITY, usesImplicitPlannedPieceSlots } from "../../cart-state.service";
 import {
   getRequiredItemCollectionFields,
   validateItemCollectionOption,
@@ -171,6 +171,10 @@ export function analyzeItemCollectionProgression(
         invalidFields: [key],
       });
     }
+  }
+
+  if (usesImplicitPlannedPieceSlots(cart)) {
+    return result({ success: true, step: "READY_TO_FINALIZE", progress });
   }
 
   if (!isValidExplicitQuantity(

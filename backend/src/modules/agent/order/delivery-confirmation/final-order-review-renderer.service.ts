@@ -23,18 +23,15 @@ function formatMinor(valueMinor: number, currency: string): string {
 function renderItem(
   item: FinalOrderReview["items"][number],
   index: number,
-  currency: string,
 ): string {
   const options = item.options.map(
-    (option) => `   ${safeText(option.label)}: ${safeText(option.value)}`,
+    (option) => `• ${safeText(option.label)}: ${safeText(option.value)}`,
   );
+  const quantitySuffix = item.quantity > 1 ? ` ×${item.quantity}` : "";
 
   return [
-    `${index + 1}) ${safeText(item.productName)}`,
+    `${index + 1}) ${safeText(item.productName)}${quantitySuffix}`,
     ...options,
-    `   الكمية: ${item.quantity}`,
-    `   ثمن الوحدة: ${formatMinor(item.unitPriceMinor, currency)}`,
-    `   المجموع: ${formatMinor(item.lineTotalMinor, currency)}`,
   ].join("\n");
 }
 
@@ -46,19 +43,18 @@ export function renderFinalOrderReview(review: FinalOrderReview): {
   presentation: OrderConfirmationPresentation;
 } {
   const itemLines = review.items.map((item, index) =>
-    renderItem(item, index, review.currency),
+    renderItem(item, index),
   );
   const deliveryLines = review.orderFields.map(
     (field) => `${safeText(field.label)}: ${safeText(field.value)}`,
   );
   const totals = [
-    `المجموع قبل العرض: ${formatMinor(review.standardSubtotalMinor, review.currency)}`,
+    `مجموع المنتجات: ${formatMinor(review.standardSubtotalMinor, review.currency)}`,
   ];
 
   if (review.selectedOffer) {
     totals.push(`العرض: ${safeText(review.selectedOffer.label || "العرض المختار")}`);
     totals.push(`التخفيض: ${formatMinor(review.selectedOffer.discountMinor, review.currency)}`);
-    totals.push(`مجموع المنتجات بعد العرض: ${formatMinor(review.merchandiseTotalMinor, review.currency)}`);
   }
 
   if (review.deliveryFee) {
@@ -71,11 +67,13 @@ export function renderFinalOrderReview(review: FinalOrderReview): {
   totals.push(`المجموع النهائي: ${formatMinor(review.finalTotalMinor, review.currency)}`);
 
   const text = [
-    "راجع الطلب ديالك قبل التأكيد:",
+    "راجع الطلب ديالك قبل التأكيد 👇",
     "",
     "المنتجات:",
     "",
     itemLines.join("\n\n"),
+    "",
+    `عدد القطع: ${review.completedUnits}`,
     "",
     "معلومات التوصيل:",
     ...deliveryLines,

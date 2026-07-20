@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { env } from "../../../../config/env";
 import { getValkeyClient } from "../../../../infrastructure/valkey/valkey.client";
+import { takeConversationPendingOrderSelections } from "../../session/conversation-session.service";
 import { normalizeSellerConfig } from "../../config/first-entry-config.service";
 import { renderFirstEntryMessage } from "../../config/first-entry-renderer.service";
 import { offerConfigService } from "../../config/offers/offer-config.service";
@@ -16,7 +17,9 @@ import { runCartPlanningPreview } from "../planning/preview/cart-planning-previe
 import {
   recoveryReply,
   replyFromCartReview,
+  replyFromCompletedPlannedItemCartReview,
   replyFromDelivery,
+  replyFromInitialPlannedItemCollection,
   replyFromItemCollection,
   replyFromPlanning,
   staleActionReply,
@@ -179,6 +182,16 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
       await persist(input, runtime, fields);
       return asTurnResult({ text: firstEntry.text, replyUi: firstEntry.uiHints.replyUi, stage: "FIRST_ENTRY", warnings: firstEntry.warnings });
     }
+    const pendingInitialItemOptions = await takeConversationPendingOrderSelections({
+      customerId: input.conversationKey,
+      customerPhone: input.customerPhone,
+      conversationKey: input.conversationKey,
+      sellerId: input.sellerId,
+      productId: productContext.productId,
+    });
+    if (Object.keys(pendingInitialItemOptions).length > 0) {
+      runtime.pendingInitialItemOptions = pendingInitialItemOptions;
+    }
     const planning = runCartPlanningPreview({ previewEnabled: true, rawActionId: "first_entry:order_now", sellerId: input.sellerId, productContext, offerLookup: offers, cart: runtime.cart, previewPlanningState: runtime.planningState, now });
     runtime.cart = planning.cartAfter;
     runtime.planningState = planning.previewPlanningState;
@@ -196,12 +209,43 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     runtime.planningState = planning.previewPlanningState;
     runtime.lastHandledAction = isGuardedOrderRuntimeAction(message) ? message : undefined;
     if (planning.nextStep === "START_ITEM_COLLECTION") {
-      const item = runItemCollectionPreview({ previewEnabled: true, sellerId: input.sellerId, productContext, requiredFields: fields, cart: runtime.cart, previewState: runtime.itemCollectionState });
+      const item = runItemCollectionPreview({
+        previewEnabled: true,
+        sellerId: input.sellerId,
+        productContext,
+        requiredFields: fields,
+        cart: runtime.cart,
+        previewState: runtime.itemCollectionState,
+        initialItemOptions: runtime.pendingInitialItemOptions,
+      });
       runtime.cart = item.cartAfter;
       runtime.itemCollectionState = item.previewState;
+      delete runtime.pendingInitialItemOptions;
+      if (item.nextStep === "CART_REVIEW_READY") {
+        const review = runCartReviewPreview({
+          previewEnabled: true,
+          sellerId: input.sellerId,
+          productContext,
+          requiredFields: fields,
+          offerLookup: offers,
+          cart: runtime.cart,
+          previewState: runtime.cartReviewState,
+          now,
+        });
+        runtime.cart = review.cartAfter;
+        runtime.cartReviewState = review.previewState;
+        runtime.runtimeStage = "CART_REVIEW";
+        await persist(input, runtime, fields);
+        return asTurnResult({
+          ...replyFromCompletedPlannedItemCartReview({ item, review }),
+          stage: runtime.runtimeStage,
+          warnings: [...planning.warnings, ...item.warnings, ...review.warnings],
+          failureCode: review.failureCode,
+        });
+      }
       runtime.runtimeStage = "COLLECTING_ITEM";
       await persist(input, runtime, fields);
-      return asTurnResult({ ...replyFromItemCollection(item), stage: runtime.runtimeStage, warnings: [...planning.warnings, ...item.warnings] });
+      return asTurnResult({ ...replyFromInitialPlannedItemCollection(item, fields), stage: runtime.runtimeStage, warnings: [...planning.warnings, ...item.warnings] });
     }
     await persist(input, runtime, fields);
     return asTurnResult({ ...replyFromPlanning(planning), stage: runtime.runtimeStage, warnings: planning.warnings, failureCode: planning.failureCode });
@@ -223,10 +267,14 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
       runtime.cartReviewState = review.previewState;
       runtime.runtimeStage = "CART_REVIEW";
       await persist(input, runtime, fields);
-      return asTurnResult({ ...replyFromCartReview(review), stage: runtime.runtimeStage, warnings: [...item.warnings, ...review.warnings] });
+      return asTurnResult({
+        ...replyFromCompletedPlannedItemCartReview({ item, review, actionId: message }),
+        stage: runtime.runtimeStage,
+        warnings: [...item.warnings, ...review.warnings],
+      });
     }
     await persist(input, runtime, fields);
-    return asTurnResult({ ...replyFromItemCollection(item), stage: runtime.runtimeStage, warnings: item.warnings });
+    return asTurnResult({ ...replyFromItemCollection(item, fields, message), stage: runtime.runtimeStage, warnings: item.warnings });
   }
 
   if (runtime.runtimeStage === "CART_REVIEW" || runtime.runtimeStage === "EDITING_CART_ITEM") {
@@ -256,8 +304,10 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     runtime.cart = delivery.cartAfter;
     runtime.deliveryConfirmationState = delivery.previewState;
     if (delivery.nextStep === "RETURN_TO_CART_REVIEW") {
+      const opensProductEdit = delivery.normalizedAction?.type === "BACK_TO_CART";
       const review = runCartReviewPreview({
         previewEnabled: true,
+        ...(opensProductEdit ? { rawActionId: "cart_review:edit" } : {}),
         sellerId: input.sellerId,
         productContext,
         requiredFields: fields,

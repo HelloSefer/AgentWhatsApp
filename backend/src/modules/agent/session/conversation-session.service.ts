@@ -456,6 +456,37 @@ export async function clearConversationProductInfoSelection(
   return session;
 }
 
+/**
+ * Transfers soft information preferences only after an explicit order action.
+ * They remain outside the cart until the guarded runtime consumes this result.
+ */
+export async function takeConversationPendingOrderSelections(
+  input: SessionIdentity,
+): Promise<Pick<import("../agent-brain.types").OrderEntities, "size" | "color">> {
+  const session = await getConversationSession(
+    input.customerId,
+    input.sellerId,
+    input.productId,
+    input.customerPhone,
+  );
+  const pending = { ...(session.productInfo?.pendingOrderSelections || {}) };
+  const selections: Pick<import("../agent-brain.types").OrderEntities, "size" | "color"> = {};
+  if (typeof pending.size === "string" && pending.size.trim()) selections.size = pending.size;
+  if (typeof pending.color === "string" && pending.color.trim()) selections.color = pending.color;
+
+  if (Object.keys(selections).length > 0 || session.productInfo?.pendingSelection) {
+    session.productInfo = {
+      ...(session.productInfo || {}),
+      pendingSelection: undefined,
+      pendingOrderSelections: undefined,
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    await saveConversationSession(session);
+  }
+
+  return selections;
+}
+
 export async function appendSellerBrainReplyKey(
   input: SessionIdentity & {
     replyKey: string;

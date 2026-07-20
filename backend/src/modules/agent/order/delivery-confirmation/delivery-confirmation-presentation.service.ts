@@ -62,6 +62,23 @@ function fieldPrompt(field: DeliveryRequirement): string {
   return field.prompt || `عافاك دخل ${field.label}`;
 }
 
+export function buildGroupedDeliveryFieldPresentation(
+  fields: readonly DeliveryRequirement[],
+): DeliveryConfirmationPresentation {
+  const labels = fields.map((field) => field.label).filter(Boolean);
+  return result({
+    kind: "COLLECT_FIELD",
+    promptKey: "COLLECT_ORDER_FIELD",
+    text: [
+      "مزيان، السلة واجدة ✅",
+      "باش نكملو التوصيل، صيفط ليا فمساج واحد:",
+      "",
+      ...labels.map((label) => `• ${label}`),
+    ].join("\n"),
+    field: { key: fields.map((field) => field.key).join(","), label: labels.join("، ") },
+  });
+}
+
 /** Platform-neutral prompts only. Sending is outside the preview boundary. */
 export function buildDeliveryFieldPresentation(
   field: DeliveryRequirement,

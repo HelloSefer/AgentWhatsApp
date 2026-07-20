@@ -5,6 +5,9 @@ import { conversationKeyService } from "../../identity/conversation-key.service"
 import { evaluateGuardedOrderRuntime } from "./order-runtime-eval.service";
 import { evaluateOrderRuntimeWebhookIntegration } from "./order-runtime-webhook-eval.service";
 import { evaluateOrderRuntimeFinalReviewReceipt } from "./order-runtime-final-review-receipt-eval.service";
+import { evaluateTotalPiecePlanning } from "./order-runtime-total-piece-planning-eval.service";
+import { evaluateGroupedDeliveryIntake } from "./order-runtime-grouped-delivery-eval.service";
+import { evaluateDirectProductEditing } from "./order-runtime-direct-product-edit-eval.service";
 import {
   clearOrderRuntimeSession,
   resetOrderRuntimeConversation,
@@ -83,5 +86,20 @@ export async function evaluateOrderRuntimeWebhookController(_req: Request, res: 
 
 export async function evaluateOrderRuntimeFinalReviewReceiptController(_req: Request, res: Response) {
   const report = await evaluateOrderRuntimeFinalReviewReceipt();
+  return res.status(report.strictAcceptance ? 200 : 500).json(report);
+}
+
+export async function evaluateTotalPiecePlanningController(_req: Request, res: Response) {
+  const report = await evaluateTotalPiecePlanning();
+  return res.status(report.strictAcceptance ? 200 : 500).json(report);
+}
+
+export async function evaluateGroupedDeliveryIntakeController(_req: Request, res: Response) {
+  const report = await evaluateGroupedDeliveryIntake();
+  return res.status(report.strictAcceptance ? 200 : 500).json(report);
+}
+
+export async function evaluateDirectProductEditingController(_req: Request, res: Response) {
+  const report = await evaluateDirectProductEditing();
   return res.status(report.strictAcceptance ? 200 : 500).json(report);
 }

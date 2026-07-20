@@ -2,7 +2,7 @@ import type {
   AgentReplyUiHint,
   OrderConfirmationPresentation,
 } from "../../reply/reply-renderer.types";
-import type { CartDraft } from "../cart-state.types";
+import type { CartDraft, SupportedOrderFieldValue } from "../cart-state.types";
 import type { CartPlanningPreviewState } from "../planning/quantity/flow/cart-custom-quantity-flow.types";
 import type { SameAsPreviousPreviewState } from "../item-collection/shortcuts/same-as-previous.types";
 import type { CartReviewPreviewState } from "../cart-review/cart-review.types";
@@ -59,6 +59,8 @@ export type OrderRuntimeSession = {
   conversationKey: string;
   productId: string;
   cart: CartDraft;
+  /** Soft information preferences, transferred only after explicit Order Now. */
+  pendingInitialItemOptions?: Record<string, SupportedOrderFieldValue>;
   runtimeStage: OrderRuntimeStage;
   planningState?: CartPlanningPreviewState;
   itemCollectionState?: SameAsPreviousPreviewState;

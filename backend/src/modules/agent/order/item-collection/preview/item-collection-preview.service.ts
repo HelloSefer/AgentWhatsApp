@@ -1,8 +1,13 @@
-import { initializeCart } from "../../cart-state.service";
+import { initializeCart, usesImplicitPlannedPieceSlots } from "../../cart-state.service";
 import type { CartDraft } from "../../cart-state.types";
 import { handleItemOptionAction } from "../actions/item-option-action-handler.service";
 import { normalizeItemOptionActionId } from "../actions/item-option-action-normalizer.service";
-import { startItemCollection } from "../item-collection.service";
+import {
+  finalizeCurrentItemCollection,
+  setCurrentItemCollectionOption,
+  startItemCollection,
+  startNextItemCollection,
+} from "../item-collection.service";
 import { buildItemCollectionPresentation } from "../presentation/item-collection-presentation.service";
 import { analyzeItemCollectionProgression } from "../progression/item-collection-progression.service";
 import { runItemCollectionLoop } from "../loop/item-collection-loop.service";
@@ -87,6 +92,8 @@ function nextStepFor(
       return "ENTER_ITEM_OPTION";
     case "SELECT_ITEM_QUANTITY":
       return "ENTER_ITEM_QUANTITY";
+    case "CART_REVIEW_READY":
+      return "CART_REVIEW_READY";
     default:
       return undefined;
   }
@@ -108,6 +115,7 @@ function result(input: {
   nextStep?: ItemCollectionPreviewNextStep;
   failureCode?: string;
   warnings?: string[];
+  appliedInitialOptionKeys?: string[];
 }): ItemCollectionPreviewResult {
   return {
     handled: input.handled,
@@ -176,6 +184,9 @@ function result(input: {
       : {}),
     ...(input.nextStep ? { nextStep: input.nextStep } : {}),
     ...(input.failureCode ? { failureCode: input.failureCode } : {}),
+    ...(input.appliedInitialOptionKeys?.length
+      ? { appliedInitialOptionKeys: [...input.appliedInitialOptionKeys] }
+      : {}),
     previewState: { ...input.previewState },
     warnings: [...(input.warnings || [])],
   };
@@ -212,6 +223,90 @@ function describeProgression(input: ItemCollectionPreviewInput, cart: CartDraft)
   };
 }
 
+function applyInitialItemOptions(input: ItemCollectionPreviewInput, cart: CartDraft): {
+  cart: CartDraft;
+  appliedKeys: string[];
+  warnings: string[];
+} {
+  if (
+    !input.initialItemOptions ||
+    cart.items.length > 0 ||
+    !cart.currentItemDraft ||
+    !usesImplicitPlannedPieceSlots(cart)
+  ) {
+    return { cart, appliedKeys: [], warnings: [] };
+  }
+
+  let workingCart = cart;
+  const appliedKeys: string[] = [];
+  const warnings: string[] = [];
+  for (const [optionKey, value] of Object.entries(input.initialItemOptions)) {
+    const applied = setCurrentItemCollectionOption({
+      cart: workingCart,
+      sellerId: input.sellerId,
+      productContext: input.productContext,
+      requiredFields: input.requiredFields,
+      optionKey,
+      value,
+    });
+    if (!applied.success) {
+      warnings.push(`pending_item_option_ignored:${optionKey}`);
+      continue;
+    }
+    workingCart = applied.cart;
+    appliedKeys.push(optionKey);
+  }
+
+  return { cart: workingCart, appliedKeys, warnings };
+}
+
+function automaticallyFinalizePlannedSlot(input: ItemCollectionPreviewInput, cart: CartDraft): {
+  cart: CartDraft;
+  progression: ReturnType<typeof analyzeItemCollectionProgression>;
+  presentation: ReturnType<typeof buildItemCollectionPresentation>;
+  warnings: string[];
+} {
+  const before = describeProgression(input, cart);
+  if (!usesImplicitPlannedPieceSlots(cart) || before.progression.step !== "READY_TO_FINALIZE") {
+    return {
+      cart,
+      progression: before.progression,
+      presentation: before.presentation,
+      warnings: before.progression.warnings,
+    };
+  }
+
+  const finalized = finalizeCurrentItemCollection({
+    cart,
+    sellerId: input.sellerId,
+    productContext: input.productContext,
+    requiredFields: input.requiredFields,
+  });
+  if (!finalized.success || finalized.progress.remainingUnits === 0) {
+    const next = describeProgression(input, finalized.cart);
+    return {
+      cart: finalized.cart,
+      progression: next.progression,
+      presentation: next.presentation,
+      warnings: [...finalized.warnings, ...next.progression.warnings],
+    };
+  }
+
+  const nextItem = startNextItemCollection({
+    cart: finalized.cart,
+    sellerId: input.sellerId,
+    productContext: input.productContext,
+    requiredFields: input.requiredFields,
+  });
+  const next = describeProgression(input, nextItem.cart);
+  return {
+    cart: nextItem.cart,
+    progression: next.progression,
+    presentation: next.presentation,
+    warnings: [...finalized.warnings, ...nextItem.warnings, ...next.progression.warnings],
+  };
+}
+
 /**
  * Explicit preview-only item collection orchestration. The caller owns cart
  * handoff between requests; this module never persists preview state.
@@ -231,7 +326,11 @@ export function runItemCollectionPreview(
       // Give the shortcut handler the caller's original state so it can reject
       // a delayed click that belongs to a previously completed item.
       const shortcut = handleSameAsPreviousAction({ ...input, cart: cartBefore, previewState: input.previewState, rawActionId: input.rawActionId });
-      const next = describeProgression({ ...input, previewState: shortcut.previewState }, shortcut.cartAfter);
+      const completed = automaticallyFinalizePlannedSlot(
+        { ...input, previewState: shortcut.previewState },
+        shortcut.cartAfter,
+      );
+      const next = describeProgression({ ...input, previewState: shortcut.previewState }, completed.cart);
       return result({
         handled: shortcut.handled,
         success: shortcut.success,
@@ -241,14 +340,14 @@ export function runItemCollectionPreview(
             : "OPTION_ACTION"
           : "BLOCKED",
         cartBefore,
-        cartAfter: shortcut.cartAfter,
+        cartAfter: completed.cart,
         progression: next.progression,
         presentation: next.presentation,
         shortcutPresentation: next.shortcutPresentation,
-        previewState: shortcut.previewState,
+        previewState: next.previewState,
         nextStep: next.nextStep,
         failureCode: shortcut.failureCode,
-        warnings: shortcut.warnings,
+        warnings: [...shortcut.warnings, ...completed.warnings],
       });
     }
     const normalization = normalizeItemOptionActionId(input.rawActionId);
@@ -274,7 +373,8 @@ export function runItemCollectionPreview(
       requiredFields: input.requiredFields,
     });
     const cartAfter = actionResult.collectionResult?.cart || cartBefore;
-    const next = describeProgression({ ...input, previewState }, cartAfter);
+    const completed = automaticallyFinalizePlannedSlot({ ...input, previewState }, cartAfter);
+    const next = describeProgression({ ...input, previewState }, completed.cart);
     const nextStep = next.nextStep;
 
     return result({
@@ -286,7 +386,7 @@ export function runItemCollectionPreview(
           : "OPTION_ACTION"
         : "BLOCKED",
       cartBefore,
-      cartAfter,
+      cartAfter: completed.cart,
       actionResult,
       progression: next.progression,
       presentation: next.presentation,
@@ -294,7 +394,7 @@ export function runItemCollectionPreview(
       previewState: next.previewState,
       nextStep,
       failureCode: actionResult.failureCode,
-      warnings: actionResult.warnings,
+      warnings: [...actionResult.warnings, ...completed.warnings],
     });
   }
 
@@ -336,7 +436,9 @@ export function runItemCollectionPreview(
     productContext: input.productContext,
     requiredFields: input.requiredFields,
   });
-  const next = describeProgression(input, collectionResult.cart);
+  const seeded = applyInitialItemOptions(input, collectionResult.cart);
+  const completed = automaticallyFinalizePlannedSlot(input, seeded.cart);
+  const next = describeProgression(input, completed.cart);
   return result({
     handled: true,
     success: collectionResult.success,
@@ -346,7 +448,7 @@ export function runItemCollectionPreview(
         : "COLLECTION_STARTED"
       : "BLOCKED",
     cartBefore,
-    cartAfter: collectionResult.cart,
+    cartAfter: completed.cart,
     collectionResult,
     progression: next.progression,
     presentation: next.presentation,
@@ -354,6 +456,7 @@ export function runItemCollectionPreview(
     previewState: next.previewState,
     nextStep: next.nextStep,
     failureCode: collectionResult.failureCode,
-    warnings: [...collectionResult.warnings, ...next.progression.warnings],
+    warnings: [...collectionResult.warnings, ...seeded.warnings, ...completed.warnings, ...next.progression.warnings],
+    appliedInitialOptionKeys: seeded.appliedKeys,
   });
 }

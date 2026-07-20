@@ -18,8 +18,27 @@ function cleanText(value: string | undefined, fallback: string): string {
   return cleanValue || fallback;
 }
 
+function cleanBodyText(value: string | undefined, fallback: string): string {
+  const candidate = value?.trim() || fallback;
+  return candidate
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\t\f\v ]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function truncateText(value: string, maxLength: number): string {
   const cleanValue = cleanText(value, "");
+
+  if (cleanValue.length <= maxLength) {
+    return cleanValue;
+  }
+
+  return cleanValue.slice(0, Math.max(0, maxLength - 1)).trimEnd();
+}
+
+function truncateBodyText(value: string, maxLength: number): string {
+  const cleanValue = cleanBodyText(value, "");
 
   if (cleanValue.length <= maxLength) {
     return cleanValue;
@@ -32,8 +51,8 @@ function getBodyText(input: {
   replyText: string;
   replyUi: AgentReplyUiHint;
 }): string {
-  return truncateText(
-    cleanText(input.replyUi.body, input.replyText),
+  return truncateBodyText(
+    cleanBodyText(input.replyUi.body, input.replyText),
     MAX_BODY_LENGTH,
   );
 }

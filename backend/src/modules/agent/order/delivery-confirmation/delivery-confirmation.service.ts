@@ -16,6 +16,7 @@ import {
 } from "./delivery-confirmation-context.service";
 import {
   buildDeliveryCollectionResult,
+  receiveGroupedDeliveryFieldValues,
   receiveDeliveryFieldValue,
   renderDeliveryFinalReview,
   startDeliveryCollection,
@@ -192,6 +193,16 @@ export function runDeliveryConfirmationService(
         deliveryPricing: input.deliveryPricing,
         commercial: evaluateDeliveryCommercial(input, cartBefore),
         changed: false,
+      });
+    }
+    if (state.groupedFieldKeys?.length) {
+      return receiveGroupedDeliveryFieldValues({
+        source: input,
+        cartBefore,
+        cart: cartBefore,
+        state,
+        requirements,
+        rawValue: rawText,
       });
     }
     return receiveDeliveryFieldValue({

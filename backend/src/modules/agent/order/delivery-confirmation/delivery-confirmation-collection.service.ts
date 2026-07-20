@@ -1,10 +1,11 @@
 import type { RequiredOrderField } from "../../config/required-fields.types";
 import type { DeliveryPricingConfig } from "../../config/seller-config.types";
 import { setCartStatus, setConfiguredOrderLevelField } from "../cart-state.service";
-import type { CartDraft } from "../cart-state.types";
+import type { CartDraft, SupportedOrderFieldValue } from "../cart-state.types";
 import type { CartCommercialEvaluation } from "../commercial/cart-commercial-evaluation.types";
 import {
   buildDeliveryFieldPresentation,
+  buildGroupedDeliveryFieldPresentation,
   buildFinalOrderReviewPresentation,
 } from "./delivery-confirmation-presentation.service";
 import {
@@ -16,6 +17,11 @@ import {
   validateDeliveryCartLifecycle,
 } from "./delivery-confirmation-context.service";
 import { normalizeDeliveryFieldValue } from "./delivery-field-normalizer.service";
+import {
+  getInitialGroupedDeliveryRequirements,
+  getRemainingGroupedDeliveryRequirements,
+  parseGroupedDeliveryInput,
+} from "./grouped-delivery-input.service";
 import {
   buildFinalOrderReview,
   cloneDeliveryCart,
@@ -46,6 +52,34 @@ export function buildDeliveryCollectionResult(input: {
   action?: DeliveryConfirmationAction;
   warnings?: string[];
 }): DeliveryConfirmationPreviewResult {
+  const grouped = getRemainingGroupedDeliveryRequirements({
+    requirements: input.requirements,
+    groupedFieldKeys: input.state.groupedFieldKeys,
+    hasValue: (value) => typeof value === "string" ? Boolean(value.trim()) : typeof value === "number" ? Number.isFinite(value) : typeof value === "boolean",
+    orderFields: input.cartAfter.orderLevelFields,
+  });
+  if (grouped.length >= 2) {
+    const state: DeliveryConfirmationPreviewState = {
+      version: DELIVERY_CONFIRMATION_PREVIEW_STATE_VERSION,
+      kind: "COLLECTING_DELIVERY",
+      currentFieldKey: grouped[0]!.key,
+      groupedFieldKeys: grouped.map((field) => field.key),
+      ...(input.state.attempts ? { attempts: input.state.attempts } : {}),
+    };
+    return createDeliveryConfirmationResult({
+      handled: true,
+      success: true,
+      changed: input.changed,
+      cartBefore: input.cartBefore,
+      cartAfter: input.cartAfter,
+      previewState: state,
+      presentation: buildGroupedDeliveryFieldPresentation(grouped),
+      commercialEvaluation: input.commercial,
+      ...(input.action ? { normalizedAction: input.action } : {}),
+      nextStep: "COLLECT_ORDER_FIELD",
+      warnings: input.warnings,
+    });
+  }
   const requirement = getCurrentDeliveryRequirement({
     requirements: input.requirements,
     cart: input.cartAfter,
@@ -129,6 +163,107 @@ export function buildDeliveryCollectionResult(input: {
     nextStep: "FINAL_ORDER_REVIEW",
     warnings: input.warnings,
   });
+}
+
+export function receiveGroupedDeliveryFieldValues(input: {
+  source: DeliveryConfirmationPreviewInput;
+  cartBefore: CartDraft;
+  cart: CartDraft;
+  state: DeliveryConfirmationPreviewState;
+  requirements: readonly DeliveryRequirement[];
+  rawValue: string;
+}): DeliveryConfirmationPreviewResult {
+  const grouped = getRemainingGroupedDeliveryRequirements({
+    requirements: input.requirements,
+    groupedFieldKeys: input.state.groupedFieldKeys,
+    hasValue: (value) => typeof value === "string" ? Boolean(value.trim()) : typeof value === "number" ? Number.isFinite(value) : typeof value === "boolean",
+    orderFields: input.cart.orderLevelFields,
+  });
+  if (grouped.length < 2) {
+    return createDeliveryConfirmationBlockedResult({
+      cartBefore: input.cartBefore,
+      previewState: input.state,
+      failureCode: "FIELD_NOT_CURRENTLY_EXPECTED",
+    });
+  }
+
+  const parsed = parseGroupedDeliveryInput({
+    rawText: input.rawValue,
+    requirements: grouped,
+    productContext: input.source.productContext,
+  });
+  let cartAfter = input.cart;
+  let changed = false;
+  for (const requirement of grouped) {
+    const value = parsed.values.get(requirement.key);
+    if (value === undefined) continue;
+    const previous = cartAfter.orderLevelFields[requirement.key];
+    const mutation = setConfiguredOrderLevelField({
+      cart: cartAfter,
+      fields: input.source.requiredFields,
+      fieldKey: requirement.key,
+      value: value as SupportedOrderFieldValue,
+    });
+    if (!mutation.accepted) {
+      return createDeliveryConfirmationBlockedResult({
+        cartBefore: input.cartBefore,
+        previewState: input.state,
+        failureCode: "CART_MUTATION_REJECTED",
+      });
+    }
+    cartAfter = mutation.cart;
+    changed ||= !deliveryValuesEqual(previous, value as SupportedOrderFieldValue);
+  }
+
+  const requirements = getDeliveryRequirementsFor(input.source, cartAfter);
+  const remainingGrouped = getRemainingGroupedDeliveryRequirements({
+    requirements,
+    groupedFieldKeys: input.state.groupedFieldKeys,
+    hasValue: (value) => typeof value === "string" ? Boolean(value.trim()) : typeof value === "number" ? Number.isFinite(value) : typeof value === "boolean",
+    orderFields: cartAfter.orderLevelFields,
+  });
+  const state: DeliveryConfirmationPreviewState = {
+    version: DELIVERY_CONFIRMATION_PREVIEW_STATE_VERSION,
+    kind: "COLLECTING_DELIVERY",
+    ...(remainingGrouped.length ? { currentFieldKey: remainingGrouped[0]!.key } : {}),
+    ...(remainingGrouped.length >= 2 ? { groupedFieldKeys: remainingGrouped.map((field) => field.key) } : {}),
+    ...(parsed.invalidFieldKeys.length || input.state.attempts
+      ? { attempts: Math.min((input.state.attempts || 0) + (parsed.invalidFieldKeys.length ? 1 : 0), 9) }
+      : {}),
+  };
+  const commercial = evaluateDeliveryCommercial(input.source, cartAfter);
+  const result = buildDeliveryCollectionResult({
+    cartBefore: input.cartBefore,
+    cartAfter,
+    state,
+    requirements,
+    requiredFields: input.source.requiredFields,
+    productContext: input.source.productContext,
+    deliveryPricing: input.source.deliveryPricing,
+    commercial,
+    changed,
+    warnings: [...commercial.warnings, ...parsed.invalidFieldKeys.map((key) => `INVALID_GROUPED_DELIVERY_FIELD:${key}`)],
+  });
+
+  const savedLabels = grouped
+    .filter((field) => parsed.values.has(field.key))
+    .map((field) => field.label);
+  const invalidRequirement = grouped.find((field) => parsed.invalidFieldKeys.includes(field.key));
+  if (!result.presentation || (!savedLabels.length && !invalidRequirement)) return result;
+
+  const prefix = invalidRequirement
+    ? `${savedLabels.length ? `${savedLabels.join(" و")} تسجلو ✅\n` : ""}غير ${invalidRequirement.label} ما بانش صحيح.`
+    : result.nextStep === "COLLECT_ORDER_FIELD" && remainingGrouped.length === 0
+      ? `تمام، تسجلو ${savedLabels.join(" و")} ✅`
+      : "";
+  if (!prefix) return result;
+  return {
+    ...result,
+    presentation: {
+      ...result.presentation,
+      text: [prefix, result.presentation.text].filter(Boolean).join("\n"),
+    },
+  };
 }
 
 export function renderDeliveryFinalReview(input: {
@@ -366,15 +501,22 @@ export function startDeliveryCollection(input: {
   if (!lifecycle.accepted) {
     return createDeliveryConfirmationBlockedResult({ cartBefore: input.cartBefore, failureCode: "CART_MUTATION_REJECTED" });
   }
+  const requirements = getDeliveryRequirementsFor(input.source, lifecycle.cart);
+  const grouped = getInitialGroupedDeliveryRequirements(
+    requirements,
+    (value) => typeof value === "string" ? Boolean(value.trim()) : typeof value === "number" ? Number.isFinite(value) : typeof value === "boolean",
+    lifecycle.cart.orderLevelFields,
+  );
   const state: DeliveryConfirmationPreviewState = {
     version: DELIVERY_CONFIRMATION_PREVIEW_STATE_VERSION,
     kind: "COLLECTING_DELIVERY",
+    ...(grouped.length ? { currentFieldKey: grouped[0]!.key, groupedFieldKeys: grouped.map((field) => field.key) } : {}),
   };
   return buildDeliveryCollectionResult({
     cartBefore: input.cartBefore,
     cartAfter: lifecycle.cart,
     state,
-    requirements: getDeliveryRequirementsFor(input.source, lifecycle.cart),
+    requirements,
     requiredFields: input.source.requiredFields,
     productContext: input.source.productContext,
     deliveryPricing: input.source.deliveryPricing,

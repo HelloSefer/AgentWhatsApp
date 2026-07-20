@@ -202,7 +202,13 @@ export async function evaluateItemCollectionLoop(): Promise<ItemCollectionLoopEv
   add(cases, "loop and quantity have no AI Cloud Meta pricing receipt DB or queue dependency", !/from\s+["'][^"']*(?:ollama|openai|\/ai\/|seller-brain|whatsapp|cloud|meta|pricing|commercial|receipt|valkey|redis|database|prisma|typeorm|bull|queue)/i.test(`${loopSource}\n${quantitySource}`));
   add(cases, "loop owns no global mutable state", !/^(?:let|var)\s+/m.test(loopSource));
   const previewSource = readFileSync(join(process.cwd(), "src", "modules", "agent", "order", "item-collection", "preview", "item-collection-preview.service.ts"), "utf8");
-  add(cases, "preview delegates loop without quantity or finalization commands", previewSource.includes("runItemCollectionLoop") && !/\b(?:setCurrentItemCollectionQuantity|finalizeCurrentItemCollection|startNextItemCollection)\b/.test(previewSource));
+  add(
+    cases,
+    "preview keeps explicit quantity outside the initial implicit-slot finalizer",
+    previewSource.includes("runItemCollectionLoop") &&
+      !/\bsetCurrentItemCollectionQuantity\b/.test(previewSource) &&
+      previewSource.includes("automaticallyFinalizePlannedSlot"),
+  );
 
   const d2d1 = await evaluateItemCollectionPreview();
   const d2c = await evaluateItemOptionActions();

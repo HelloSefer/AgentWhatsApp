@@ -21,6 +21,7 @@ export type ItemCollectionFailureCode =
   | "ORDER_SCOPED_FIELD"
   | "INVALID_ITEM_OPTION_VALUE"
   | "INVALID_ITEM_QUANTITY"
+  | "IMPLICIT_PLANNED_QUANTITY"
   | "QUANTITY_EXCEEDS_REMAINING_TARGET"
   | "MISSING_REQUIRED_ITEM_FIELDS"
   | "CART_MUTATION_REJECTED";
@@ -32,10 +33,15 @@ export type ItemCollectionContext = {
 };
 
 export type ItemCollectionProgress = {
+  /** Backward-compatible aliases retained for existing cart/domain consumers. */
   targetUnits: number;
   completedUnits: number;
   remainingUnits: number;
   currentItemNumber?: number;
+  /** Initial planning semantics: physical pieces and one-piece slot index. */
+  plannedPieceCount?: number;
+  completedPieceCount?: number;
+  currentSlotIndex?: number;
 };
 
 export type ItemCollectionInspection = {

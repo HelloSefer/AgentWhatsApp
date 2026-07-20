@@ -5,6 +5,7 @@ import {
   setCurrentItemOption as setCartCurrentItemOption,
   setCurrentItemQuantity as setCartCurrentItemQuantity,
   startCurrentItem,
+  usesImplicitPlannedPieceSlots,
   MAX_CART_ITEM_QUANTITY,
   MAX_CART_TARGET_ITEM_COUNT,
 } from "../cart-state.service";
@@ -57,6 +58,9 @@ function progressFor(cart: CartDraft): ItemCollectionProgress {
     completedUnits: complete,
     remainingUnits,
     ...(cart.currentItemDraft ? { currentItemNumber: cart.items.length + 1 } : {}),
+    plannedPieceCount: targetUnits,
+    completedPieceCount: complete,
+    ...(cart.currentItemDraft ? { currentSlotIndex: complete + 1 } : {}),
   };
 }
 
@@ -245,6 +249,9 @@ export function setCurrentItemCollectionQuantity(input: SetCurrentItemQuantityIn
   const inspection = inspectItemCollectionState(input);
   if (!inspection.valid) return blockedResult(input, inspection.failureCode!);
   if (!input.cart.currentItemDraft) return blockedResult(input, "CURRENT_ITEM_MISSING");
+  if (usesImplicitPlannedPieceSlots(input.cart)) {
+    return blockedResult(input, "IMPLICIT_PLANNED_QUANTITY");
+  }
   if (!isSafeItemQuantity(input.quantity)) return blockedResult(input, "INVALID_ITEM_QUANTITY");
   if (input.quantity > inspection.progress.remainingUnits) return blockedResult(input, "QUANTITY_EXCEEDS_REMAINING_TARGET");
 
@@ -276,7 +283,40 @@ export function finalizeCurrentItemCollection(input: ItemCollectionCommandInput)
     return result({ cart: input.cart, context: input, success: false, changed: false, failureCode: "MISSING_REQUIRED_ITEM_FIELDS", missingItemFields, invalidItemFields });
   }
 
-  const mutation = finalizeCartCurrentItem({ cart: input.cart, fields: input.requiredFields });
+  const implicitSlot = usesImplicitPlannedPieceSlots(input.cart);
+  if (implicitSlot && draft.quantityExplicitlySet && draft.quantity !== 1) {
+    return result({
+      cart: input.cart,
+      context: input,
+      success: false,
+      changed: false,
+      failureCode: "IMPLICIT_PLANNED_QUANTITY",
+      missingItemFields,
+      invalidItemFields,
+    });
+  }
+
+  const quantityPrepared = implicitSlot
+    ? setCartCurrentItemQuantity({
+        cart: input.cart,
+        productId: input.productContext.productId,
+        quantity: 1,
+        quantitySource: "IMPLICIT_PLANNED_SLOT",
+      })
+    : { cart: input.cart, accepted: true };
+  if (!quantityPrepared.accepted) {
+    return result({
+      cart: quantityPrepared.cart,
+      context: input,
+      success: false,
+      changed: false,
+      failureCode: "CART_MUTATION_REJECTED",
+      missingItemFields,
+      invalidItemFields,
+    });
+  }
+
+  const mutation = finalizeCartCurrentItem({ cart: quantityPrepared.cart, fields: input.requiredFields });
   if (!mutation.accepted) {
     return result({ cart: mutation.cart, context: input, success: false, changed: false, failureCode: "CART_MUTATION_REJECTED", invalidItemFields: mutation.invalidPaths });
   }

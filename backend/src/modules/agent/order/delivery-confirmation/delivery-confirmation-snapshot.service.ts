@@ -32,7 +32,10 @@ export function cloneDeliveryCart(cart: CartDraft): CartDraft {
 export function cloneDeliveryPreviewState(
   state: DeliveryConfirmationPreviewState,
 ): DeliveryConfirmationPreviewState {
-  return { ...state };
+  return {
+    ...state,
+    ...(state.groupedFieldKeys ? { groupedFieldKeys: [...state.groupedFieldKeys] } : {}),
+  };
 }
 
 export function cloneDeliveryCommercialEvaluation(

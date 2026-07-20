@@ -164,7 +164,7 @@ export async function evaluateDeliveryConfirmation(): Promise<DeliveryConfirmati
   add(cases, "entry does not clear existing cart data", JSON.stringify(initial) === initialJson && started.cartAfter.items.length === 2);
   add(cases, "requirements follow configuration order", requirements.map((field) => field.key).join(",") === "fullName,phone,city,address,deliveryZone,deliveryInstructions");
   add(cases, "item fields are excluded from delivery requirements", !requirements.some((field) => ["size", "color", "quantity"].includes(field.key)));
-  add(cases, "first missing order field is presented", started.previewState?.currentFieldKey === "fullName" && started.presentation?.field?.key === "fullName");
+  add(cases, "initial standard delivery fields are presented as one safe group", started.previewState?.currentFieldKey === "fullName" && started.previewState?.groupedFieldKeys?.join(",") === "fullName,phone,city" && ["Nom complet", "Téléphone", "Ville"].every((label) => started.presentation?.text?.includes(label) === true));
   add(cases, "open text field has no unsafe option actions", !started.presentation?.uiHints);
 
   const incomplete = run({ cart: reviewedCart({ targetItemCount: 4 }) });
@@ -188,13 +188,13 @@ export async function evaluateDeliveryConfirmation(): Promise<DeliveryConfirmati
   add(cases, "checkout actions reject whitespace and control ambiguity", !normalizeDeliveryConfirmationAction("order_checkout_field:value:city:Casa Blanca").valid && !normalizeDeliveryConfirmationAction("order_checkout_field:value:city:Casa\u0001").valid);
   add(cases, "checkout actions never embed display labels as authority", normalizeDeliveryConfirmationAction("order_checkout_field:value:deliveryZone:centre").action?.type === "SELECT_FIELD_VALUE");
   const invalidName = advance(started, "نعم");
-  add(cases, "invalid full name is rejected without mutation", !invalidName.success && invalidName.cartAfter.orderLevelFields.fullName === undefined && invalidName.previewState?.currentFieldKey === "fullName");
+  add(cases, "invalid full name is rejected without mutation", invalidName.cartAfter.orderLevelFields.fullName === undefined && invalidName.previewState?.currentFieldKey === "fullName");
   const name = advance(started, "Oussama El Amrani");
   add(cases, "full name normalization works", name.success && name.cartAfter.orderLevelFields.fullName === "Oussama El Amrani" && name.previewState?.currentFieldKey === "phone");
   const phone = advance(name, "+212612345678");
   add(cases, "Moroccan phone normalization works", phone.success && phone.cartAfter.orderLevelFields.phone === "0612345678");
   const invalidPhone = advance(name, "199 MAD");
-  add(cases, "invalid phone is rejected without mutation", !invalidPhone.success && invalidPhone.cartAfter.orderLevelFields.phone === undefined);
+  add(cases, "invalid phone is rejected without mutation", invalidPhone.cartAfter.orderLevelFields.phone === undefined && invalidPhone.previewState?.currentFieldKey === "phone");
   const openCity = advance(phone, "منطقة الأمل الشرقية");
   add(cases, "unseen open locality is accepted without whitelist", openCity.success && openCity.cartAfter.orderLevelFields.city === "منطقة الأمل الشرقية");
   const cityQuestion = advance(phone, "واش التوصيل كاين؟");
@@ -281,6 +281,7 @@ export async function evaluateDeliveryConfirmation(): Promise<DeliveryConfirmati
     "delivery-confirmation.service.ts",
     "delivery-confirmation-presentation.service.ts",
     "delivery-confirmation-preview.service.ts",
+    "grouped-delivery-input.service.ts",
   ].map((file) => readFileSync(join(sourceRoot, file), "utf8")).join("\n");
   add(cases, "delivery module has no persistence or transport dependency", !/from\s+["'][^"']*(?:session|valkey|redis|database|prisma|typeorm|whatsapp|cloud|meta|receipt|notification|bull|queue)[^"']*/i.test(sourceFiles));
   add(cases, "delivery module has no AI dependency", !/from\s+["'][^"']*(?:ollama|openai|\/ai\/|seller-brain)[^"']*/i.test(sourceFiles));

@@ -30,6 +30,7 @@ function samePlanningState(left: CartDraft, right: CartDraft): boolean {
     left.mode === right.mode &&
     left.status === right.status &&
     left.targetItemCount === right.targetItemCount &&
+    left.initialCollectionMode === right.initialCollectionMode &&
     left.selectedOfferId === right.selectedOfferId
   );
 }
@@ -110,6 +111,7 @@ function applyStandardPlanning(
     cart: context.cart,
     mode: "STANDARD",
     targetItemCount,
+    initialCollectionMode: "IMPLICIT_PLANNED_PIECE_SLOTS",
   });
   if (!mutation.accepted) {
     return failure(context, command, "INVALID_QUANTITY");
@@ -177,6 +179,7 @@ function applyOfferSelection(
     mode: "OFFER",
     targetItemCount: offer.requiredItemCount,
     selectedOfferId: offer.id,
+    initialCollectionMode: "IMPLICIT_PLANNED_PIECE_SLOTS",
   });
   if (!mutation.accepted) {
     return failure(context, command, "INVALID_OFFER_CONFIG");
@@ -311,6 +314,7 @@ function applyReviewPlanning(input: {
     mode: input.mode,
     targetItemCount: input.targetItemCount,
     ...(input.selectedOfferId ? { selectedOfferId: input.selectedOfferId } : {}),
+    initialCollectionMode: null,
   });
   if (!planning.accepted) {
     return failure(input.context, input.command, "INVALID_QUANTITY");

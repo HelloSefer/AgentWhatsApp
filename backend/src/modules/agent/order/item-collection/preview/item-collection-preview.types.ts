@@ -1,6 +1,6 @@
 import type { ProductContext } from "../../../config/product-context.types";
 import type { RequiredOrderField } from "../../../config/required-fields.types";
-import type { CartDraft } from "../../cart-state.types";
+import type { CartDraft, SupportedOrderFieldValue } from "../../cart-state.types";
 import type { ItemOptionActionHandleResult } from "../actions/item-option-action.types";
 import type { ItemCollectionCommandResult } from "../item-collection.types";
 import type { ItemCollectionPresentationResult } from "../presentation/item-collection-presentation.types";
@@ -29,6 +29,8 @@ export type ItemCollectionPreviewInput = {
   previewEnabled: boolean;
   rawActionId?: unknown;
   itemCollectionText?: unknown;
+  /** Validated information preferences may seed only the first planned slot. */
+  initialItemOptions?: Readonly<Record<string, SupportedOrderFieldValue>>;
   previewState?: SameAsPreviousPreviewState;
   cart?: CartDraft;
   sellerId: string;
@@ -52,4 +54,5 @@ export type ItemCollectionPreviewResult = {
   nextStep?: ItemCollectionPreviewNextStep;
   failureCode?: string;
   warnings: string[];
+  appliedInitialOptionKeys?: string[];
 };

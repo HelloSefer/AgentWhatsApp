@@ -135,12 +135,11 @@ async function startStandardCart(scope: Scope, units: 1 | 2): Promise<WebhookRes
   await action(scope, "first_entry:order_now");
   let result = await action(scope, `cart_quantity:${units}`);
   await action(scope, "cart_item_option:size:38");
-  await action(scope, "cart_item_option:color:أسود");
-  result = await receive({ scope, text: "1" });
+  result = await action(scope, "cart_item_option:color:أسود");
   if (units === 2) {
+    await action(scope, "cart_item_previous:different");
     await action(scope, "cart_item_option:size:40");
-    await action(scope, "cart_item_option:color:وردي");
-    result = await receive({ scope, text: "1" });
+    result = await action(scope, "cart_item_option:color:وردي");
   }
   return result;
 }
@@ -293,10 +292,10 @@ export async function evaluateOrderRuntimeFinalReviewReceipt(): Promise<OrderRun
     add(assertions, "review includes first selected size", initialText.includes("المقاس: 38"));
     add(assertions, "review includes second selected size", initialText.includes("المقاس: 40"));
     add(assertions, "review includes every selected color", initialText.includes("اللون: أسود") && initialText.includes("اللون: وردي"));
-    add(assertions, "review includes item quantities", (initialText.match(/الكمية: 1/g) || []).length === 2);
-    add(assertions, "review includes authoritative unit prices", (initialText.match(/ثمن الوحدة: 199 درهم/g) || []).length === 2);
-    add(assertions, "review includes authoritative line totals", (initialText.match(/المجموع: 199 درهم/g) || []).length === 2);
-    add(assertions, "review includes standard subtotal", initialText.includes("المجموع قبل العرض: 398 درهم"));
+    add(assertions, "review omits redundant quantity one lines", !initialText.includes("الكمية: 1"));
+    add(assertions, "review omits per-item unit prices", !initialText.includes("ثمن الوحدة:"));
+    add(assertions, "review omits per-item line totals", !initialText.includes("   المجموع:"));
+    add(assertions, "review includes authoritative standard subtotal once", (initialText.match(/مجموع المنتجات:/g) || []).length === 1 && initialText.includes("مجموع المنتجات: 398 درهم"));
     add(assertions, "review includes configured paid delivery", initialText.includes("التوصيل: 30 درهم"));
     add(assertions, "review includes final total with delivery", initialText.includes("المجموع النهائي: 428 درهم"));
     add(assertions, "review includes full name", initialText.includes("الاسم الكامل: عمر العزري"));
@@ -315,8 +314,13 @@ export async function evaluateOrderRuntimeFinalReviewReceipt(): Promise<OrderRun
     const editCart = await action(scope, "order_checkout:back_to_cart");
     runtime = await loadRuntime(scope);
     add(assertions, "cart edit action does not confirm", runtime?.runtimeStage === "CART_REVIEW" && !runtime.confirmed);
-    add(assertions, "cart edit reuses existing cart review presentation", actionIds(editCart).includes("cart_review:edit") && actionIds(editCart).includes("cart_review:continue"));
-    await action(scope, "cart_review:edit");
+    add(
+      assertions,
+      "cart edit opens the canonical item selector directly",
+      actionIds(editCart).some((id) => id.startsWith("cart_review_item:select:")) && editCart.outboundMessages[0]?.text.includes("اختار قطعة") === true,
+      JSON.stringify({ actionIds: actionIds(editCart), text: editCart.outboundMessages[0]?.text }),
+    );
+    add(assertions, "cart edit does not require a second generic review click", !actionIds(editCart).includes("cart_review:edit") && !editCart.outboundMessages[0]?.text.includes("راجع السلة ديالك قبل ما نكملو"));
     await action(scope, `cart_review_item:select:${firstItemId}`);
     await action(scope, `cart_review_item:options:${firstItemId}`);
     await action(scope, "cart_item_option:size:39");

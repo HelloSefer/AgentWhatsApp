@@ -1,3 +1,4 @@
+import { usesImplicitPlannedPieceSlots } from "../../cart-state.service";
 import type { CartDraft, SupportedOrderFieldValue } from "../../cart-state.types";
 import { getRequiredItemCollectionFields, validateItemCollectionOption } from "../item-collection-requirements.service";
 import { setCurrentItemCollectionOption } from "../item-collection.service";
@@ -303,7 +304,10 @@ export function handleSameAsPreviousAction(input: SameAsPreviousInput & { rawAct
   }
 
   const next = describe(input, workingCart);
-  if (next.progression.step !== "COLLECT_QUANTITY") {
+  const expectedStep = usesImplicitPlannedPieceSlots(workingCart)
+    ? "READY_TO_FINALIZE"
+    : "COLLECT_QUANTITY";
+  if (next.progression.step !== expectedStep) {
     return handleResult({ handled: true, success: false, changed: false, cartBefore, action: normalization.action, progression: current.progression, presentation: current.presentation, previewState: state, failureCode: "COPY_NOT_COMPLETE", warnings: next.progression.warnings });
   }
 

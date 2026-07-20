@@ -24,6 +24,8 @@ export type DeliveryConfirmationPreviewState = Readonly<{
   version: typeof DELIVERY_CONFIRMATION_PREVIEW_STATE_VERSION;
   kind: DeliveryConfirmationPreviewKind;
   currentFieldKey?: string;
+  /** Initial standard delivery fields requested together, when configuration permits it. */
+  groupedFieldKeys?: readonly string[];
   editingFieldKey?: string;
   attempts?: number;
   confirmedAt?: string;
