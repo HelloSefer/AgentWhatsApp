@@ -78,7 +78,7 @@ export type GenerateAgentOptions = {
   interactiveEnabledOverride?: boolean;
   /** Explicit activation from API tests or a trusted server-side transport guard. */
   orderRuntimeEnabled?: boolean;
-  /** Trusted Cloud/Baileys metadata; never read from public request bodies. */
+  /** Trusted Cloud transport metadata; never read from public request bodies. */
   transportInput?: AgentInboundTransportInput;
 };
 

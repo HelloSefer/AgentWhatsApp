@@ -10,7 +10,6 @@ export type InteractiveSendDecisionReason =
 export type InteractiveSendChannel =
   | "test"
   | "whatsapp_cloud"
-  | "baileys"
   | "unknown";
 
 export type InteractiveSendDecision = {
