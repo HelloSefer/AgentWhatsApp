@@ -9,6 +9,7 @@ export interface ProductContext {
   businessName: string;
   productId?: string;
   productName: string;
+  conversationalProductName?: string;
   category?: string;
   description?: string;
   price?: string;

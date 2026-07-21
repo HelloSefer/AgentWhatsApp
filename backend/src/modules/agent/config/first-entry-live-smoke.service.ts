@@ -365,14 +365,8 @@ function buildFirstEntryInteractivePayload(input: {
   };
 }
 
-function getSplitCtaQuestion(firstEntry: IntentAwareFirstEntryPreviewResult): string {
-  const style = firstEntry.renderResult.policy.greetingStyle;
-
-  if (style === "professional") {
-    return "كيف ترغب أن نكمل؟";
-  }
-
-  return "شنو بغيتي ندير دابا؟";
+function getSplitCtaQuestion(): string {
+  return "شنو بغيتي دابا: دير الطلب ✅ ولا تعرف المزيد من المعلومات على المنتج؟";
 }
 
 function normalizeInfoLine(line: string): string {
@@ -420,7 +414,7 @@ function buildFirstEntryPresentation(
 ): FirstEntryLiveSmokePresentation {
   const infoText = buildFirstEntryInfoText(firstEntry);
   const buttons = getFirstEntryButtons(firstEntry);
-  const ctaText = getSplitCtaQuestion(firstEntry);
+  const ctaText = getSplitCtaQuestion();
 
   if (!buttons.length) {
     return {

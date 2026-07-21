@@ -5,6 +5,7 @@ export const demoProductContexts: ProductContext[] = [
     sellerId: "seller_demo_sandals",
     productId: "prod_demo_sandal_001",
     name: "صندالة نسائية",
+    conversationalName: "الصندالة",
     description: "صندالة نسائية مناسبة للاستعمال اليومي والخروج.",
     price: 199,
     currency: "MAD",

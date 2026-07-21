@@ -591,6 +591,7 @@ function toAgentProductContext(input: {
     businessName: input.sellerConfig.businessName,
     productId: input.configProductContext.productId,
     productName: input.configProductContext.name,
+    conversationalProductName: input.configProductContext.conversationalName,
     description: input.configProductContext.description,
     price: String(input.configProductContext.price),
     currency:

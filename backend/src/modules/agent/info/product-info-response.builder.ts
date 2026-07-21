@@ -143,12 +143,20 @@ function getTextFallback(options: Array<{ label: string }>): string {
   return options.map((option) => `- ${option.label}`).join("\n");
 }
 
+function getConversationalProductName(productContext: ProductContext): string {
+  return (
+    productContext.conversationalProductName?.trim() ||
+    productContext.productName.trim() ||
+    "المنتج"
+  );
+}
+
 function buildMenuReply(input: ProductInfoReplyInput): RenderedAgentReply {
   const options = getMenuOptions(input.productContext);
   const heading =
     ["info:menu", "info:more_info"].includes(input.message.trim()) || input.message.includes("معلومات")
       ? "اختار المعلومة اللي بغيتي 👇"
-      : "أكيد 👌\nشنو بغيتي تعرف على المنتج؟";
+      : `أكيد 👌 شنو بغيتي تعرف على ${getConversationalProductName(input.productContext)}؟`;
   const textMode = input.infoMenuDisplayMode === "text";
 
   return {

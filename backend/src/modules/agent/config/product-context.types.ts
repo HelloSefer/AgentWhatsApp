@@ -44,6 +44,8 @@ export type ProductContext = {
   sellerId: string;
   productId: string;
   name: string;
+  /** Short natural name used only in customer-facing conversational copy. */
+  conversationalName?: string;
   description?: string;
   price: number;
   oldPrice?: number;
