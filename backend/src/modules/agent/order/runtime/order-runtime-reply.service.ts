@@ -144,6 +144,9 @@ export function replyFromInitialPlannedItemCollection(
   result: ItemCollectionPreviewResult,
   fields: readonly RequiredOrderField[] = [],
 ): RuntimeReply {
+  if (result.nextStep === "SAME_OR_DIFFERENT_ITEM_OPTIONS") {
+    return replyFromItemCollection(result, fields);
+  }
   const itemReply = replyFromItemCollection(result, fields);
   const text = buildInitialPlannedPieceCopy({
     plannedPieceCount: plannedPieceCount(result),

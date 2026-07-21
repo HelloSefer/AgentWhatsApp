@@ -8,6 +8,7 @@ import { evaluateOrderRuntimeFinalReviewReceipt } from "./order-runtime-final-re
 import { evaluateTotalPiecePlanning } from "./order-runtime-total-piece-planning-eval.service";
 import { evaluateGroupedDeliveryIntake } from "./order-runtime-grouped-delivery-eval.service";
 import { evaluateDirectProductEditing } from "./order-runtime-direct-product-edit-eval.service";
+import { evaluateMoreInfoOrderContinuation } from "./order-runtime-more-info-continuation-eval.service";
 import {
   clearOrderRuntimeSession,
   resetOrderRuntimeConversation,
@@ -101,5 +102,10 @@ export async function evaluateGroupedDeliveryIntakeController(_req: Request, res
 
 export async function evaluateDirectProductEditingController(_req: Request, res: Response) {
   const report = await evaluateDirectProductEditing();
+  return res.status(report.strictAcceptance ? 200 : 500).json(report);
+}
+
+export async function evaluateMoreInfoOrderContinuationController(_req: Request, res: Response) {
+  const report = await evaluateMoreInfoOrderContinuation();
   return res.status(report.strictAcceptance ? 200 : 500).json(report);
 }

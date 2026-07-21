@@ -35,18 +35,18 @@ import type {
 } from "./order-runtime.types";
 
 export function isGuardedOrderRuntimeAction(message: string): boolean {
-  return /^(?:first_entry:order_now|info:order_now|cart_offer:.+|cart_quantity:.+|cart_item_option:.+|cart_item_previous:(?:same|different)|cart_review:.+|cart_review_item:.+|cart_review_item_edit:.+|order_checkout:.+|order_checkout_field:.+)$/.test(message);
+  return /^(?:first_entry:order_now|info:(?:order_now|continue_order)|cart_offer:.+|cart_quantity:.+|cart_item_option:.+|cart_item_previous:(?:same|different)|cart_review:.+|cart_review_item:.+|cart_review_item_edit:.+|order_checkout:.+|order_checkout_field:.+)$/.test(message);
 }
 
 function isInformationAction(message: string): boolean {
-  return /^(?:first_entry:more_info|info:(?:price|sizes|colors|delivery_payment|availability|how_to_order|menu|more_info|continue_order))$/.test(message);
+  return /^(?:first_entry:more_info|info:(?:price|sizes|colors|delivery_payment|availability|how_to_order|menu|more_info))$/.test(message);
 }
 
 function normalizeRuntimeMessage(
   message: string,
   stage: OrderRuntimeStage,
 ): string {
-  return stage === "FIRST_ENTRY" && message === "info:order_now"
+  return stage === "FIRST_ENTRY" && (message === "info:order_now" || message === "info:continue_order")
     ? "first_entry:order_now"
     : message;
 }

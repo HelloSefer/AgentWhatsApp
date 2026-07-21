@@ -40,6 +40,7 @@ import {
   evaluateTotalPiecePlanningController,
   evaluateGroupedDeliveryIntakeController,
   evaluateDirectProductEditingController,
+  evaluateMoreInfoOrderContinuationController,
   evaluateOrderRuntimeWebhookController,
   getOrderRuntimeReadinessController,
   resetOrderRuntimeController,
@@ -56,6 +57,7 @@ router.post("/order-runtime/final-review-receipt-eval", evaluateOrderRuntimeFina
 router.post("/order-runtime/total-piece-planning-eval", evaluateTotalPiecePlanningController);
 router.post("/order-runtime/grouped-delivery-eval", evaluateGroupedDeliveryIntakeController);
 router.post("/order-runtime/direct-product-edit-eval", evaluateDirectProductEditingController);
+router.post("/order-runtime/more-info-continuation-eval", evaluateMoreInfoOrderContinuationController);
 router.post("/first-entry-dry-run", firstEntryDryRun);
 router.post("/first-entry-click-preview", firstEntryClickPreview);
 router.get("/first-entry-readiness", getFirstEntryReadiness);

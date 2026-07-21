@@ -136,9 +136,9 @@ export interface ConversationSession {
   };
   productInfo?: {
     lastTopic?: "menu" | "price" | "sizes" | "colors" | "delivery_payment" | "availability" | "how_to_order";
-    pendingSelection?: "size" | "color";
+    pendingSelection?: string;
     /** Browsing preferences are not order fields until Continue Order is selected. */
-    pendingOrderSelections?: Pick<OrderEntities, "size" | "color">;
+    pendingOrderSelections?: Record<string, string>;
     lastUpdatedAt?: string;
   };
   /** Guarded Phase 6.3 workflow state. It is separate from legacy orderState. */

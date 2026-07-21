@@ -438,7 +438,7 @@ export function runItemCollectionPreview(
   });
   const seeded = applyInitialItemOptions(input, collectionResult.cart);
   const completed = automaticallyFinalizePlannedSlot(input, seeded.cart);
-  const next = describeProgression(input, completed.cart);
+  const next = describeProgression({ ...input, previewState }, completed.cart);
   return result({
     handled: true,
     success: collectionResult.success,

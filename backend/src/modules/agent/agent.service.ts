@@ -363,16 +363,23 @@ function withColorArticle(color: string): string {
 }
 
 function buildSoftInfoSelectionResult(input: {
-  field: "size" | "color";
+  field: string;
+  fieldLabel?: string;
   value: string;
   textMode?: boolean;
 }): AgentResult {
+  const label = input.fieldLabel || (input.field === "size"
+    ? "المقاس"
+    : input.field === "color"
+      ? "اللون"
+      : "الاختيار");
   const selectionText =
     input.field === "size"
       ? `المقاس ${input.value} متوفر ✅`
-      : `اللون ${withColorArticle(input.value)} متوفر ✅`;
-  const fieldLabel = input.field === "size" ? "المقاس" : "اللون";
-  const body = `${selectionText}\n\nبغيتي نكمل لك الطلب بهذا ${fieldLabel}، ولا تشوف معلومات أخرى؟`;
+      : input.field === "color"
+        ? `اللون ${withColorArticle(input.value)} متوفر ✅`
+        : `${label} ${input.value} متوفر ✅`;
+  const body = `${selectionText}\n\nبغيتي نكمل لك الطلب بهذا ${label}، ولا تشوف معلومات أخرى؟`;
   const fallback = `${body}\n\nكتب "نكمل الطلب" باش نكملو الطلب، أو "معلومات أخرى" باش تشوف معلومات أخرى.`;
 
   return {
@@ -405,7 +412,7 @@ function buildSoftInfoSelectionResult(input: {
 
 async function saveSoftInfoPreference(input: {
   options?: GenerateAgentOptions;
-  field: "size" | "color";
+  field: string;
   value: string;
 }): Promise<void> {
   if (!input.options?.useMemory || !input.options.customerId) {
@@ -446,7 +453,7 @@ async function saveSoftInfoPreference(input: {
 async function updateProductInfoMarker(input: {
   options?: GenerateAgentOptions;
   topic?: "menu" | "price" | "sizes" | "colors" | "delivery_payment" | "availability" | "how_to_order";
-  pendingSelection?: "size" | "color";
+  pendingSelection?: string;
 }): Promise<void> {
   if (!input.options?.useMemory || !input.options.customerId || !input.topic) {
     return;
@@ -479,9 +486,43 @@ async function clearProductInfoPendingSelection(
   });
 }
 
+function normalizeConfiguredOptionText(value: string): string {
+  return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
+}
+
+function getConfiguredInfoSelectionFromMessage(
+  message: string,
+  requiredFields: RequiredOrderField[] | undefined,
+): { field: string; fieldLabel?: string; value: string } | null {
+  const match = message.trim().match(/^([a-zA-Z][a-zA-Z0-9_-]{0,79}):(.+)$/);
+  if (!match || !requiredFields?.length) {
+    return null;
+  }
+
+  const [, rawFieldKey, rawValue] = match;
+  const field = requiredFields.find(
+    (candidate) =>
+      candidate.source === "productOption" &&
+      candidate.key.trim().toLocaleLowerCase() === rawFieldKey.trim().toLocaleLowerCase(),
+  );
+  if (!field?.options?.length) {
+    return null;
+  }
+
+  const normalizedValue = normalizeConfiguredOptionText(rawValue);
+  const configuredValue = field.options.find(
+    (option) => normalizeConfiguredOptionText(option) === normalizedValue,
+  );
+
+  return configuredValue
+    ? { field: field.key, fieldLabel: field.label, value: configuredValue }
+    : null;
+}
+
 async function buildSoftInfoSelectionResultIfHandled(input: {
   userMessage: string;
   productContext: ProductContext;
+  requiredFields?: RequiredOrderField[];
   options?: GenerateAgentOptions;
   infoMenuDisplayMode: SellerConfig["interactive"]["infoMenuDisplayMode"];
 }): Promise<AgentResult | null> {
@@ -505,14 +546,20 @@ async function buildSoftInfoSelectionResultIfHandled(input: {
     return null;
   }
 
-  const selection = getInfoSelectionFromMessage(
+  const configuredSelection = getConfiguredInfoSelectionFromMessage(
     input.userMessage,
-    input.productContext,
+    input.requiredFields,
   );
+  const selection =
+    configuredSelection ||
+    getInfoSelectionFromMessage(input.userMessage, input.productContext);
 
   if (!selection || selection.field !== pendingSelection) {
     return null;
   }
+  const fieldLabel =
+    configuredSelection?.fieldLabel ||
+    input.requiredFields?.find((field) => field.key === selection.field)?.label;
 
   await saveSoftInfoPreference({
     options: input.options,
@@ -523,6 +570,7 @@ async function buildSoftInfoSelectionResultIfHandled(input: {
 
   return buildSoftInfoSelectionResult({
     field: selection.field,
+    fieldLabel,
     value: selection.value,
     textMode: input.infoMenuDisplayMode === "text",
   });
@@ -1695,6 +1743,7 @@ export async function generateAgentResult(
   const softInfoSelectionResult = await buildSoftInfoSelectionResultIfHandled({
     userMessage,
     productContext: runtimeProductContext,
+    requiredFields,
     options: activeOptions,
     infoMenuDisplayMode,
   });

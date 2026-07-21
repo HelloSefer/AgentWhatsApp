@@ -251,10 +251,23 @@ export function normalizeInfoOrderMessage(message: string): string {
 export function getInfoSelectionFromMessage(
   message: string,
   productContext: ProductContext,
-): { field: "size"; value: string } | { field: "color"; value: string } | null {
+): { field: string; value: string } | null {
   const cleanMessage = message.trim();
   const explicitSize = cleanMessage.match(/^size:(.+)$/i)?.[1]?.trim();
   const explicitColor = cleanMessage.match(/^color:(.+)$/i)?.[1]?.trim();
+  const explicitOption = cleanMessage.match(/^([a-zA-Z][a-zA-Z0-9_-]{0,79}):(.+)$/)?.slice(1);
+  if (explicitOption && explicitOption[0] !== "size" && explicitOption[0] !== "color") {
+    const [field, rawValue] = explicitOption;
+    const value = rawValue.trim();
+    const configuredValue = productContext.attributes?.[field] === value
+      ? value
+      : undefined;
+
+    if (configuredValue) {
+      return { field, value: configuredValue };
+    }
+  }
+
   const size = findAvailableSize(
     explicitSize || detectSpecificSize(cleanMessage) || cleanMessage,
     productContext,

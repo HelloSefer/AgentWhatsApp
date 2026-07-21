@@ -462,7 +462,7 @@ export async function clearConversationProductInfoSelection(
  */
 export async function takeConversationPendingOrderSelections(
   input: SessionIdentity,
-): Promise<Pick<import("../agent-brain.types").OrderEntities, "size" | "color">> {
+): Promise<Record<string, import("../order/cart-state.types").SupportedOrderFieldValue>> {
   const session = await getConversationSession(
     input.customerId,
     input.sellerId,
@@ -470,9 +470,12 @@ export async function takeConversationPendingOrderSelections(
     input.customerPhone,
   );
   const pending = { ...(session.productInfo?.pendingOrderSelections || {}) };
-  const selections: Pick<import("../agent-brain.types").OrderEntities, "size" | "color"> = {};
-  if (typeof pending.size === "string" && pending.size.trim()) selections.size = pending.size;
-  if (typeof pending.color === "string" && pending.color.trim()) selections.color = pending.color;
+  const selections: Record<string, import("../order/cart-state.types").SupportedOrderFieldValue> = {};
+  for (const [key, value] of Object.entries(pending)) {
+    if (typeof value === "string" && value.trim()) {
+      selections[key] = value.trim();
+    }
+  }
 
   if (Object.keys(selections).length > 0 || session.productInfo?.pendingSelection) {
     session.productInfo = {
