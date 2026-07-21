@@ -133,7 +133,10 @@ export class WhatsAppInteractiveMapper {
           text: getBodyText(input),
         },
         action: {
-          button: truncateText("اختار", MAX_LIST_BUTTON_LENGTH),
+          button: truncateText(
+            cleanText(input.replyUi.buttonText, "اختار"),
+            MAX_LIST_BUTTON_LENGTH,
+          ),
           sections: [
             {
               title: sectionTitle,

@@ -167,7 +167,10 @@ function mainPresentation(input: {
     commercialEvaluation: readiness.commercialEvaluation,
     presentation: readiness.commercialEvaluation?.state === "SELECTED_OFFER_INELIGIBLE"
       ? buildCommercialResolutionPresentation()
-      : buildCartReviewPresentation(readiness.review),
+      : buildCartReviewPresentation(
+          readiness.review,
+          input.context.productContext.conversationalName,
+        ),
     warnings: readiness.warnings,
   };
 }

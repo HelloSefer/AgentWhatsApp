@@ -191,6 +191,10 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     });
     if (Object.keys(pendingInitialItemOptions).length > 0) {
       runtime.pendingInitialItemOptions = pendingInitialItemOptions;
+      const selectedSize = pendingInitialItemOptions.size;
+      if (typeof selectedSize === "string" && selectedSize.trim()) {
+        runtime.moreInfoContinuation = { selectedSize: selectedSize.trim() };
+      }
     }
     const planning = runCartPlanningPreview({ previewEnabled: true, rawActionId: "first_entry:order_now", sellerId: input.sellerId, productContext, offerLookup: offers, cart: runtime.cart, previewPlanningState: runtime.planningState, now });
     runtime.cart = planning.cartAfter;
@@ -198,7 +202,20 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     runtime.runtimeStage = "PLANNING";
     runtime.lastHandledAction = "first_entry:order_now";
     await persist(input, runtime, fields);
-    return asTurnResult({ ...replyFromPlanning(planning), stage: runtime.runtimeStage, warnings: planning.warnings, failureCode: planning.failureCode });
+    return asTurnResult({
+      ...replyFromPlanning(
+        planning,
+        runtime.moreInfoContinuation
+          ? {
+              selectedSize: runtime.moreInfoContinuation.selectedSize,
+              productPluralName: productContext.pluralName?.trim() || productContext.name,
+            }
+          : undefined,
+      ),
+      stage: runtime.runtimeStage,
+      warnings: planning.warnings,
+      failureCode: planning.failureCode,
+    });
   }
 
   if (runtime.runtimeStage === "PLANNING") {
@@ -209,6 +226,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     runtime.planningState = planning.previewPlanningState;
     runtime.lastHandledAction = isGuardedOrderRuntimeAction(message) ? message : undefined;
     if (planning.nextStep === "START_ITEM_COLLECTION") {
+      const moreInfoContinuation = runtime.moreInfoContinuation;
       const item = runItemCollectionPreview({
         previewEnabled: true,
         sellerId: input.sellerId,
@@ -221,6 +239,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
       runtime.cart = item.cartAfter;
       runtime.itemCollectionState = item.previewState;
       delete runtime.pendingInitialItemOptions;
+      delete runtime.moreInfoContinuation;
       if (item.nextStep === "CART_REVIEW_READY") {
         const review = runCartReviewPreview({
           previewEnabled: true,
@@ -245,7 +264,20 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
       }
       runtime.runtimeStage = "COLLECTING_ITEM";
       await persist(input, runtime, fields);
-      return asTurnResult({ ...replyFromInitialPlannedItemCollection(item, fields), stage: runtime.runtimeStage, warnings: [...planning.warnings, ...item.warnings] });
+      return asTurnResult({
+        ...replyFromInitialPlannedItemCollection(
+          item,
+          fields,
+          moreInfoContinuation
+            ? {
+                selectedSize: moreInfoContinuation.selectedSize,
+                productPluralName: productContext.pluralName?.trim() || productContext.name,
+              }
+            : undefined,
+        ),
+        stage: runtime.runtimeStage,
+        warnings: [...planning.warnings, ...item.warnings],
+      });
     }
     await persist(input, runtime, fields);
     return asTurnResult({ ...replyFromPlanning(planning), stage: runtime.runtimeStage, warnings: planning.warnings, failureCode: planning.failureCode });

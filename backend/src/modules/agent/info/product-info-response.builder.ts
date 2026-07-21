@@ -186,9 +186,10 @@ function buildSoftSelectionReply(input: {
     input.field === "size"
       ? `المقاس ${input.value} متوفر ✅`
       : `اللون ${withColorArticle(input.value)} متوفر ✅`;
-  const body = `${selectionText}\n\nبغيتي نكمل لك الطلب بهذا ${
-    input.field === "size" ? "المقاس" : "اللون"
-  }، ولا تشوف معلومات أخرى؟`;
+  const body =
+    input.field === "size"
+      ? `${selectionText}\n\nنكملو الطلب بهاد المقاس ولا بغيتي تعرف معلومات أخرى؟`
+      : `${selectionText}\n\nبغيتي نكمل لك الطلب بهذا اللون، ولا تشوف معلومات أخرى؟`;
   const fallback =
     `${body}\n\nكتب "نكمل الطلب" باش نكملو الطلب، أو "معلومات أخرى" باش تشوف معلومات أخرى.`;
 
@@ -254,7 +255,7 @@ function buildTopicText(input: ProductInfoReplyInput): string {
     return input.request.requestedSize
       ? getSizeReply(input.message, input.productContext)
       : input.productContext.availableSizes?.length
-        ? "المقاسات المتوفرة عندنا:\nاختار المقاس المناسب ليك 👇"
+        ? "هادو هما المقاسات المتوفرة👇\nاختار المقاس المناسب ليك"
         : "معلومة المقاسات ما محدداش دابا.";
   }
 

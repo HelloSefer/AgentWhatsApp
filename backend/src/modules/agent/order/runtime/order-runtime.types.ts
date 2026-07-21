@@ -61,6 +61,10 @@ export type OrderRuntimeSession = {
   cart: CartDraft;
   /** Soft information preferences, transferred only after explicit Order Now. */
   pendingInitialItemOptions?: Record<string, SupportedOrderFieldValue>;
+  /** Presentation-only marker for an explicit More Information continuation. */
+  moreInfoContinuation?: {
+    selectedSize: string;
+  };
   runtimeStage: OrderRuntimeStage;
   planningState?: CartPlanningPreviewState;
   itemCollectionState?: SameAsPreviousPreviewState;

@@ -128,10 +128,11 @@ function contextFor(input: CartReviewPreviewInput, cart: CartDraft) {
 function mainPresentation(input: {
   review: CartReviewSnapshot;
   commercialState?: string;
+  conversationalProductName?: string;
 }): CartReviewPresentationResult {
   return input.commercialState === "SELECTED_OFFER_INELIGIBLE"
     ? buildCommercialResolutionPresentation()
-    : buildCartReviewPresentation(input.review);
+    : buildCartReviewPresentation(input.review, input.conversationalProductName);
 }
 
 function result(input: {
@@ -293,7 +294,7 @@ export function runCartReviewPreview(
       cartAfter: mutation.cartAfter,
       ...(mutation.review ? { review: mutation.review } : {}),
       ...(mutation.review && mutation.commercialEvaluation
-        ? { presentation: mainPresentation({ review: mutation.review, commercialState: mutation.commercialEvaluation.state }) }
+        ? { presentation: mainPresentation({ review: mutation.review, commercialState: mutation.commercialEvaluation.state, conversationalProductName: input.productContext.conversationalName }) }
         : {}),
       ...(mutation.commercialEvaluation ? { commercialEvaluation: mutation.commercialEvaluation } : {}),
       previewState: nextState,
@@ -324,7 +325,7 @@ export function runCartReviewPreview(
       changed: false,
       cartBefore,
       review: readiness.review,
-      presentation: mainPresentation({ review: readiness.review!, commercialState: readiness.commercialEvaluation?.state }),
+      presentation: mainPresentation({ review: readiness.review!, commercialState: readiness.commercialEvaluation?.state, conversationalProductName: input.productContext.conversationalName }),
       commercialEvaluation: readiness.commercialEvaluation,
       previewState,
       nextStep: readiness.commercialEvaluation?.state === "SELECTED_OFFER_INELIGIBLE"
@@ -381,7 +382,10 @@ export function runCartReviewPreview(
       changed: false,
       cartBefore,
       review,
-      presentation: buildCartReviewPresentation(review),
+      presentation: buildCartReviewPresentation(
+        review,
+        input.productContext.conversationalName,
+      ),
       commercialEvaluation,
       previewState,
       normalizedAction: action,
@@ -503,7 +507,7 @@ export function runCartReviewPreview(
       cartBefore,
       cartAfter: mutation.cartAfter,
       ...(mutation.review ? { review: mutation.review } : {}),
-      ...(mutation.review && mutation.commercialEvaluation ? { presentation: buildCartReviewPresentation(mutation.review) } : {}),
+      ...(mutation.review && mutation.commercialEvaluation ? { presentation: buildCartReviewPresentation(mutation.review, input.productContext.conversationalName) } : {}),
       ...(mutation.commercialEvaluation ? { commercialEvaluation: mutation.commercialEvaluation } : {}),
       previewState: nextState,
       ...(mutation.planningResult ? { planningResult: mutation.planningResult } : {}),

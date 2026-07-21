@@ -379,7 +379,10 @@ function buildSoftInfoSelectionResult(input: {
       : input.field === "color"
         ? `اللون ${withColorArticle(input.value)} متوفر ✅`
         : `${label} ${input.value} متوفر ✅`;
-  const body = `${selectionText}\n\nبغيتي نكمل لك الطلب بهذا ${label}، ولا تشوف معلومات أخرى؟`;
+  const body =
+    input.field === "size"
+      ? `${selectionText}\n\nنكملو الطلب بهاد المقاس ولا بغيتي تعرف معلومات أخرى؟`
+      : `${selectionText}\n\nبغيتي نكمل لك الطلب بهذا ${label}، ولا تشوف معلومات أخرى؟`;
   const fallback = `${body}\n\nكتب "نكمل الطلب" باش نكملو الطلب، أو "معلومات أخرى" باش تشوف معلومات أخرى.`;
 
   return {

@@ -64,6 +64,10 @@ export function buildDifferentChoicesCopy(input: {
   currentSlotNumber: number;
   optionPrompt: string;
 }): string {
+  if (input.currentSlotNumber === 2) {
+    return "واخا 👌 بالنسبة للثانية، شنو المقاس اللي بغيتي ليها؟";
+  }
+
   return [
     `واخا 👌 نخليو ${slotLabel(input.currentSlotNumber)} باختيارات مختلفة.`,
     cleanText(input.optionPrompt),

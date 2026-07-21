@@ -26,15 +26,19 @@ function itemLabel(item: CartReviewItemSnapshot): string {
 
 /** Platform-neutral review controls only; transport payloads are built elsewhere. */
 export function buildCartReviewPresentation(
-  review: CartReviewSnapshot,
+  _review: CartReviewSnapshot,
+  conversationalProductName?: string,
 ): CartReviewPresentationResult {
+  const addItemLabel = conversationalProductName?.trim()
+    ? `زيد ${conversationalProductName.trim()}`
+    : "زيد قطعة";
   const uiHints: AgentReplyUiHint = {
     kind: "buttons",
     purpose: "cart_review",
-    body: `عندك ${review.completedUnits} قطعة واجدة للمراجعة`,
+    body: "مزيان 👌 السلة ديالك واجدة.",
     options: [
       { id: "cart_review:continue", label: "كمل الطلب" },
-      { id: "cart_review:add_item", label: "زيد قطعة" },
+      { id: "cart_review:add_item", label: addItemLabel },
       { id: "cart_review:edit", label: "عدل السلة" },
     ],
     previewOnly: true,
@@ -43,7 +47,7 @@ export function buildCartReviewPresentation(
     success: true,
     kind: "CART_REVIEW",
     promptKey: "CART_REVIEW",
-    text: "راجع السلة ديالك قبل ما نكملو",
+    text: "مزيان 👌 السلة ديالك واجدة.",
     uiHints,
   });
 }

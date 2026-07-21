@@ -14,6 +14,7 @@ export type AgentReplyUiHint = {
   kind: AgentReplyUiHintKind;
   purpose?: AgentReplyUiHintPurpose;
   title?: string;
+  buttonText?: string;
   body?: string;
   options?: Array<{
     id: string;

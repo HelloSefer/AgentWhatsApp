@@ -9,7 +9,6 @@ import type { DeliveryConfirmationPreviewResult } from "../delivery-confirmation
 import type { RequiredOrderField } from "../../config/required-fields.types";
 import {
   buildCartReviewIntroduction,
-  buildCartReviewCompletionCopy,
   buildDifferentChoicesCopy,
   buildInitialPlannedPieceCopy,
   buildSameAsPreviousCopy,
@@ -86,7 +85,48 @@ function completedOptionDisplays(
     });
 }
 
-export function replyFromPlanning(result: CartPlanningPreviewResult): RuntimeReply {
+type MoreInfoContinuationPresentation = {
+  selectedSize: string;
+  productPluralName: string;
+};
+
+function replyFromMoreInfoQuantitySelector(
+  result: CartPlanningPreviewResult,
+  input: MoreInfoContinuationPresentation,
+): RuntimeReply | undefined {
+  const selector = result.selector;
+  if (!selector?.uiHints || selector.promptKey !== "SELECT_QUANTITY") {
+    return undefined;
+  }
+
+  const text = `باش نكمّلو الطلب، واش بغيتي غير هادي بالمقاس ${input.selectedSize}، ولا تزيد عليها ${input.productPluralName} خرين وتختار ليهم المقاس واللون من بعد؟`;
+  const labels: Record<string, string> = {
+    "cart_quantity:1": "غير هادي",
+    "cart_quantity:2": "نزيد وحدة",
+    "cart_quantity:3": "نزيد جوج",
+  };
+
+  return replyWithVisibleInteractiveBody(text, {
+    ...selector.uiHints,
+    options: selector.uiHints.options?.map((option) => ({
+      ...option,
+      label: labels[option.id] || option.label,
+    })),
+  });
+}
+
+export function replyFromPlanning(
+  result: CartPlanningPreviewResult,
+  moreInfoContinuation?: MoreInfoContinuationPresentation,
+): RuntimeReply {
+  if (moreInfoContinuation) {
+    const continuationReply = replyFromMoreInfoQuantitySelector(
+      result,
+      moreInfoContinuation,
+    );
+    if (continuationReply) return continuationReply;
+  }
+
   if (result.prompt?.key === "REQUEST_CUSTOM_QUANTITY") {
     return reply("شحال من قطعة بغيتي؟");
   }
@@ -124,12 +164,16 @@ export function replyFromItemCollection(
   }
 
   if (actionId === "cart_item_previous:different") {
+    const differentUi =
+      result.presentation?.field?.key === "size" && interactiveUi?.kind === "list"
+        ? { ...interactiveUi, buttonText: "اختار المقاس" }
+        : interactiveUi;
     return replyWithVisibleInteractiveBody(
       buildDifferentChoicesCopy({
         currentSlotNumber: currentSlotNumber(result),
         optionPrompt: currentOptionPrompt(result),
       }),
-      interactiveUi,
+      differentUi,
     );
   }
 
@@ -143,11 +187,26 @@ export function replyFromItemCollection(
 export function replyFromInitialPlannedItemCollection(
   result: ItemCollectionPreviewResult,
   fields: readonly RequiredOrderField[] = [],
+  moreInfoContinuation?: MoreInfoContinuationPresentation,
 ): RuntimeReply {
   if (result.nextStep === "SAME_OR_DIFFERENT_ITEM_OPTIONS") {
     return replyFromItemCollection(result, fields);
   }
   const itemReply = replyFromItemCollection(result, fields);
+  if (
+    moreInfoContinuation &&
+    result.presentation?.field?.key === "color"
+  ) {
+    const text = plannedPieceCount(result) === 1
+      ? `مزيان 👌 المقاس ${moreInfoContinuation.selectedSize} تسجّل.\nدابا اختار اللون ديالها 👇`
+      : plannedPieceCount(result) === 2
+        ? `مزيان 👌 غادي يكونو جوج ${moreInfoContinuation.productPluralName}.\nالأولى بالمقاس ${moreInfoContinuation.selectedSize}، دابا اختار اللون ديالها 👇`
+        : `مزيان 👌 غادي يكونو ${plannedPieceCount(result)} ${moreInfoContinuation.productPluralName}.\nالأولى بالمقاس ${moreInfoContinuation.selectedSize}، دابا اختار اللون ديالها 👇`;
+    return replyWithVisibleInteractiveBody(
+      text,
+      itemReply.replyUi,
+    );
+  }
   const text = buildInitialPlannedPieceCopy({
     plannedPieceCount: plannedPieceCount(result),
     optionPrompt: currentOptionPrompt(result),
@@ -157,12 +216,12 @@ export function replyFromInitialPlannedItemCollection(
 
 export function replyFromCartReview(
   result: CartReviewPreviewResult,
-  introduction?: string,
+  _introduction?: string,
 ): RuntimeReply {
-  const text = [introduction, result.presentation?.text]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .join("\n\n");
-  return replyWithVisibleInteractiveBody(text, result.presentation?.uiHints);
+  return replyWithVisibleInteractiveBody(
+    result.presentation?.text,
+    result.presentation?.uiHints,
+  );
 }
 
 export function replyFromCompletedPlannedItemCartReview(input: {
@@ -170,15 +229,7 @@ export function replyFromCompletedPlannedItemCartReview(input: {
   review: CartReviewPreviewResult;
   actionId?: string;
 }): RuntimeReply {
-  const total = plannedPieceCount(input.item);
-  const completed = completedPieceCount(input.item);
-  const sameAcknowledgement = input.actionId === "cart_item_previous:same"
-    ? buildSameAsPreviousCopy({ plannedPieceCount: total, completedPieceCount: completed })
-    : undefined;
-  const introduction = [sameAcknowledgement, buildCartReviewCompletionCopy(total)]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .join("\n\n");
-  return replyFromCartReview(input.review, introduction);
+  return replyFromCartReview(input.review);
 }
 
 export function replyFromDelivery(result: DeliveryConfirmationPreviewResult): RuntimeReply {
