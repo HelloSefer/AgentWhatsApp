@@ -73,6 +73,7 @@ export type CartReviewAction =
   | { type: "SELECT_ITEM"; rawId: `cart_review_item:select:${string}`; itemId: string }
   | { type: "EDIT_ITEM_QUANTITY"; rawId: `cart_review_item:quantity:${string}`; itemId: string }
   | { type: "EDIT_ITEM_OPTIONS"; rawId: `cart_review_item:options:${string}`; itemId: string }
+  | { type: "EDIT_ITEM_OPTION"; rawId: string; itemId: string; fieldKey: string }
   | { type: "REMOVE_ITEM"; rawId: `cart_review_item:remove:${string}`; itemId: string };
 
 export type CartReviewActionNormalizationResult = {

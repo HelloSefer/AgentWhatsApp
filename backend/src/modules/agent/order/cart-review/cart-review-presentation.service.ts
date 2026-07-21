@@ -17,11 +17,27 @@ function result(input: Omit<CartReviewPresentationResult, "warnings"> & { warnin
   };
 }
 
-function itemLabel(item: CartReviewItemSnapshot): string {
-  const optionText = item.options
+function itemOrdinal(index: number): string {
+  const ordinals = [
+    "الأولى",
+    "الثانية",
+    "الثالثة",
+    "الرابعة",
+    "الخامسة",
+    "السادسة",
+    "السابعة",
+    "الثامنة",
+    "التاسعة",
+    "العاشرة",
+  ];
+
+  return ordinals[index] || `رقم ${index + 1}`;
+}
+
+function itemDescription(item: CartReviewItemSnapshot): string {
+  return item.options
     .map((option) => `${option.label}: ${String(option.value)}`)
-    .join("، ");
-  return optionText ? `${optionText} — ${item.quantity}` : `قطعة — ${item.quantity}`;
+    .join(" — ");
 }
 
 /** Platform-neutral review controls only; transport payloads are built elsewhere. */
@@ -54,16 +70,19 @@ export function buildCartReviewPresentation(
 
 export function buildCartReviewItemSelectorPresentation(
   review: CartReviewSnapshot,
+  conversationalProductName?: string,
 ): CartReviewPresentationResult {
+  const productName = conversationalProductName?.trim() || "المنتج";
   const uiHints: AgentReplyUiHint = {
     kind: "list",
     purpose: "cart_review",
     title: "اختار القطعة",
-    body: "اختار القطعة اللي بغيتي تعدل",
-    options: review.items.map((item) => ({
+    buttonText: "اختار",
+    body: "شنو بغيتي تعدل؟",
+    options: review.items.map((item, index) => ({
       id: `cart_review_item:select:${item.id}`,
-      label: itemLabel(item),
-      value: item.id,
+      label: `${productName} ${itemOrdinal(index)}`,
+      value: itemDescription(item),
     })),
     previewOnly: true,
   };
@@ -71,7 +90,7 @@ export function buildCartReviewItemSelectorPresentation(
     success: true,
     kind: "ITEM_SELECTOR",
     promptKey: "SELECT_CART_ITEM",
-    text: "اختار قطعة من السلة",
+    text: "شنو بغيتي تعدل؟",
     uiHints,
   });
 }
@@ -79,15 +98,19 @@ export function buildCartReviewItemSelectorPresentation(
 export function buildCartReviewItemActionsPresentation(
   item: CartReviewItemSnapshot,
 ): CartReviewPresentationResult {
+  const optionButtons = item.options
+    .filter((option) => option.key === "size" || option.key === "color")
+    .map((option) => ({
+      id: `cart_review_item:option:${option.key}:${item.id}`,
+      label: option.label,
+    }));
   const uiHints: AgentReplyUiHint = {
     kind: "buttons",
     purpose: "cart_review",
-    body: itemLabel(item),
+    body: "شنو بغيتي تبدل؟",
     options: [
-      { id: `cart_review_item:quantity:${item.id}`, label: "بدل الكمية" },
-      { id: `cart_review_item:options:${item.id}`, label: "بدل الاختيارات" },
-      { id: `cart_review_item:remove:${item.id}`, label: "حيد القطعة" },
-      { id: "cart_review:back", label: "رجوع" },
+      ...optionButtons,
+      { id: `cart_review_item:remove:${item.id}`, label: "حذف من السلة" },
     ],
     previewOnly: true,
   };
@@ -95,7 +118,7 @@ export function buildCartReviewItemActionsPresentation(
     success: true,
     kind: "ITEM_ACTIONS",
     promptKey: "CART_ITEM_ACTIONS",
-    text: "شنو بغيتي دير بهاد القطعة؟",
+    text: "شنو بغيتي تبدل؟",
     selectedItemId: item.id,
     uiHints,
   });

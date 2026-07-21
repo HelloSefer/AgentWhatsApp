@@ -82,7 +82,9 @@ function buildEditPresentation(input: {
   context: CartItemEditContext;
   state: CartItemEditPreviewState;
 }): CartReviewPresentationResult {
-  const fields = getItemCollectionOptionFields(input.context.requiredFields);
+  const fields = getItemCollectionOptionFields(input.context.requiredFields)
+    .filter((field) => !input.state.focusedFieldKey || field.key === input.state.focusedFieldKey);
+  const isFocusedSize = input.state.focusedFieldKey === "size";
   const awaitingField = input.state.awaitingTextFieldKey
     ? fields.find((field) => field.key === input.state.awaitingTextFieldKey)
     : undefined;
@@ -111,13 +113,16 @@ function buildEditPresentation(input: {
         const id = buildItemCollectionOptionActionId(field.key, canonicalValue);
         if (!id) continue;
         const current = input.state.workingItem.selectedOptions[field.key] === canonicalValue;
+        const sizeLabel = `${field.label || field.key}: ${canonicalValue}${
+          current ? " — الحالي" : ""
+        }`;
         options.push({
           id,
           label: truncateItemCollectionPresentationText(
-            `${field.label || field.key}: ${canonicalValue}${current ? " (دابا)" : ""}`,
+            isFocusedSize ? sizeLabel : `${field.label || field.key}: ${canonicalValue}${current ? " (دابا)" : ""}`,
             48,
           ),
-          value: canonicalValue,
+          ...(isFocusedSize ? {} : { value: canonicalValue }),
         });
       }
       continue;
@@ -132,16 +137,20 @@ function buildEditPresentation(input: {
       });
     }
   }
-  options.push(
-    { id: "cart_review_item_edit:save", label: "حفظ التغييرات" },
-    { id: "cart_review_item_edit:cancel", label: "إلغاء" },
-  );
+  if (!input.state.autoSaveOnSelection) {
+    options.push(
+      { id: "cart_review_item_edit:save", label: "حفظ التغييرات" },
+      { id: "cart_review_item_edit:cancel", label: "إلغاء" },
+    );
+  }
 
   const uiHints: AgentReplyUiHint = {
     kind: options.length <= MAX_BUTTON_OPTIONS ? "buttons" : "list",
     purpose: "cart_review",
     ...(options.length > MAX_BUTTON_OPTIONS ? { title: "بدل الاختيارات" } : {}),
-    body: "بدل غير الاختيار اللي بغيتي، ومن بعد حفظ التغييرات",
+    body: isFocusedSize
+      ? "اختار المقاس الجديد"
+      : "بدل غير الاختيار اللي بغيتي، ومن بعد حفظ التغييرات",
     options,
     previewOnly: true,
   };
@@ -149,7 +158,7 @@ function buildEditPresentation(input: {
     success: true,
     kind: "ITEM_OPTION_EDIT",
     promptKey: "EDIT_CART_ITEM_OPTIONS",
-    text: "بدل اختيارات هاد القطعة",
+    text: isFocusedSize ? "اختار المقاس الجديد" : "بدل اختيارات هاد القطعة",
     selectedItemId: input.state.sourceItemId,
     uiHints,
     warnings: [],
@@ -250,14 +259,22 @@ export function runCartItemEditPreview(input: CartItemEditPreviewInput): CartIte
     if (hasInvalidState) {
       return result({ handled: true, success: false, changed: false, cartBefore, failureCode: "INVALID_ITEM_EDIT_STATE" });
     }
+    const operation = startCartItemEdit({
+      context,
+      itemId: input.startItemId,
+      ...(suppliedState ? { activeState: suppliedState } : {}),
+      hasCartReviewConflict: input.hasCartReviewConflict,
+    });
+    const editState = operation.editState && input.startFieldKey
+      ? {
+          ...operation.editState,
+          focusedFieldKey: input.startFieldKey,
+          autoSaveOnSelection: true,
+        }
+      : operation.editState;
     return withEditPresentation({
       context,
-      operation: startCartItemEdit({
-        context,
-        itemId: input.startItemId,
-        ...(suppliedState ? { activeState: suppliedState } : {}),
-        hasCartReviewConflict: input.hasCartReviewConflict,
-      }),
+      operation: { ...operation, ...(editState ? { editState } : {}) },
       nextStep: "SELECT_ITEM_OPTION",
     });
   }
@@ -317,16 +334,32 @@ export function runCartItemEditPreview(input: CartItemEditPreviewInput): CartIte
   }
 
   if (normalization.action.type === "SELECT_OPTION") {
-    return withEditPresentation({
+    const selected = selectCartItemEditOption({
       context,
-      operation: selectCartItemEditOption({
-        context,
-        state: suppliedState,
-        fieldKey: normalization.action.fieldKey,
-        canonicalValue: normalization.action.canonicalValue,
-      }),
-      nextStep: "REVIEW_ITEM_CHANGES",
+      state: suppliedState,
+      fieldKey: normalization.action.fieldKey,
+      canonicalValue: normalization.action.canonicalValue,
     });
+    if (selected.success && selected.editState?.autoSaveOnSelection) {
+      const saved = saveCartItemEdit({ context, state: selected.editState });
+      const main = saved.success ? mainPresentation({ context, cart: saved.cartAfter }) : undefined;
+      return result({
+        handled: true,
+        success: saved.success,
+        changed: saved.changed,
+        cartBefore: saved.cartBefore,
+        cartAfter: saved.cartAfter,
+        ...(saved.review ? { review: saved.review } : {}),
+        ...(main?.presentation ? { presentation: main.presentation } : {}),
+        ...(saved.commercialEvaluation ? { commercialEvaluation: saved.commercialEvaluation } : {}),
+        ...(saved.planningResult ? { planningResult: saved.planningResult } : {}),
+        ...(saved.mergedIntoItemId ? { mergedIntoItemId: saved.mergedIntoItemId } : {}),
+        nextStep: saved.success ? "RETURN_TO_CART_REVIEW" : "BLOCKED",
+        failureCode: saved.failureCode,
+        warnings: [...saved.warnings, ...(main?.warnings || [])],
+      });
+    }
+    return withEditPresentation({ context, operation: selected, nextStep: "REVIEW_ITEM_CHANGES" });
   }
   if (normalization.action.type === "ENTER_TEXT") {
     return withEditPresentation({

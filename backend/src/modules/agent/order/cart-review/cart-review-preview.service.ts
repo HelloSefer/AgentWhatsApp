@@ -211,8 +211,12 @@ export function runCartReviewPreview(
   const initialReviewAction = typeof input.rawActionId === "string"
     ? normalizeCartReviewAction(input.rawActionId)
     : undefined;
-  const itemEditStartItemId = initialReviewAction?.valid && initialReviewAction.action?.type === "EDIT_ITEM_OPTIONS"
+  const itemEditStartItemId = initialReviewAction?.valid &&
+    (initialReviewAction.action?.type === "EDIT_ITEM_OPTIONS" || initialReviewAction.action?.type === "EDIT_ITEM_OPTION")
     ? initialReviewAction.action.itemId
+    : undefined;
+  const itemEditStartFieldKey = initialReviewAction?.valid && initialReviewAction.action?.type === "EDIT_ITEM_OPTION"
+    ? initialReviewAction.action.fieldKey
     : undefined;
   const isExplicitItemEditControl = typeof input.rawActionId === "string" && input.rawActionId.startsWith("cart_review_item_edit:");
   if (itemEditStartItemId || input.cartItemEditPreviewState !== undefined || isExplicitItemEditControl) {
@@ -222,6 +226,7 @@ export function runCartReviewPreview(
       cartReviewText: input.cartReviewText,
       editState: input.cartItemEditPreviewState,
       ...(itemEditStartItemId ? { startItemId: itemEditStartItemId } : {}),
+      ...(itemEditStartFieldKey ? { startFieldKey: itemEditStartFieldKey } : {}),
       hasCartReviewConflict: previewState.awaitingInput.kind !== "NONE",
       sellerId: input.sellerId,
       productContext: input.productContext,
@@ -401,7 +406,10 @@ export function runCartReviewPreview(
       changed: false,
       cartBefore,
       review,
-      presentation: buildCartReviewItemSelectorPresentation(review),
+      presentation: buildCartReviewItemSelectorPresentation(
+        review,
+        input.productContext.conversationalName,
+      ),
       commercialEvaluation,
       previewState: { ...previewState, awaitingInput: { kind: "NONE" } },
       normalizedAction: action,
@@ -418,7 +426,7 @@ export function runCartReviewPreview(
       changed: false,
       cartBefore,
       review,
-      presentation: mainPresentation({ review, commercialState: commercialEvaluation.state }),
+      presentation: mainPresentation({ review, commercialState: commercialEvaluation.state, conversationalProductName: input.productContext.conversationalName }),
       commercialEvaluation,
       previewState: nextState,
       normalizedAction: action,
@@ -483,7 +491,7 @@ export function runCartReviewPreview(
       cartBefore,
       cartAfter: mutation.cartAfter,
       ...(mutation.review ? { review: mutation.review } : {}),
-      ...(mutation.review && mutation.commercialEvaluation ? { presentation: mainPresentation({ review: mutation.review, commercialState: mutation.commercialEvaluation.state }) } : {}),
+      ...(mutation.review && mutation.commercialEvaluation ? { presentation: mainPresentation({ review: mutation.review, commercialState: mutation.commercialEvaluation.state, conversationalProductName: input.productContext.conversationalName }) } : {}),
       ...(mutation.commercialEvaluation ? { commercialEvaluation: mutation.commercialEvaluation } : {}),
       previewState: nextState,
       ...(mutation.planningResult ? { planningResult: mutation.planningResult } : {}),

@@ -24,6 +24,8 @@ export type CartItemEditPreviewState = Readonly<{
     selectedOptions: Readonly<Record<string, SupportedOrderFieldValue>>;
   }>;
   awaitingTextFieldKey?: string;
+  focusedFieldKey?: string;
+  autoSaveOnSelection?: boolean;
 }>;
 
 export type CartItemEditFailureCode =
@@ -85,6 +87,7 @@ export type CartItemEditPreviewInput = CartItemEditContext & {
   cartReviewText?: unknown;
   editState?: CartItemEditPreviewState;
   startItemId?: string;
+  startFieldKey?: string;
   hasCartReviewConflict?: boolean;
 };
 

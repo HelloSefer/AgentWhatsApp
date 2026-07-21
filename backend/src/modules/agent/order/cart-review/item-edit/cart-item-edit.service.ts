@@ -170,6 +170,9 @@ export function normalizeCartItemEditPreviewState(value: unknown): CartItemEditP
   const awaitingTextFieldKey = typeof state.awaitingTextFieldKey === "string" && isSafeFieldKey(state.awaitingTextFieldKey)
     ? state.awaitingTextFieldKey
     : undefined;
+  const focusedFieldKey = typeof state.focusedFieldKey === "string" && isSafeFieldKey(state.focusedFieldKey)
+    ? state.focusedFieldKey
+    : undefined;
   return {
     version: CART_ITEM_EDIT_PREVIEW_STATE_VERSION,
     kind: "EDIT_CART_ITEM_OPTIONS",
@@ -181,6 +184,8 @@ export function normalizeCartItemEditPreviewState(value: unknown): CartItemEditP
       selectedOptions,
     },
     ...(awaitingTextFieldKey ? { awaitingTextFieldKey } : {}),
+    ...(focusedFieldKey ? { focusedFieldKey } : {}),
+    ...(state.autoSaveOnSelection === true ? { autoSaveOnSelection: true } : {}),
   };
 }
 

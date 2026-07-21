@@ -51,7 +51,23 @@ export function normalizeCartReviewAction(rawId: unknown): CartReviewActionNorma
   }
 
   const segments = rawId.split(":");
-  if (segments.length !== 3 || segments[0] !== "cart_review_item") {
+  if (segments[0] !== "cart_review_item") {
+    return invalid("MALFORMED_CART_REVIEW_ACTION");
+  }
+
+  if (segments.length === 4 && segments[1] === "option") {
+    const [, , fieldKey, itemId] = segments;
+    if (!isSafeItemId(itemId) || !/^[A-Za-z][A-Za-z0-9_-]{0,79}$/u.test(fieldKey)) {
+      return invalid("MALFORMED_CART_REVIEW_ACTION");
+    }
+    return {
+      recognized: true,
+      valid: true,
+      action: { type: "EDIT_ITEM_OPTION", rawId, itemId, fieldKey },
+    };
+  }
+
+  if (segments.length !== 3) {
     return invalid("MALFORMED_CART_REVIEW_ACTION");
   }
 
