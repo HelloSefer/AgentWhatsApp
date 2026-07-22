@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { env } from "../../../../config/env";
+import { runtimeWriteComposition } from "../../../../composition/runtime-write/runtime-write-composition.runtime";
 import { getValkeyClient } from "../../../../infrastructure/valkey/valkey.client";
 import { takeConversationPendingOrderSelections } from "../../session/conversation-session.service";
 import { normalizeSellerConfig } from "../../config/first-entry-config.service";
@@ -9,7 +10,12 @@ import { productContextService } from "../../config/product-context.service";
 import { requiredFieldsService } from "../../config/required-fields.service";
 import type { RequiredOrderField } from "../../config/required-fields.types";
 import { sellerConfigService } from "../../config/seller-config.service";
-import { prepareConfirmedOrderReceipt } from "../confirmed-order/confirmed-order-preview.service";
+import {
+  prepareConfirmedOrderReceipt,
+  prepareConfirmedOrderReceiptDocument,
+  prepareConfirmedOrderSnapshot,
+} from "../confirmed-order/confirmed-order-preview.service";
+import type { ConfirmedOrderReceiptPreparationResult } from "../confirmed-order/confirmed-order-receipt.types";
 import { runCartReviewPreview } from "../cart-review/cart-review-preview.service";
 import { runDeliveryConfirmationPreview } from "../delivery-confirmation/delivery-confirmation-preview.service";
 import { runItemCollectionPreview } from "../item-collection/preview/item-collection-preview.service";
@@ -482,9 +488,22 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     }
     else if (delivery.nextStep === "FINAL_ORDER_REVIEW") runtime.runtimeStage = "FINAL_ORDER_REVIEW";
     else if (delivery.nextStep === "CONFIRMED_ORDER_PREVIEW" && delivery.confirmedPreview && delivery.previewState) {
-      const publicOrderCode = createPublicOrderCode();
+      const confirmationAttempt = env.persistenceRuntimeOrderWritesEnabled
+        ? runtime.pendingConfirmation || {
+          publicOrderCode: createPublicOrderCode(),
+          confirmedAt: now.toISOString(),
+        }
+        : {
+          publicOrderCode: createPublicOrderCode(),
+          confirmedAt: now.toISOString(),
+        };
+      if (env.persistenceRuntimeOrderWritesEnabled && !runtime.pendingConfirmation) {
+        runtime.pendingConfirmation = confirmationAttempt;
+        await persist(input, runtime, fields);
+      }
+      const publicOrderCode = confirmationAttempt.publicOrderCode;
       const receiptBranding = sellerConfig.receipt.branding;
-      const receipt = await prepareConfirmedOrderReceipt({
+      const receiptInput = {
         previewEnabled: true,
         cart: runtime.cart,
         previewState: delivery.previewState,
@@ -508,10 +527,32 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
         },
         now,
         snapshotId: publicOrderCode,
-        confirmedAt: now.toISOString(),
-      });
+        confirmedAt: confirmationAttempt.confirmedAt,
+      };
+      const receipt: ConfirmedOrderReceiptPreparationResult = !env.persistenceRuntimeOrderWritesEnabled
+        ? await prepareConfirmedOrderReceipt(receiptInput)
+        : await (async () => {
+          const snapshotPreparation = prepareConfirmedOrderSnapshot(receiptInput);
+          if (!snapshotPreparation.success || !snapshotPreparation.snapshot || !snapshotPreparation.receiptModel) {
+            return snapshotPreparation;
+          }
+          const writeResult = await runtimeWriteComposition.confirmedOrderWriter.persist({
+            sellerId: input.sellerId,
+            snapshot: snapshotPreparation.snapshot,
+            confirmationIdempotencyKey: publicOrderCode,
+          });
+          if (writeResult.status === "failed") {
+            return {
+              success: false as const,
+              failureCode: "PERSISTENCE_FAILED",
+              warnings: [...snapshotPreparation.warnings, `runtime_order_write_${writeResult.category}`],
+            };
+          }
+          return prepareConfirmedOrderReceiptDocument(snapshotPreparation);
+        })();
       if (!receipt.success || !receipt.snapshot || !receipt.receiptDocument || !receipt.buffer) return asTurnResult({ ...recoveryReply(), stage: runtime.runtimeStage, warnings: receipt.warnings, failureCode: receipt.failureCode });
       runtime.runtimeStage = "CONFIRMED";
+      delete runtime.pendingConfirmation;
       runtime.confirmed = {
         snapshotId: receipt.snapshot.id,
         publicOrderCode,

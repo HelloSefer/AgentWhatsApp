@@ -19,6 +19,8 @@ export const env = {
   appName: process.env.APP_NAME || "Moroccan Darija WhatsApp AI Sales Agent",
   persistenceRuntimeReadsEnabled:
     process.env.PERSISTENCE_RUNTIME_READS_ENABLED === "true",
+  persistenceRuntimeOrderWritesEnabled:
+    process.env.PERSISTENCE_RUNTIME_ORDER_WRITES_ENABLED === "true",
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
   ollamaModel: process.env.OLLAMA_MODEL || "qwen2.5:7b",
   informationalAiEnabled:

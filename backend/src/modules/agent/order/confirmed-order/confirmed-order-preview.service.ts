@@ -7,6 +7,7 @@ import type {
   ConfirmedOrderReceiptPreparationResult,
   ConfirmedOrderReceiptPreviewInput,
   ConfirmedOrderReceiptPreviewResult,
+  ConfirmedOrderSnapshotPreparationResult,
 } from "./confirmed-order-receipt.types";
 
 function blocked(
@@ -21,10 +22,10 @@ function blocked(
   };
 }
 
-/** Builds the immutable snapshot and real in-memory PDF without persistence or transport. */
-export async function prepareConfirmedOrderReceipt(
+/** Builds and validates the immutable confirmation snapshot before any receipt work. */
+export function prepareConfirmedOrderSnapshot(
   input: ConfirmedOrderReceiptPreviewInput,
-): Promise<ConfirmedOrderReceiptPreparationResult> {
+): ConfirmedOrderSnapshotPreparationResult {
   if (!input.previewEnabled) return { success: false, warnings: [] };
 
   const snapshotResult = createConfirmedOrderSnapshot(input);
@@ -46,18 +47,37 @@ export async function prepareConfirmedOrderReceipt(
     };
   }
 
+  return {
+    success: true,
+    snapshot: snapshotResult.snapshot,
+    receiptModel: receiptResult.receiptModel,
+    warnings: [...snapshotResult.warnings, ...receiptResult.warnings],
+  };
+}
+
+/** Builds the real in-memory PDF from an already validated immutable snapshot. */
+export async function prepareConfirmedOrderReceiptDocument(
+  prepared: ConfirmedOrderSnapshotPreparationResult,
+): Promise<ConfirmedOrderReceiptPreparationResult> {
+  if (!prepared.success || !prepared.snapshot || !prepared.receiptModel) {
+    return {
+      success: false,
+      ...(prepared.failureCode ? { failureCode: prepared.failureCode } : {}),
+      warnings: [...prepared.warnings],
+    };
+  }
+
   const documentResult = await generateConfirmedOrderReceiptPreviewPdf(
-    receiptResult.receiptModel,
+    prepared.receiptModel,
   );
   if (!documentResult.success) {
     return {
       success: false,
       failureCode: documentResult.failureCode,
-      snapshot: snapshotResult.snapshot,
-      receiptModel: receiptResult.receiptModel,
+      snapshot: prepared.snapshot,
+      receiptModel: prepared.receiptModel,
       warnings: [
-        ...snapshotResult.warnings,
-        ...receiptResult.warnings,
+        ...prepared.warnings,
         ...documentResult.warnings,
       ],
     };
@@ -73,16 +93,16 @@ export async function prepareConfirmedOrderReceipt(
     return {
       success: false,
       failureCode: "PDF_GENERATION_FAILED",
-      snapshot: snapshotResult.snapshot,
-      receiptModel: receiptResult.receiptModel,
-      warnings: [...snapshotResult.warnings, ...receiptResult.warnings, "incomplete_pdf_metadata"],
+      snapshot: prepared.snapshot,
+      receiptModel: prepared.receiptModel,
+      warnings: [...prepared.warnings, "incomplete_pdf_metadata"],
     };
   }
 
   return {
     success: true,
-    snapshot: snapshotResult.snapshot,
-    receiptModel: receiptResult.receiptModel,
+    snapshot: prepared.snapshot,
+    receiptModel: prepared.receiptModel,
     receiptDocument: {
       filename: documentResult.filename,
       mimeType: documentResult.mimeType,
@@ -91,11 +111,17 @@ export async function prepareConfirmedOrderReceipt(
     },
     buffer: documentResult.buffer,
     warnings: [
-      ...snapshotResult.warnings,
-      ...receiptResult.warnings,
+      ...prepared.warnings,
       ...documentResult.warnings,
     ],
   };
+}
+
+/** Builds the immutable snapshot and real in-memory PDF without persistence or transport. */
+export async function prepareConfirmedOrderReceipt(
+  input: ConfirmedOrderReceiptPreviewInput,
+): Promise<ConfirmedOrderReceiptPreparationResult> {
+  return prepareConfirmedOrderReceiptDocument(prepareConfirmedOrderSnapshot(input));
 }
 
 export async function runConfirmedOrderReceiptPreview(

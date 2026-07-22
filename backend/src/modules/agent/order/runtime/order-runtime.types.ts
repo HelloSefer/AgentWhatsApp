@@ -69,6 +69,11 @@ export type OrderRuntimeSession = {
   cartReviewState?: CartReviewPreviewState;
   itemEditState?: CartItemEditPreviewState;
   deliveryConfirmationState?: DeliveryConfirmationPreviewState;
+  /** Retains the authoritative confirmation identity across a guarded write retry. */
+  pendingConfirmation?: {
+    publicOrderCode: string;
+    confirmedAt: string;
+  };
   lastHandledAction?: string;
   confirmed?: {
     snapshotId: string;

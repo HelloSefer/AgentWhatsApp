@@ -62,4 +62,12 @@ export type ConfirmedOrderReceiptPreparationResult = Readonly<{
   warnings: readonly string[];
 }>;
 
+export type ConfirmedOrderSnapshotPreparationResult = Readonly<{
+  success: boolean;
+  snapshot?: ConfirmedOrderSnapshot;
+  receiptModel?: ConfirmedOrderReceiptModel;
+  failureCode?: string;
+  warnings: readonly string[];
+}>;
+
 export type ConfirmedOrderReceiptPreviewInput = ConfirmedOrderSnapshotInput;
