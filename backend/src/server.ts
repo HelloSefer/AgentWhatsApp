@@ -3,6 +3,7 @@ import app from "./app";
 import { env } from "./config/env";
 import { warmNaturalReplyModel } from "./modules/agent/natural-reply/natural-reply-generator.service";
 import { cleanupOldOrderReceiptPdfs } from "./modules/order-receipt/order-receipt.service";
+import { closeDatabasePool } from "./infrastructure/database/client/database-pool.service";
 
 const logger = pino({
   transport:
@@ -16,7 +17,7 @@ const logger = pino({
       : undefined,
 });
 
-app.listen(env.port, () => {
+const server = app.listen(env.port, () => {
   logger.info(`${env.appName} is running on port ${env.port}`);
 
   warmNaturalReplyModel().catch((error) => {
@@ -36,3 +37,23 @@ app.listen(env.port, () => {
     );
   }
 });
+
+let shutdownInProgress = false;
+
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shutdownInProgress) return;
+  shutdownInProgress = true;
+  logger.info({ signal }, "Shutting down backend");
+  server.close(async () => {
+    try {
+      await closeDatabasePool();
+      process.exit(0);
+    } catch {
+      logger.error("Database pool shutdown failed");
+      process.exit(1);
+    }
+  });
+}
+
+process.once("SIGINT", () => { void shutdown("SIGINT"); });
+process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
