@@ -69,6 +69,7 @@ import { conversationConfigResolver } from "../conversation-engine/config/conver
 import { runWithConversationConfig } from "../conversation-engine/config/conversation-config-context.service";
 import { getActiveConversationConfig } from "../conversation-engine/config/conversation-config-context.service";
 import { applyResolvedConversationProductConfig, withConversationProductDefaults } from "../conversation-engine/config/conversation-product-config.service";
+import { runtimeReadComposition } from "../../composition/runtime-read/runtime-read-composition.runtime";
 
 export type GenerateAgentOptions = {
   customerId?: string;
@@ -653,23 +654,26 @@ function toAgentProductContext(input: {
   };
 }
 
-function resolveRuntimeProductContext(
+async function resolveRuntimeProductContext(
   productContext: ProductContext,
   options?: GenerateAgentOptions,
-): ProductContext {
+): Promise<ProductContext> {
   if (!options?.sellerId || productContext !== DEFAULT_PRODUCT_CONTEXT) {
     return productContext;
   }
 
   try {
     const sellerConfig = sellerConfigService.getSellerConfig(options.sellerId);
-    const configProductContext = productContextService.getActiveProductContext(
-      options.sellerId,
-    );
+    const legacyProductContext = productContextService.getActiveProductContext(options.sellerId);
+    const catalogResolution = await runtimeReadComposition.catalogReader.resolve({
+      sellerId: options.sellerId,
+      productId: options.productId?.trim() || legacyProductContext.productId,
+      legacyProductContext,
+    });
 
     return toAgentProductContext({
       sellerConfig,
-      configProductContext,
+      configProductContext: catalogResolution.productContext,
     });
   } catch (error) {
     console.error("❌ Runtime product context resolution failed", error);
@@ -1629,10 +1633,7 @@ async function generateAgentResultInternal(
   const userMessage = message.trim();
   const normalized = normalizeAgentOptions(options);
   const activeOptions = normalized.options;
-  const runtimeProductContext = resolveRuntimeProductContext(
-    productContext,
-    activeOptions,
-  );
+  const runtimeProductContext = productContext;
   const requiredFields = getRuntimeRequiredOrderFields(activeOptions);
   const infoMenuDisplayMode = getRuntimeInfoMenuDisplayMode(activeOptions);
 
@@ -1943,15 +1944,17 @@ export async function generateAgentResult(
   dependencies: GenerateAgentDependencies = {},
 ): Promise<AgentResult> {
   const sellerId = options?.sellerId?.trim() || DEFAULT_DEMO_SELLER_ID;
-  const productId = options?.productId?.trim() || productContext.productId;
-  const resolvedConfig = conversationConfigResolver.resolve({ sellerId, productId });
+  const runtimeProductContext = await resolveRuntimeProductContext(productContext, options);
+  const productId = options?.productId?.trim() || runtimeProductContext.productId;
+  const configResolution = await runtimeReadComposition.conversationConfigReader.resolve({ sellerId, productId });
+  const resolvedConfig = configResolution.config;
   const configuredProductContext: ProductContext = resolvedConfig.productWording
     ? {
-        ...productContext,
+        ...runtimeProductContext,
         productName: resolvedConfig.productWording.fullName,
         conversationalProductName: resolvedConfig.productWording.conversationalName,
       }
-    : productContext;
+    : runtimeProductContext;
   return runWithConversationConfig(resolvedConfig, () =>
     generateAgentResultInternal(message, configuredProductContext, options, dependencies),
   );

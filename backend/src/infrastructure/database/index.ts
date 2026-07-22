@@ -4,7 +4,12 @@ export { createTenantContext } from "./contracts/tenant-context";
 export { getDatabaseHealth } from "./health/database-health.service";
 export { getDatabaseMigrationStatus, runDatabaseMigrations } from "./migrations/migration-runner.service";
 export { withTransaction } from "./transactions/with-transaction.service";
-export { DatabaseQueryError } from "./errors/database.errors";
+export {
+  DatabaseConfigurationError,
+  DatabaseConnectionError,
+  DatabaseQueryError,
+  InvalidTenantContextError,
+} from "./errors/database.errors";
 export type { DatabaseHealthResult } from "./contracts/database-health.types";
 export type { DatabaseQueryExecutor, DatabaseQueryResult, DatabaseTransactionExecutor, ParameterizedQuery } from "./contracts/database-query.types";
 export type { TenantContext } from "./contracts/tenant-context";

@@ -15,7 +15,8 @@
     "test:catalog-persistence": "npm run build && node dist/modules/catalog/testing/phase-7c-test.command.js",
     "test:conversation-config-persistence": "npm run build && node dist/modules/conversation-config/testing/phase-7d-test.command.js",
     "test:order-persistence": "npm run build && node dist/modules/agent/order/persistence/testing/phase-7e-test.command.js",
-    "test:persistence-composition": "npm run build && node dist/composition/persistence/testing/phase-7f1-test.command.js"
+    "test:persistence-composition": "npm run build && node dist/composition/persistence/testing/phase-7f1-test.command.js",
+    "test:persistence-runtime-reads": "npm run build && node dist/composition/runtime-read/testing/phase-7f2-test.command.js"
   },
   "keywords": [],
   "author": "",
