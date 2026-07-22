@@ -10,7 +10,8 @@
     "test:typing": "powershell -ExecutionPolicy Bypass -File .\\scripts\\test-typing-indicator.ps1",
     "db:migrate": "npm run build && node dist/infrastructure/database/migrations/migration.command.js migrate",
     "db:migrate:status": "npm run build && node dist/infrastructure/database/migrations/migration.command.js status",
-    "test:database": "npm run build && node dist/infrastructure/database/testing/phase-7a-test.command.js"
+    "test:database": "npm run build && node dist/infrastructure/database/testing/phase-7a-test.command.js",
+    "test:seller-persistence": "npm run build && node dist/modules/seller/testing/phase-7b-test.command.js"
   },
   "keywords": [],
   "author": "",
