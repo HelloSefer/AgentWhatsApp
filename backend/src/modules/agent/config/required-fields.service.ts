@@ -83,6 +83,7 @@ export class RequiredFieldsService {
           askOrder: group.askOrder ?? index + 1,
           display: group.display,
           options: [...group.options],
+          valueConfigurations: group.valueConfigurations?.map((value) => ({ ...value })),
           requirement: group.requirement || (group.required ? "REQUIRED" : "OPTIONAL"),
           captureMode: group.captureMode || "CONFIGURED_ENUM",
           semanticType: group.semanticType,
@@ -90,6 +91,8 @@ export class RequiredFieldsService {
           allowMultipleMessages: group.allowMultipleMessages,
           askPolicy: group.askPolicy,
           condition: group.condition,
+          promptMessageKey: group.promptMessageKey,
+          presentation: group.presentation ? { ...group.presentation } : undefined,
         });
       });
 

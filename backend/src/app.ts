@@ -10,6 +10,7 @@ import conversationSessionRoutes from "./modules/agent/session/conversation-sess
 import whatsappCloudRoutes from "./modules/whatsapp/cloud/whatsapp-cloud.routes";
 import orderFormRoutes from "./modules/order-form/order-form.routes";
 import orderReceiptRoutes from "./modules/order-receipt/order-receipt.routes";
+import conversationConfigRoutes from "./modules/conversation-engine/conversation-config.routes";
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use("/", orderFormRoutes);
 app.use("/", orderReceiptRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/agent", agentRoutes);
+app.use("/api/agent/conversation-config", conversationConfigRoutes);
 app.use("/api/agent", intentRouterRoutes);
 app.use("/api/agent/session", conversationSessionRoutes);
 app.use("/api/whatsapp/cloud", whatsappCloudRoutes);

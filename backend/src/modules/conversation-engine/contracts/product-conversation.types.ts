@@ -1,4 +1,7 @@
-import type { ConversationMessageKey } from "./conversation-presentation.types";
+import type {
+  ConversationMessageKey,
+  ConversationOutcomeReference,
+} from "./conversation-presentation.types";
 
 export type ConversationOptionInputType = "buttons" | "list" | "text" | "auto";
 export type ConversationOptionRequirement = "required" | "optional" | "disabled";
@@ -12,11 +15,14 @@ export type ConversationProductWording = Readonly<{
 }>;
 
 export type ConversationOptionValue = Readonly<{
+  key: string;
   canonicalValue: string;
   displayLabel: string;
+  description?: string;
   enabled: boolean;
   order: number;
   available?: boolean;
+  outcome?: ConversationOutcomeReference;
 }>;
 
 export type ConversationOptionValidation = Readonly<{
@@ -39,5 +45,10 @@ export type ConversationProductOption = Readonly<{
   selectionMode: ConversationSelectionMode;
   promptKey: ConversationMessageKey;
   listButtonLabel?: string;
+  listTitle?: string;
+  sectionTitle?: string;
+  fallbackText?: string;
+  currentValueMarker?: string;
+  outcome?: ConversationOutcomeReference;
   actionNamespace: string;
 }>;

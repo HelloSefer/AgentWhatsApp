@@ -41,6 +41,8 @@ import type {
   OrderRuntimeTurnResult,
 } from "./order-runtime.types";
 import { orderMessage } from "../../../conversation-engine/adapters/order-conversation.adapter";
+import { getActiveConversationConfig } from "../../../conversation-engine/config/conversation-config-context.service";
+import { applyResolvedConversationProductConfig, withConversationProductDefaults } from "../../../conversation-engine/config/conversation-product-config.service";
 
 export function isGuardedOrderRuntimeAction(message: string): boolean {
   return /^(?:first_entry:order_now|info:(?:order_now|continue_order)|cart_offer:.+|cart_quantity:.+|cart_item_option:.+|cart_item_previous:(?:same|different)|cart_review:.+|cart_review_item:.+|cart_review_item_edit:.+|order_checkout:.+|order_checkout_field:.+)$/.test(message);
@@ -156,7 +158,14 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
   if (!readiness.flowEnabled || !readiness.valkeyReady) return { handled: false, warnings: [] };
 
   const sellerConfig = normalizeSellerConfig(sellerConfigService.getSellerConfig(input.sellerId));
-  const productContext = productContextService.getActiveProductContext(input.sellerId);
+  const baseProductContext = productContextService.getActiveProductContext(input.sellerId);
+  const activeConversationConfig = getActiveConversationConfig();
+  const productContext = activeConversationConfig
+    ? applyResolvedConversationProductConfig(
+        baseProductContext,
+        withConversationProductDefaults(activeConversationConfig, baseProductContext),
+      )
+    : baseProductContext;
   const fields = requiredFieldsService.getOrderFields({ sellerConfig, productContext });
   const offers = offerConfigService.getConfiguredOffers({ sellerId: input.sellerId, productId: productContext.productId });
   const identity = runtimeIdentity(input, productContext.productId);

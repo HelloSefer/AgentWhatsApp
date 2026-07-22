@@ -9,6 +9,7 @@ import type {
   ItemOptionActionHandleResult,
   ItemOptionActionHandlerInput,
 } from "./item-option-action.types";
+import { resolveConfiguredOptionCanonicalValue } from "../../../../conversation-engine/config/conversation-product-config.service";
 
 function cloneProgression(progression: ItemCollectionProgressionResult): ItemCollectionProgressionResult {
   return {
@@ -175,7 +176,11 @@ export function handleItemOptionAction(
       warnings: progression.warnings,
     });
   }
-  if (!field.options.includes(normalization.action.canonicalValue)) {
+  const canonicalValue = resolveConfiguredOptionCanonicalValue(
+    field,
+    normalization.action.canonicalValue,
+  );
+  if (!canonicalValue || !field.options.includes(canonicalValue)) {
     return result({
       handled: true,
       success: false,
@@ -193,7 +198,7 @@ export function handleItemOptionAction(
     productContext: input.productContext,
     requiredFields: input.requiredFields,
     optionKey: field.key,
-    value: normalization.action.canonicalValue,
+    value: canonicalValue,
   });
   const nextProgression = analyzeItemCollectionProgression({
     cart: collectionResult.cart,

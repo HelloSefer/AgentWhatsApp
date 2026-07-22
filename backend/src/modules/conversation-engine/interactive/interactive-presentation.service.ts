@@ -37,13 +37,23 @@ export function buildConversationPresentation(input: {
   buttonText?: string;
   actions?: readonly ConversationAction[];
   rows?: readonly ConversationListRow[];
+  sections?: readonly Readonly<{
+    key: string;
+    title?: string;
+    order: number;
+    rows: readonly ConversationListRow[];
+  }>[];
   fallbackText?: string;
   metadata?: Readonly<Record<string, string | number | boolean>>;
 }): ConversationPresentation {
-  const source = input.interactionType === "list"
-    ? [...(input.rows || [])].filter((row) => row.enabled).sort((left, right) => left.order - right.order)
-    : [...(input.actions || [])];
-  const valid = source.every(validAction);
+  const configuredRows = input.sections?.flatMap((section) => section.rows) || input.rows || [];
+  const listRows = [...configuredRows]
+    .filter((row) => row.enabled)
+    .sort((left, right) => left.order - right.order);
+  const actions = [...(input.actions || [])];
+  const valid = input.interactionType === "list"
+    ? listRows.every(validAction)
+    : actions.every(validAction);
   return {
     messageKey: input.messageKey,
     locale: "ar-MA",
@@ -53,6 +63,15 @@ export function buildConversationPresentation(input: {
     ...(input.buttonText ? { buttonText: input.buttonText } : {}),
     ...(valid && input.actions ? { actions: input.actions.map((action) => ({ ...action })) } : {}),
     ...(valid && input.rows ? { rows: input.rows.map((row) => ({ ...row })) } : {}),
+    ...(valid && input.sections
+      ? {
+          sections: input.sections.map((section) => ({
+            ...section,
+            rows: section.rows.map((row) => ({ ...row })),
+          })),
+          rows: listRows.map((row) => ({ ...row })),
+        }
+      : {}),
     ...(input.fallbackText ? { fallbackText: input.fallbackText } : {}),
     ...(input.metadata ? { metadata: { ...input.metadata } } : {}),
   };

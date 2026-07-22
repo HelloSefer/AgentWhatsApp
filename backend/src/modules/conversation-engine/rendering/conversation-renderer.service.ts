@@ -6,6 +6,7 @@ import type {
 } from "../contracts/conversation-presentation.types";
 import { resolveConversationConfig } from "../config/conversation-config-resolver.service";
 import type { ConversationOverrideResolutionInput } from "../config/conversation-overrides.types";
+import { getActiveConversationConfig } from "../config/conversation-config-context.service";
 
 const TOKEN_PATTERN = /\{\{([a-zA-Z][a-zA-Z0-9]*)\}\}/g;
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
@@ -51,7 +52,12 @@ export function renderConversationMessage(
   variables: Readonly<Record<string, ConversationTemplateValue>> = {},
   resolution: ConversationOverrideResolutionInput = {},
 ): string {
-  const config = resolveConversationConfig(resolution);
+  const hasExplicitResolution = Boolean(
+    resolution.locale || resolution.sellerOverrides || resolution.productOverrides,
+  );
+  const config = !hasExplicitResolution && getActiveConversationConfig()
+    ? getActiveConversationConfig()!
+    : resolveConversationConfig(resolution);
   return renderTemplate(config.messages[key], variables)
     || renderTemplate(resolveConversationConfig().messages[key], variables)
     || resolveConversationConfig().messages["error.recovery"];
@@ -62,9 +68,13 @@ export function renderConversationLabel(
   variables: Readonly<Record<string, ConversationTemplateValue>> = {},
   resolution: ConversationOverrideResolutionInput = {},
 ): string {
-  const config = resolveConversationConfig(resolution);
+  const hasExplicitResolution = Boolean(
+    resolution.locale || resolution.sellerOverrides || resolution.productOverrides,
+  );
+  const config = !hasExplicitResolution && getActiveConversationConfig()
+    ? getActiveConversationConfig()!
+    : resolveConversationConfig(resolution);
   return renderTemplate(config.labels[key], variables)
     || renderTemplate(resolveConversationConfig().labels[key], variables)
     || key;
 }
-

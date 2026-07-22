@@ -117,13 +117,26 @@ function buildEditPresentation(input: {
   const options: NonNullable<AgentReplyUiHint["options"]> = [];
   for (const field of fields) {
     if (field.options?.length) {
-      for (const canonicalValue of field.options) {
-        const id = buildItemCollectionOptionActionId(field.key, canonicalValue);
+      const configuredValues = field.valueConfigurations?.length
+        ? field.valueConfigurations
+            .filter((value) => value.enabled && value.available)
+            .sort((left, right) => left.order - right.order)
+        : field.options.map((canonicalValue, order) => ({
+            key: canonicalValue,
+            canonicalValue,
+            label: canonicalValue,
+            enabled: true,
+            available: true,
+            order,
+          }));
+      for (const configuredValue of configuredValues) {
+        const canonicalValue = configuredValue.canonicalValue;
+        const id = buildItemCollectionOptionActionId(field.key, configuredValue.key);
         if (!id) continue;
         const current = input.state.workingItem.selectedOptions[field.key] === canonicalValue;
         const focusedLabel = cartMessage(
           current ? "cart.option_row_current" : "cart.option_row",
-          { optionLabel: field.label || field.key, optionValue: canonicalValue },
+          { optionLabel: field.label || field.key, optionValue: configuredValue.label },
         );
         options.push({
           id,
@@ -132,7 +145,7 @@ function buildEditPresentation(input: {
               ? focusedLabel
               : cartMessage(current ? "cart.option_row_now" : "cart.option_row", {
                   optionLabel: field.label || field.key,
-                  optionValue: canonicalValue,
+                  optionValue: configuredValue.label,
                 }),
             48,
           ),
@@ -357,11 +370,18 @@ export function runCartItemEditPreview(input: CartItemEditPreviewInput): CartIte
   }
 
   if (normalization.action.type === "SELECT_OPTION") {
+    const selectionAction = normalization.action;
+    const selectedField = context.requiredFields.find(
+      (field) => field.key === selectionAction.fieldKey,
+    );
+    const configuredValue = selectedField?.valueConfigurations?.find(
+      (value) => value.key === selectionAction.canonicalValue && value.enabled && value.available,
+    );
     const selected = selectCartItemEditOption({
       context,
       state: suppliedState,
-      fieldKey: normalization.action.fieldKey,
-      canonicalValue: normalization.action.canonicalValue,
+      fieldKey: selectionAction.fieldKey,
+      canonicalValue: configuredValue?.canonicalValue || selectionAction.canonicalValue,
     });
     if (selected.success && selected.editState?.autoSaveOnSelection) {
       const saved = saveCartItemEdit({ context, state: selected.editState });

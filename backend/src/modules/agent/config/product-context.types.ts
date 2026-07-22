@@ -13,6 +13,16 @@ export type ProductOptionGroup = {
   prompt?: string;
   required: boolean;
   options: string[];
+  /** Stable presentation identities remain separate from customer-visible labels. */
+  valueConfigurations?: Array<{
+    key: string;
+    canonicalValue: string;
+    label: string;
+    description?: string;
+    enabled: boolean;
+    available: boolean;
+    order: number;
+  }>;
   display: DisplayMode;
   askOrder?: number;
   requirement?: OrderFieldRequirement;
@@ -22,6 +32,14 @@ export type ProductOptionGroup = {
   allowMultipleMessages?: boolean;
   askPolicy?: OptionalFieldAskPolicy;
   condition?: OrderFieldCondition;
+  promptMessageKey?: string;
+  presentation?: {
+    title?: string;
+    sectionTitle?: string;
+    buttonLabel?: string;
+    fallbackText?: string;
+    currentValueMarker?: string;
+  };
 };
 
 export type ProductInfoMenuItem =

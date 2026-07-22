@@ -18,6 +18,15 @@ export type RequiredOrderField = {
   askOrder: number;
   display?: DisplayMode;
   options?: string[];
+  valueConfigurations?: Array<{
+    key: string;
+    canonicalValue: string;
+    label: string;
+    description?: string;
+    enabled: boolean;
+    available: boolean;
+    order: number;
+  }>;
   minValue?: number;
   maxValue?: number;
   defaultValue?: number | string;
@@ -28,4 +37,12 @@ export type RequiredOrderField = {
   allowMultipleMessages?: boolean;
   askPolicy?: OptionalFieldAskPolicy;
   condition?: OrderFieldCondition;
+  promptMessageKey?: string;
+  presentation?: {
+    title?: string;
+    sectionTitle?: string;
+    buttonLabel?: string;
+    fallbackText?: string;
+    currentValueMarker?: string;
+  };
 };

@@ -91,8 +91,8 @@ export function buildOrderEntryOptionPresentation(
     ? orderMessage("order.first_size_prompt")
     : orderMessage("order.first_option_prompt", { optionLabel: option.label });
   const options = option.values
-    .filter((value) => value.enabled)
-    .map((value) => value.canonicalValue);
+    .filter((value) => value.enabled && value.available !== false)
+    .sort((left, right) => left.order - right.order);
 
   if (!options.length) {
     return { text };
@@ -100,16 +100,16 @@ export function buildOrderEntryOptionPresentation(
 
   const usesButtons = options.length <= MAX_BUTTON_OPTIONS;
   const mappedOptions: NonNullable<AgentReplyUiHint["options"]> = [];
-  for (const canonicalValue of options) {
-    const id = buildItemCollectionOptionActionId(field.key, canonicalValue);
+  for (const value of options) {
+    const id = buildItemCollectionOptionActionId(field.key, value.key);
     if (!id) return { text };
     mappedOptions.push({
       id,
-      label: displayLabel({
-        canonicalValue,
-        maximumLength: usesButtons ? MAX_BUTTON_LABEL_LENGTH : MAX_LIST_LABEL_LENGTH,
-      }),
-      value: canonicalValue,
+      label: truncateItemCollectionPresentationText(
+        value.displayLabel,
+        usesButtons ? MAX_BUTTON_LABEL_LENGTH : MAX_LIST_LABEL_LENGTH,
+      ),
+      value: value.description || value.canonicalValue,
     });
   }
 
@@ -118,8 +118,8 @@ export function buildOrderEntryOptionPresentation(
     uiHints: {
       kind: usesButtons ? "buttons" : "list",
       purpose: "field_options",
-      ...(usesButtons ? {} : { title: field.label || field.key }),
-      ...(isSize && !usesButtons ? { buttonText: orderLabel("order.size_list_button") } : {}),
+      ...(usesButtons ? {} : { title: option.listTitle || field.label || field.key }),
+      ...(!usesButtons && option.listButtonLabel ? { buttonText: option.listButtonLabel } : {}),
       body: text,
       options: mappedOptions,
       previewOnly: true,
@@ -233,11 +233,15 @@ export function buildItemCollectionPresentation(
     }
 
     const seenActionIds = new Set<string>();
-    const optionCount = field.options.length;
+    const configuredOption = toConversationProductOption(field);
+    const configuredValues = configuredOption.values
+      .filter((value) => value.enabled && value.available !== false)
+      .sort((left, right) => left.order - right.order);
+    const optionCount = configuredValues.length;
     const usesButtons = optionCount <= MAX_BUTTON_OPTIONS;
     const options: NonNullable<AgentReplyUiHint["options"]> = [];
-    for (const canonicalValue of field.options) {
-      const actionId = buildItemCollectionOptionActionId(field.key, canonicalValue);
+    for (const value of configuredValues) {
+      const actionId = buildItemCollectionOptionActionId(field.key, value.key);
       if (!actionId) {
         return result({
           success: false,
@@ -261,12 +265,11 @@ export function buildItemCollectionPresentation(
       seenActionIds.add(actionId);
       options.push({
         id: actionId,
-        label: displayLabel({
-          canonicalValue,
-          labels: input.optionDisplayLabels,
-          maximumLength: usesButtons ? MAX_BUTTON_LABEL_LENGTH : MAX_LIST_LABEL_LENGTH,
-        }),
-        value: canonicalValue,
+        label: truncateItemCollectionPresentationText(
+          cleanText(input.optionDisplayLabels?.[value.canonicalValue]) || value.displayLabel,
+          usesButtons ? MAX_BUTTON_LABEL_LENGTH : MAX_LIST_LABEL_LENGTH,
+        ),
+        value: value.description || value.canonicalValue,
       });
     }
 
@@ -274,7 +277,8 @@ export function buildItemCollectionPresentation(
     const uiHints: AgentReplyUiHint = {
       kind: usesButtons ? "buttons" : "list",
       purpose: "field_options",
-      ...(usesButtons ? {} : { title: truncateItemCollectionPresentationText(field.label || field.key, MAX_LIST_LABEL_LENGTH) }),
+      ...(usesButtons ? {} : { title: truncateItemCollectionPresentationText(configuredOption.listTitle || field.label || field.key, MAX_LIST_LABEL_LENGTH) }),
+      ...(!usesButtons && configuredOption.listButtonLabel ? { buttonText: configuredOption.listButtonLabel } : {}),
       body: text,
       options,
       previewOnly: true,

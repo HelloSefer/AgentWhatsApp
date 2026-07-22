@@ -235,12 +235,18 @@ function buildCtaItem(input: {
 export function buildFirstEntryCtaPreview(
   policy: FirstEntryPolicy,
 ): FirstEntryCtaPreview {
+  const configuredPrimaryLabel = firstEntryLabel("first_entry.order_now");
+  const configuredSecondaryLabel = firstEntryLabel("first_entry.more_info");
   const primaryLabel = cleanCtaLabel(
-    policy.primaryCtaLabel,
+    configuredPrimaryLabel !== defaultPrimaryCtaLabel
+      ? configuredPrimaryLabel
+      : policy.primaryCtaLabel,
     defaultPrimaryCtaLabel,
   );
   const secondaryLabel = cleanCtaLabel(
-    policy.secondaryCtaLabel,
+    configuredSecondaryLabel !== defaultSecondaryCtaLabel
+      ? configuredSecondaryLabel
+      : policy.secondaryCtaLabel,
     defaultSecondaryCtaLabel,
   );
 

@@ -65,6 +65,10 @@ import {
   isGuardedOrderRuntimeAction,
   processGuardedOrderRuntimeTurn,
 } from "./order/runtime/order-runtime-router.service";
+import { conversationConfigResolver } from "../conversation-engine/config/conversation-config-runtime.service";
+import { runWithConversationConfig } from "../conversation-engine/config/conversation-config-context.service";
+import { getActiveConversationConfig } from "../conversation-engine/config/conversation-config-context.service";
+import { applyResolvedConversationProductConfig, withConversationProductDefaults } from "../conversation-engine/config/conversation-product-config.service";
 
 export type GenerateAgentOptions = {
   customerId?: string;
@@ -315,10 +319,16 @@ function getRuntimeRequiredOrderFields(
     const configProductContext = productContextService.getActiveProductContext(
       options.sellerId,
     );
+    const activeConversationConfig = getActiveConversationConfig();
+    const effectiveConversationConfig = activeConversationConfig
+      ? withConversationProductDefaults(activeConversationConfig, configProductContext)
+      : undefined;
 
     return requiredFieldsService.getOrderFields({
       sellerConfig,
-      productContext: configProductContext,
+      productContext: effectiveConversationConfig
+        ? applyResolvedConversationProductConfig(configProductContext, effectiveConversationConfig)
+        : configProductContext,
     });
   } catch (error) {
     console.error("❌ Required order fields resolution failed", error);
@@ -1609,7 +1619,7 @@ async function buildOrderResultIfHandled(
   }
 }
 
-export async function generateAgentResult(
+async function generateAgentResultInternal(
   message: string,
   productContext: ProductContext = DEFAULT_PRODUCT_CONTEXT,
   options?: GenerateAgentOptions,
@@ -1924,6 +1934,27 @@ export async function generateAgentResult(
   await appendMessageToMemory(activeOptions, "agent", finalResult.reply);
 
   return finalResult;
+}
+
+export async function generateAgentResult(
+  message: string,
+  productContext: ProductContext = DEFAULT_PRODUCT_CONTEXT,
+  options?: GenerateAgentOptions,
+  dependencies: GenerateAgentDependencies = {},
+): Promise<AgentResult> {
+  const sellerId = options?.sellerId?.trim() || DEFAULT_DEMO_SELLER_ID;
+  const productId = options?.productId?.trim() || productContext.productId;
+  const resolvedConfig = conversationConfigResolver.resolve({ sellerId, productId });
+  const configuredProductContext: ProductContext = resolvedConfig.productWording
+    ? {
+        ...productContext,
+        productName: resolvedConfig.productWording.fullName,
+        conversationalProductName: resolvedConfig.productWording.conversationalName,
+      }
+    : productContext;
+  return runWithConversationConfig(resolvedConfig, () =>
+    generateAgentResultInternal(message, configuredProductContext, options, dependencies),
+  );
 }
 
 export async function generateAgentReply(

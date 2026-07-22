@@ -239,10 +239,29 @@ export type ConversationTemplateValue = string | number | boolean | SafeConversa
 
 export type ConversationInteractionType = "text" | "buttons" | "list" | "split";
 
+export const CONVERSATION_PRESENTATION_KEYS = [
+  "first_entry",
+  "information_menu",
+  "product_option",
+  "piece_planning",
+  "item_collection",
+  "cart_review",
+  "cart_item_selector",
+  "cart_item_edit",
+  "delivery_collection",
+  "final_review",
+  "confirmation",
+  "recovery",
+] as const;
+
+export type ConversationPresentationKey = (typeof CONVERSATION_PRESENTATION_KEYS)[number];
+
 export type ConversationOutcomeReference = Readonly<{
   responseMessageKey?: ConversationMessageKey;
-  nextPresentationKey?: ConversationMessageKey;
+  nextPresentationKey?: ConversationPresentationKey;
   domainActionKey?: string;
+  requestConfiguredOptionKey?: string;
+  requestTextInputKey?: string;
 }>;
 
 export type ConversationAction = Readonly<{
@@ -260,6 +279,13 @@ export type ConversationListRow = ConversationAction & Readonly<{
   available?: boolean;
 }>;
 
+export type ConversationPresentationSection = Readonly<{
+  key: string;
+  title?: string;
+  order: number;
+  rows: readonly ConversationListRow[];
+}>;
+
 export type ConversationPresentation = Readonly<{
   messageKey: ConversationMessageKey;
   locale: ConversationLocale;
@@ -269,6 +295,7 @@ export type ConversationPresentation = Readonly<{
   buttonText?: string;
   actions?: readonly ConversationAction[];
   rows?: readonly ConversationListRow[];
+  sections?: readonly ConversationPresentationSection[];
   fallbackText?: string;
   metadata?: Readonly<Record<string, string | number | boolean>>;
 }>;
