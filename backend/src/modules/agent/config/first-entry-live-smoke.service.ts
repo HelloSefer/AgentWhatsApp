@@ -1,4 +1,5 @@
 import { env } from "../../../config/env";
+import { firstEntryCtaQuestion } from "../../conversation-engine/adapters/first-entry-conversation.adapter";
 import type { AgentResult } from "../agent-action.types";
 import { normalizeFirstEntryClick } from "./first-entry-click-normalizer.service";
 import { normalizeSellerConfig } from "./first-entry-config.service";
@@ -366,7 +367,7 @@ function buildFirstEntryInteractivePayload(input: {
 }
 
 function getSplitCtaQuestion(): string {
-  return "شنو بغيتي دابا: دير الطلب ✅ ولا تعرف المزيد من المعلومات على المنتج؟";
+  return firstEntryCtaQuestion("order_or_info", "friendly")!;
 }
 
 function normalizeInfoLine(line: string): string {

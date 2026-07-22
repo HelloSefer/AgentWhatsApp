@@ -11,6 +11,10 @@ import {
 import { inspectCartReviewReadiness } from "../cart-review.service";
 import type { CartReviewPresentationResult } from "../cart-review.types";
 import {
+  cartLabel,
+  cartMessage,
+} from "../../../../conversation-engine/adapters/cart-conversation.adapter";
+import {
   beginCartItemEditText,
   captureCartItemEditText,
   normalizeCartItemEditAction,
@@ -95,13 +99,15 @@ function buildEditPresentation(input: {
       success: true,
       kind: "ITEM_OPTION_TEXT_INPUT",
       promptKey: "ENTER_CART_ITEM_OPTION_TEXT",
-      text: `دخل ${awaitingField.label || awaitingField.key}`,
+      text: cartMessage("cart.option_text_input", {
+        optionLabel: awaitingField.label || awaitingField.key,
+      }),
       selectedItemId: input.state.sourceItemId,
       uiHints: {
         kind: "buttons",
         purpose: "cart_review",
-        body: "دخل القيمة الجديدة ومن بعد حفظ التغييرات",
-        options: [{ id: "cart_review_item_edit:cancel", label: "إلغاء" }],
+        body: cartMessage("cart.option_text_input_body"),
+        options: [{ id: "cart_review_item_edit:cancel", label: cartLabel("cart.cancel") }],
         previewOnly: true,
       },
       warnings: [],
@@ -115,13 +121,19 @@ function buildEditPresentation(input: {
         const id = buildItemCollectionOptionActionId(field.key, canonicalValue);
         if (!id) continue;
         const current = input.state.workingItem.selectedOptions[field.key] === canonicalValue;
-        const sizeLabel = `${field.label || field.key}: ${canonicalValue}${
-          current ? " — الحالي" : ""
-        }`;
+        const focusedLabel = cartMessage(
+          current ? "cart.option_row_current" : "cart.option_row",
+          { optionLabel: field.label || field.key, optionValue: canonicalValue },
+        );
         options.push({
           id,
           label: truncateItemCollectionPresentationText(
-            isFocusedField ? sizeLabel : `${field.label || field.key}: ${canonicalValue}${current ? " (دابا)" : ""}`,
+            isFocusedField
+              ? focusedLabel
+              : cartMessage(current ? "cart.option_row_now" : "cart.option_row", {
+                  optionLabel: field.label || field.key,
+                  optionValue: canonicalValue,
+                }),
             48,
           ),
           ...(isFocusedField ? {} : { value: canonicalValue }),
@@ -134,27 +146,30 @@ function buildEditPresentation(input: {
     if (id) {
       options.push({
         id,
-        label: truncateItemCollectionPresentationText(`بدل ${field.label || field.key}`, 48),
+        label: truncateItemCollectionPresentationText(
+          cartMessage("cart.edit_option_label", { optionLabel: field.label || field.key }),
+          48,
+        ),
         value: field.key,
       });
     }
   }
   if (!input.state.autoSaveOnSelection) {
     options.push(
-      { id: "cart_review_item_edit:save", label: "حفظ التغييرات" },
-      { id: "cart_review_item_edit:cancel", label: "إلغاء" },
+      { id: "cart_review_item_edit:save", label: cartLabel("cart.save") },
+      { id: "cart_review_item_edit:cancel", label: cartLabel("cart.cancel") },
     );
   }
 
   const uiHints: AgentReplyUiHint = {
     kind: options.length <= MAX_BUTTON_OPTIONS ? "buttons" : "list",
     purpose: "cart_review",
-    ...(options.length > MAX_BUTTON_OPTIONS ? { title: "بدل الاختيارات" } : {}),
+    ...(options.length > MAX_BUTTON_OPTIONS ? { title: cartLabel("cart.edit_options_title") } : {}),
     body: isFocusedSize
-      ? "اختار المقاس الجديد"
+      ? cartMessage("cart.select_new_size")
       : isFocusedColor
-        ? "اختار اللون الجديد"
-      : "بدل غير الاختيار اللي بغيتي، ومن بعد حفظ التغييرات",
+        ? cartMessage("cart.select_new_color")
+      : cartMessage("cart.select_new_option"),
     options,
     previewOnly: true,
   };
@@ -163,10 +178,10 @@ function buildEditPresentation(input: {
     kind: "ITEM_OPTION_EDIT",
     promptKey: "EDIT_CART_ITEM_OPTIONS",
     text: isFocusedSize
-      ? "اختار المقاس الجديد"
+      ? cartMessage("cart.select_new_size")
       : isFocusedColor
-        ? "اختار اللون الجديد"
-        : "بدل اختيارات هاد القطعة",
+        ? cartMessage("cart.select_new_color")
+        : cartMessage("cart.edit_item_options"),
     selectedItemId: input.state.sourceItemId,
     uiHints,
     warnings: [],

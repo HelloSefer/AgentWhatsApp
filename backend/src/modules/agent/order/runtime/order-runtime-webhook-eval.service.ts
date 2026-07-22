@@ -344,7 +344,7 @@ export async function evaluateOrderRuntimeWebhookIntegration(): Promise<OrderRun
     add(assertions, "commercial message uses configured product name", Boolean(firstMessage?.text.includes(product.name)));
     add(assertions, "commercial message uses configured product price", Boolean(firstMessage?.text.includes(String(product.price))));
     add(assertions, "commercial message includes configured delivery information", Boolean(firstMessage?.text.includes("التوصيل")));
-    add(assertions, "commercial message includes configured payment information", Boolean(firstMessage?.text.includes("الدفع")));
+    add(assertions, "compact commercial message omits duplicate payment information", !firstMessage?.text.includes("الدفع"));
     add(assertions, "commercial message does not collect order fields", !hasAllFieldsPrompt(firstMessage?.text));
     add(assertions, "First Entry message 2 is a separate interactive CTA", secondMessage?.kind === "interactive" && secondMessage.text !== firstMessage?.text);
     add(assertions, "First Entry CTA has exactly the two authoritative actions", firstEntryActions.length === 2 && firstEntryActions[0] === "first_entry:order_now" && firstEntryActions[1] === "first_entry:more_info");
@@ -392,11 +392,18 @@ export async function evaluateOrderRuntimeWebhookIntegration(): Promise<OrderRun
     state = await loadRuntime(scope);
     add(assertions, "first_entry:order_now remains authoritative through webhook mapping", directOrder.normalizedActionId === "first_entry:order_now");
     add(assertions, "trusted server-side webhook scope activates guarded runtime", directOrder.agentSource === "direct" && state.orderRuntime?.runtimeStage === "PLANNING");
-    add(assertions, "direct Order Now delegates to configured planning selector", actionIds(directOrder).some((id) => id.startsWith("cart_quantity:") || id.startsWith("cart_offer:")));
+    add(assertions, "direct Order Now requests the first configured product option", actionIds(directOrder).some((id) => id.startsWith("cart_item_option:size:")));
     add(assertions, "direct Order Now does not enter legacy all-fields collection", !hasAllFieldsPrompt(directOrder.agentReplyPreview));
     add(assertions, "stale legacy confirmation cannot hijack runtime planning", legacyFingerprint(state.orderState) === legacyBeforeRuntime);
 
-    let quantitySelector = directOrder;
+    const firstSizeAction = actionIds(directOrder).find((id) => id.startsWith("cart_item_option:size:"));
+    let quantitySelector = firstSizeAction
+      ? await receiveWebhook(webhookResults, {
+          scope,
+          buttonReplyId: firstSizeAction,
+          buttonReplyTitle: firstSizeAction.split(":").at(-1) || "المقاس",
+        })
+      : directOrder;
     const offerAction = actionIds(quantitySelector).find((id) => id.startsWith("cart_offer:"));
     if (offerAction) {
       quantitySelector = await receiveWebhook(webhookResults, {

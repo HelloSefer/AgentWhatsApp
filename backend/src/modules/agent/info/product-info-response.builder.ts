@@ -11,6 +11,12 @@ import {
   matchAvailableInfoColor,
   matchAvailableInfoSize,
 } from "./product-info.service";
+import {
+  informationLabel,
+  informationMessage,
+} from "../../conversation-engine/adapters/information-conversation.adapter";
+import { resolveProductConversationWording } from "../../conversation-engine/adapters/product-wording.adapter";
+import { commonLabel } from "../../conversation-engine/adapters/common-conversation.adapter";
 
 type ProductInfoReplyInput = {
   message: string;
@@ -21,30 +27,30 @@ type ProductInfoReplyInput = {
 };
 
 const infoMenuOptions = [
-  { id: "info:price", label: "الثمن", fact: "price" },
-  { id: "info:sizes", label: "المقاسات", fact: "sizes" },
-  { id: "info:colors", label: "الألوان", fact: "colors" },
+  { id: "info:price", label: informationLabel("information.price"), fact: "price" },
+  { id: "info:sizes", label: informationLabel("information.sizes"), fact: "sizes" },
+  { id: "info:colors", label: informationLabel("information.colors"), fact: "colors" },
   {
     id: "info:delivery_payment",
-    label: "التوصيل والدفع",
+    label: informationLabel("information.delivery_payment"),
     fact: "delivery_payment",
   },
-  { id: "info:how_to_order", label: "طريقة الطلب", fact: "always" },
-  { id: "info:order_now", label: "أطلب الآن", fact: "always" },
+  { id: "info:how_to_order", label: informationLabel("information.how_to_order"), fact: "always" },
+  { id: "info:order_now", label: informationLabel("information.order_now"), fact: "always" },
 ] as const;
 
 const followupOptions = [
-  { id: "info:order_now", label: "نبدأ الطلب", value: "نبدأ الطلب" },
-  { id: "info:menu", label: "معلومات أخرى", value: "معلومات أخرى" },
+  { id: "info:order_now", label: informationLabel("information.start_order"), value: informationLabel("information.start_order") },
+  { id: "info:menu", label: informationLabel("information.more"), value: informationLabel("information.more") },
 ];
 const selectionFollowupOptions = [
-  { id: "info:continue_order", label: "نكمل الطلب", value: "نكمل الطلب" },
-  { id: "info:menu", label: "معلومات أخرى", value: "معلومات أخرى" },
+  { id: "info:continue_order", label: informationLabel("information.continue_order"), value: informationLabel("information.continue_order") },
+  { id: "info:menu", label: informationLabel("information.more"), value: informationLabel("information.more") },
 ];
 
 function formatCurrency(productContext: ProductContext): string {
   return productContext.currency === "MAD"
-    ? "درهم"
+    ? commonLabel("common.currency_mad")
     : productContext.currency || "";
 }
 
@@ -73,7 +79,7 @@ function getDeliveryLine(productContext: ProductContext): string | undefined {
     return ensureSentence(delivery.replace(/^التوصيل\s+/, "التوصيل متوفر "));
   }
 
-  return ensureSentence(`التوصيل متوفر: ${delivery}`);
+  return informationMessage("information.delivery_detail", { deliveryText: delivery });
 }
 
 function getPaymentLine(productContext: ProductContext): string | undefined {
@@ -83,7 +89,9 @@ function getPaymentLine(productContext: ProductContext): string | undefined {
     return undefined;
   }
 
-  return ensureSentence(/متوفر/.test(payment) ? payment : `${payment} متوفر`);
+  return /متوفر/.test(payment)
+    ? ensureSentence(payment)
+    : informationMessage("information.payment_available", { paymentText: payment });
 }
 
 function getDeliveryCostAnswer(message: string, productContext: ProductContext): string | undefined {
@@ -94,15 +102,20 @@ function getDeliveryCostAnswer(message: string, productContext: ProductContext):
   }
 
   if (productContext.deliveryIsFree === true || productContext.deliveryPricing?.mode === "ALL_FREE") {
-    return "التوصيل مجاني.";
+    return informationMessage("information.delivery_free");
   }
 
   if (typeof productContext.deliveryPrice === "number") {
-    return `ثمن التوصيل هو ${productContext.deliveryPrice} ${productContext.currency === "MAD" ? "درهم" : productContext.currency || ""}.`.replace(/\s+\./, ".");
+    return informationMessage("information.delivery_paid", {
+      deliveryAmount: productContext.deliveryPrice,
+      currency: productContext.currency === "MAD"
+        ? commonLabel("common.currency_mad")
+        : productContext.currency || "",
+    }).replace(/\s+\./, ".");
   }
 
   if (productContext.deliveryIsFree === false || productContext.deliveryPricing?.enabled) {
-    return "التوصيل ماشي مجاني فكل المدن، والثمن كيتحدد حسب المدينة.";
+    return informationMessage("information.delivery_variable");
   }
 
   return undefined;
@@ -144,19 +157,17 @@ function getTextFallback(options: Array<{ label: string }>): string {
 }
 
 function getConversationalProductName(productContext: ProductContext): string {
-  return (
-    productContext.conversationalProductName?.trim() ||
-    productContext.productName.trim() ||
-    "المنتج"
-  );
+  return resolveProductConversationWording(productContext).conversationalName;
 }
 
 function buildMenuReply(input: ProductInfoReplyInput): RenderedAgentReply {
   const options = getMenuOptions(input.productContext);
   const heading =
     ["info:menu", "info:more_info"].includes(input.message.trim()) || input.message.includes("معلومات")
-      ? "اختار المعلومة اللي بغيتي 👇"
-      : `أكيد 👌 شنو بغيتي تعرف على ${getConversationalProductName(input.productContext)}؟`;
+      ? informationMessage("information.menu_opening")
+      : informationMessage("information.opening", {
+          productConversationalName: getConversationalProductName(input.productContext),
+        });
   const textMode = input.infoMenuDisplayMode === "text";
 
   return {
@@ -166,7 +177,7 @@ function buildMenuReply(input: ProductInfoReplyInput): RenderedAgentReply {
       : {
           kind: "list",
           purpose: "info_menu",
-          title: "معلومات المنتج",
+          title: informationLabel("information.product_title"),
           body: heading,
           options,
         },
@@ -184,14 +195,13 @@ function buildSoftSelectionReply(input: {
 }): RenderedAgentReply {
   const selectionText =
     input.field === "size"
-      ? `المقاس ${input.value} متوفر ✅`
-      : `اللون ${withColorArticle(input.value)} متوفر ✅`;
+      ? informationMessage("information.option_available_size", { optionValue: input.value })
+      : informationMessage("information.option_available_color", { optionValue: withColorArticle(input.value) });
   const body =
     input.field === "size"
-      ? `${selectionText}\n\nنكملو الطلب بهاد المقاس ولا بغيتي تعرف معلومات أخرى؟`
-      : `${selectionText}\n\nبغيتي نكمل لك الطلب بهذا اللون، ولا تشوف معلومات أخرى؟`;
-  const fallback =
-    `${body}\n\nكتب "نكمل الطلب" باش نكملو الطلب، أو "معلومات أخرى" باش تشوف معلومات أخرى.`;
+      ? informationMessage("information.size_followup", { selectionText })
+      : informationMessage("information.color_followup", { selectionText });
+  const fallback = informationMessage("information.text_followup", { body });
 
   return {
     text: input.textMode ? fallback : body,
@@ -219,13 +229,13 @@ function buildHowToOrderReply(input: ProductInfoReplyInput): string {
   );
   const requestedParts = [
     ...productFields,
-    ...(hasDeliveryFields ? ["معلومات التوصيل"] : []),
+    ...(hasDeliveryFields ? [informationLabel("information.delivery_fields")] : []),
   ];
   const fieldsText = requestedParts.length
     ? requestedParts.join("، ")
-    : "معلومات الطلب والتوصيل";
+    : informationLabel("information.order_delivery_fields");
 
-  return `باش تطلب، غادي نطلب منك ${fieldsText}. من بعد نعرض عليك ملخص الطلب باش تراجعو.`;
+  return informationMessage("information.how_to_order", { fieldsText });
 }
 
 function buildAvailabilityReply(productContext: ProductContext): string {
@@ -234,37 +244,40 @@ function buildAvailabilityReply(productContext: ProductContext): string {
   }
 
   if (productContext.offer) {
-    return `المنتج متوفر حالياً. ${ensureSentence(productContext.offer)}`;
+    return informationMessage("information.availability_with_offer", {
+      offerText: ensureSentence(productContext.offer),
+    });
   }
 
-  return "معلومة التوفر ما محدداش دابا. نقدر نعاونك فالثمن، المقاسات أو الألوان.";
+  return informationMessage("information.availability_unknown");
 }
 
 function buildTopicText(input: ProductInfoReplyInput): string {
   if (input.request.topic === "price") {
     if (!input.productContext.price) {
-      return "الثمن ما محددش دابا.";
+      return informationMessage("information.price_unknown");
     }
 
-    return `الثمن هو ${input.productContext.price} ${formatCurrency(
-      input.productContext,
-    )}.\n${getPaymentLine(input.productContext) || ""}`.trim();
+    return `${informationMessage("information.price", {
+      price: input.productContext.price,
+      currency: formatCurrency(input.productContext),
+    })}\n${getPaymentLine(input.productContext) || ""}`.trim();
   }
 
   if (input.request.topic === "sizes") {
     return input.request.requestedSize
       ? getSizeReply(input.message, input.productContext)
       : input.productContext.availableSizes?.length
-        ? "هادو هما المقاسات المتوفرة👇\nاختار المقاس المناسب ليك"
-        : "معلومة المقاسات ما محدداش دابا.";
+        ? informationMessage("information.size_list")
+        : informationMessage("information.sizes_unknown");
   }
 
   if (input.request.topic === "colors") {
     return input.request.requestedColor
       ? getColorReply(input.message, input.productContext)
       : input.productContext.availableColors?.length
-        ? "الألوان المتوفرة:\nاختار اللون اللي عجبك 👇"
-        : "معلومة الألوان ما محدداش دابا.";
+        ? informationMessage("information.color_list")
+        : informationMessage("information.colors_unknown");
   }
 
   if (input.request.topic === "delivery_payment") {
@@ -276,7 +289,7 @@ function buildTopicText(input: ProductInfoReplyInput): string {
 
     return lines.length
       ? lines.join("\n")
-      : "معلومات التوصيل والدفع ما محدداش دابا.";
+      : informationMessage("information.delivery_payment_unknown");
   }
 
   if (input.request.topic === "availability") {
@@ -328,7 +341,7 @@ export function buildProductInfoReply(
         : {
             kind: "list",
             purpose: "field_options",
-            title: "المقاسات",
+            title: informationLabel("information.sizes"),
             body: text,
             options: sizes.map((size) => ({
               id: `size:${size}`,
@@ -372,7 +385,7 @@ export function buildProductInfoReply(
         : {
             kind: colors.length <= 3 ? "buttons" : "list",
             purpose: "field_options",
-            title: "الألوان",
+            title: informationLabel("information.colors"),
             body: text,
             options: colors.map((color) => ({
               id: `color:${color}`,
@@ -387,7 +400,7 @@ export function buildProductInfoReply(
 
   return {
     text: textMode
-      ? `${text}\n\nإلا بغيتي تطلب كتب: أطلب الآن\nوإلا بغيتي معلومات أخرى كتب: معلومات أخرى`
+      ? informationMessage("information.text_actions_hint", { body: text })
       : text,
     ui: textMode
       ? { kind: "none", purpose: "info_menu" }

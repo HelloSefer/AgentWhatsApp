@@ -138,13 +138,12 @@ function completedUnits(runtime: OrderRuntimeSession | undefined): number {
 async function buildReviewedCart(customerPhone: string): Promise<OrderRuntimeSession | undefined> {
   await clearRuntime(customerPhone);
   await turn(customerPhone, "first_entry:order_now");
-  await turn(customerPhone, "cart_quantity:2");
   await turn(customerPhone, "cart_item_option:size:38");
+  await turn(customerPhone, "cart_quantity:2");
   await turn(customerPhone, "cart_item_option:color:أسود");
-  await turn(customerPhone, "1");
+  await turn(customerPhone, "cart_item_previous:different");
   await turn(customerPhone, "cart_item_option:size:40");
   await turn(customerPhone, "cart_item_option:color:وردي");
-  await turn(customerPhone, "1");
   return loadRuntime(customerPhone);
 }
 
@@ -165,7 +164,6 @@ async function runWrongFieldCheck(assertions: Assertion[]): Promise<void> {
   const customerPhone = "h1-eval-runtime-wrong-field";
   await clearRuntime(customerPhone);
   await turn(customerPhone, "first_entry:order_now");
-  await turn(customerPhone, "cart_quantity:1");
   const before = await loadRuntime(customerPhone);
   const result = await turn(customerPhone, "cart_item_option:color:أسود");
   const after = await loadRuntime(customerPhone);
@@ -192,9 +190,8 @@ async function runCartReviewMutationChecks(assertions: Assertion[]): Promise<voi
   const optionItemId = runtime?.cart.items[0]?.id || "";
   await turn(optionCustomerPhone, "cart_review:edit");
   await turn(optionCustomerPhone, `cart_review_item:select:${optionItemId}`);
-  await turn(optionCustomerPhone, `cart_review_item:options:${optionItemId}`);
+  await turn(optionCustomerPhone, `cart_review_item:option:size:${optionItemId}`);
   await turn(optionCustomerPhone, "cart_item_option:size:39");
-  await turn(optionCustomerPhone, "cart_review_item_edit:save");
   runtime = await loadRuntime(optionCustomerPhone);
   add(assertions, "completed-item option edit remains atomic", completedOption(runtime, 0, "size") === "39" && completedOption(runtime, 0, "color") === "أسود");
   await clearRuntime(optionCustomerPhone);
@@ -263,30 +260,28 @@ export async function evaluateGuardedOrderRuntime(): Promise<OrderRuntimeEvaluat
   const orderNow = await turn(CUSTOMER_PHONE, "first_entry:order_now");
   runtime = await assertStage(assertions, CUSTOMER_PHONE, "PLANNING", "Order Now enters PLANNING");
   add(assertions, "planning reply is generated", Boolean(orderNow.reply));
+  add(assertions, "configured option order is respected", orderNow.replyUi?.options?.[0]?.id === "cart_item_option:size:36");
 
+  await turn(CUSTOMER_PHONE, "cart_item_option:size:38");
   const oneItem = await turn(CUSTOMER_PHONE, "cart_quantity:2");
   runtime = await assertStage(assertions, CUSTOMER_PHONE, "COLLECTING_ITEM", "item collection starts exactly one current draft");
   add(assertions, "cart target quantity persists after planning", runtime?.cart.targetItemCount === 2 && runtime.cart.items.length === 0 && Boolean(runtime.cart.currentItemDraft));
-  add(assertions, "configured option order is respected", oneItem.replyUi?.options?.[0]?.id === "cart_item_option:size:36");
+  add(assertions, "first planned slot asks the next configured option", oneItem.replyUi?.options?.[0]?.id?.startsWith("cart_item_option:color:") === true);
 
   await runWrongFieldCheck(assertions);
 
-  await turn(CUSTOMER_PHONE, "cart_item_option:size:38");
   runtime = await loadRuntime(CUSTOMER_PHONE);
   add(assertions, "valid option persists in Valkey", optionValue(runtime, "size") === "38");
   await turn(CUSTOMER_PHONE, "cart_item_option:color:أسود");
   runtime = await loadRuntime(CUSTOMER_PHONE);
-  add(assertions, "color option persists before quantity", optionValue(runtime, "color") === "أسود");
-  await turn(CUSTOMER_PHONE, "1");
-  runtime = await loadRuntime(CUSTOMER_PHONE);
-  add(assertions, "current-item quantity is parsed only at COLLECT_QUANTITY", completedQuantity(runtime, 0) === 1);
+  add(assertions, "color option completes the first planned slot", completedOption(runtime, 0, "color") === "أسود");
+  add(assertions, "planned item uses implicit quantity one", completedQuantity(runtime, 0) === 1);
   add(assertions, "first item finalizes", runtime?.cart.items.length === 1 && completedOption(runtime, 0, "size") === "38" && completedOption(runtime, 0, "color") === "أسود");
   add(assertions, "next item starts automatically", Boolean(runtime?.cart.currentItemDraft) && runtime?.runtimeStage === "COLLECTING_ITEM");
 
   const same = await turn(CUSTOMER_PHONE, "cart_item_previous:same");
   runtime = await loadRuntime(CUSTOMER_PHONE);
-  add(assertions, "Same as Previous works", optionValue(runtime, "size") === "38" && optionValue(runtime, "color") === "أسود" && Boolean(same.reply));
-  await turn(CUSTOMER_PHONE, "1");
+  add(assertions, "Same as Previous works", completedOption(runtime, 0, "size") === "38" && completedOption(runtime, 0, "color") === "أسود" && completedUnits(runtime) === 2 && Boolean(same.reply));
   runtime = await assertStage(assertions, CUSTOMER_PHONE, "CART_REVIEW", "multi-item target reaches CART_REVIEW");
   add(assertions, "cart review contains two completed units", completedUnits(runtime) === 2 && !runtime?.cart.currentItemDraft);
 

@@ -8,6 +8,11 @@ import type {
   OfferSelectorPresentationInput,
 } from "./cart-planning-presentation.types";
 import { MAX_CART_PLANNING_ACTION_ID_LENGTH } from "./cart-planning-presentation.types";
+import {
+  orderLabel,
+  orderMessage,
+} from "../../../../conversation-engine/adapters/order-conversation.adapter";
+import { commonLabel } from "../../../../conversation-engine/adapters/common-conversation.adapter";
 
 const MAX_BUTTON_OPTIONS = 3;
 const MAX_BUTTON_LABEL_LENGTH = 20;
@@ -18,8 +23,8 @@ const QUANTITY_ACTION_PREFIX = "cart_quantity:";
 const COMMON_QUANTITIES = [1, 2, 3] as const;
 const UNSAFE_ACTION_SEGMENT = /[:\s\u0000-\u001F\u007F-\u009F]/u;
 
-const OFFER_PROMPT = "اختار العرض اللي مناسب ليك";
-const QUANTITY_PROMPT = "قبل ما نبدأو، شحال من قطعة بغيتي؟";
+const OFFER_PROMPT = orderMessage("order.offer_prompt");
+const QUANTITY_PROMPT = orderMessage("order.quantity_prompt");
 
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
@@ -42,7 +47,7 @@ export function truncatePresentationText(value: string, maximumLength: number): 
 }
 
 function formatCurrency(currency: string): string {
-  return currency === "MAD" ? "درهم" : currency;
+  return currency === "MAD" ? commonLabel("common.currency_mad") : currency;
 }
 
 function formatPrice(totalPrice: number, currency: string): string {
@@ -52,14 +57,14 @@ function formatPrice(totalPrice: number, currency: string): string {
 
 function formatItemCount(count: number): string {
   if (count === 1) {
-    return "1 قطعة";
+    return orderMessage("order.piece_count_one");
   }
 
   if (count === 2) {
-    return "قطعتان";
+    return orderMessage("order.piece_count_two");
   }
 
-  return `${count} قطع`;
+  return orderMessage("order.piece_count_many", { itemCount: count });
 }
 
 function isAvailableAt(offer: ProductOfferConfig, now: Date): boolean {
@@ -175,7 +180,7 @@ export function buildOfferSelectorPresentation(
   const uiHints: AgentReplyUiHint = {
     kind: usesButtons ? "buttons" : "list",
     purpose: "order_start",
-    title: usesButtons ? undefined : "العروض",
+    title: usesButtons ? undefined : orderLabel("order.offers_title"),
     body: OFFER_PROMPT,
     options: options.map((option) => ({
       id: option.id,
@@ -212,7 +217,7 @@ export function buildStandardQuantitySelectorPresentation(): CartPlanningPresent
   const uiHints: AgentReplyUiHint = {
     kind: "buttons",
     purpose: "order_start",
-    title: "الكمية",
+    title: orderLabel("order.quantity_title"),
     body: QUANTITY_PROMPT,
     options,
     previewOnly: true,

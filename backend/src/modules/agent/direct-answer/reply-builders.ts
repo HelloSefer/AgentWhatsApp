@@ -15,32 +15,34 @@ import {
   isAvailableSize,
 } from "./intent-detectors";
 import { formatNaturalList, includesAny } from "./text-normalization";
+import { informationMessage } from "../../conversation-engine/adapters/information-conversation.adapter";
+import { salesMessage } from "../../conversation-engine/adapters/sales-conversation.adapter";
 
 export function getPriceReply(productContext: ProductContext): string | null {
   if (!productContext.price) {
-    return "الثمن ما متوفرش عندي دابا، نقدر نأكدو لك من عند صاحب المتجر.";
+    return salesMessage("sales.price_unknown");
   }
 
   const price = formatPriceText(productContext);
-  const offer = productContext.offer ? ` والعرض: ${productContext.offer}.` : "";
-
-  return `الثمن هو ${price}.${offer}`;
+  return productContext.offer
+    ? salesMessage("sales.price_with_offer", { price, offer: productContext.offer })
+    : salesMessage("sales.price", { price });
 }
 
 export function buildGreetingReply(productContext: ProductContext): string {
   const productName = productContext.productName?.trim();
 
   if (!productName) {
-    return "وعليكم السلام، مرحبا بيك. نقدر نعاونك فمعلومات المنتج أو التوصيل.";
+    return salesMessage("sales.greeting_unknown_product");
   }
 
   const price = formatPriceText(productContext);
 
   if (price) {
-    return `وعليكم السلام، مرحبا بيك. كنبيعو ${productName} بثمن ${price}، واش بغيتي تعرف الثمن أو التوصيل؟`;
+    return salesMessage("sales.greeting_with_price", { productName, price });
   }
 
-  return `وعليكم السلام، مرحبا بيك. المتوفر دابا هو ${productName}. واش بغيتي تعرف الثمن أو التوصيل؟`;
+  return salesMessage("sales.greeting_product_only", { productName });
 }
 
 export function getRecommendationHints(
@@ -79,8 +81,8 @@ export function buildRecommendationReply(productContext: ProductContext): string
     const secondHint = recommendationHints[1];
 
     return secondHint
-      ? `إلا بغيتي رأيي، ${firstHint}. ${secondHint}.`
-      : `إلا بغيتي رأيي، ${firstHint}.`;
+      ? salesMessage("sales.recommendation_two_hints", { firstHint, secondHint })
+      : salesMessage("sales.recommendation_one_hint", { firstHint });
   }
 
   if (colors.length) {
@@ -88,28 +90,36 @@ export function buildRecommendationReply(productContext: ProductContext): string
     const secondColor = colors[1] ? formatColorName(colors[1]) : "";
 
     if (secondColor) {
-      return `إلا بغيتي حاجة زوينة وكتبان، ${firstColor} اختيار مزيان. وإذا بغيتي لون عملي، ${secondColor} مناسب.`;
+      return salesMessage("sales.recommendation_two_colors", { firstColor, secondColor });
     }
 
-    return `إلا بغيتي رأيي، ${firstColor} اختيار مزيان.`;
+    return salesMessage("sales.recommendation_one_color", { firstColor });
   }
 
   const productName = productContext.productName?.trim();
 
   if (!productName) {
-    return "نقدر نعاونك تختار حسب المعلومات المتوفرة على المنتج والتوصيل.";
+    return salesMessage("sales.recommendation_generic");
   }
 
   const features = productContext.features?.filter(Boolean).slice(0, 2) || [];
   const price = formatPriceText(productContext);
-  const details = features.length ? `، فيه ${formatNaturalList(features)}` : "";
+  const details = features.length
+    ? salesMessage("sales.recommendation_feature_details", {
+        features: formatNaturalList(features),
+      })
+    : "";
   const secondSentence = productContext.offer
-    ? `العرض: ${productContext.offer}.`
+    ? salesMessage("sales.recommendation_offer", { offer: productContext.offer })
     : price
-      ? `الثمن هو ${price}.`
-      : "نقدر نعطيك الثمن والتوصيل إذا بغيتي.";
+      ? salesMessage("sales.recommendation_price", { price })
+      : salesMessage("sales.recommendation_more");
 
-  return `إلا بغيتي رأيي، ${productName} اختيار مزيان${details}. ${secondSentence}`;
+  return salesMessage("sales.recommendation_product", {
+    productName,
+    details,
+    secondSentence,
+  });
 }
 
 export function buildProductIdentityReply(
@@ -118,7 +128,7 @@ export function buildProductIdentityReply(
   const productName = productContext.productName?.trim();
 
   if (!productName) {
-    return "نقدر نعاونك فمعلومات المنتج المتوفر عند صاحب المتجر.";
+    return salesMessage("sales.identity_unknown");
   }
 
   const price = formatPriceText(productContext);
@@ -130,42 +140,55 @@ export function buildProductIdentityReply(
   const details: string[] = [];
 
   if (price) {
-    details.push(`بثمن ${price}`);
+    details.push(salesMessage("sales.detail_price", { price }));
   }
 
   if (colors.length) {
-    details.push(`متوفر ب${formatColorList(colors)}`);
+    details.push(salesMessage("sales.detail_colors", { colors: formatColorList(colors) }));
   }
 
   if (sizes.length) {
-    details.push(`بالمقاسات ${formatSizesSummary(sizes)}`);
+    details.push(salesMessage("sales.detail_sizes", { sizes: formatSizesSummary(sizes) }));
   }
 
   if (variants.length) {
-    details.push(`الأنواع: ${formatNaturalList(variants)}`);
+    details.push(salesMessage("sales.detail_variants", {
+      variants: formatNaturalList(variants),
+    }));
   }
 
   if (features.length) {
-    details.push(`فيه ${formatNaturalList(features.slice(0, 2))}`);
+    details.push(salesMessage("sales.detail_features", {
+      features: formatNaturalList(features.slice(0, 2)),
+    }));
   }
 
   if (productContext.offer) {
-    details.push(`العرض: ${productContext.offer}`);
+    details.push(salesMessage("sales.detail_offer", { offer: productContext.offer }));
   }
 
   if (details.length) {
-    return `كنبيعو ${productName} ${details.join("، ")}.`;
+    return salesMessage("sales.identity_with_details", {
+      productName,
+      details: details.join("، "),
+    });
   }
 
   if (productContext.category) {
-    return `المتوفر دابا هو ${productName} من قسم ${productContext.category}. نقدر نعطيك التفاصيل اللي متوفرة.`;
+    return salesMessage("sales.identity_category", {
+      productName,
+      category: productContext.category,
+    });
   }
 
   if (productContext.description) {
-    return `المتوفر دابا هو ${productName}: ${productContext.description}.`;
+    return salesMessage("sales.identity_description", {
+      productName,
+      description: productContext.description,
+    });
   }
 
-  return `المتوفر دابا هو ${productName}. نقدر نعطيك التفاصيل اللي متوفرة.`;
+  return salesMessage("sales.identity_basic", { productName });
 }
 
 export function getDeliveryPaymentReply(
@@ -175,30 +198,30 @@ export function getDeliveryPaymentReply(
   const paymentText = getPaymentText(productContext);
 
   if (deliveryText && paymentText) {
-    return `نعم، ${deliveryText}، و${paymentText}.`;
+    return salesMessage("sales.delivery_payment_both", { deliveryText, paymentText });
   }
 
   if (deliveryText) {
-    return `نعم، ${deliveryText}.`;
+    return salesMessage("sales.delivery_only", { deliveryText });
   }
 
   if (paymentText) {
-    return `${paymentText}.`;
+    return salesMessage("sales.payment_only", { paymentText });
   }
 
-  return "معلومات التوصيل والدفع ما متوفراش عندي دابا، نقدر نأكدها لك من عند صاحب المتجر.";
+  return salesMessage("sales.delivery_payment_unknown");
 }
 
 export function getImageReply(productContext: ProductContext): DirectAgentResult {
   if (!productContext.images?.length) {
     return {
-      reply: "الصور ما متوفراش عندي دابا، نقدر نأكدها لك من عند صاحب المتجر.",
+      reply: salesMessage("sales.images_unknown"),
       actions: [],
     };
   }
 
   return {
-    reply: "أكيد، نقدر نرسل لك صور المنتج.",
+    reply: salesMessage("sales.images_available"),
     actions: [
       {
         type: "send_product_images",
@@ -217,18 +240,21 @@ export function getSizeReply(
   const requestedSize = detectSpecificSize(message);
 
   if (!availableSizes.length) {
-    return "معلومة المقاسات ما متوفراش عندي دابا، نقدر نأكدها لك من عند صاحب المتجر.";
+    return informationMessage("information.size_owner_fallback");
   }
 
   if (requestedSize) {
     return isAvailableSize(requestedSize, productContext)
-      ? `نعم، مقاس ${requestedSize} متوفر. بغيتي نكمل لك الطلب؟`
-      : `حالياً مقاس ${requestedSize} ما متوفرش، المقاسات المتوفرة هي: ${formatNaturalList(
-          availableSizes,
-        )}.`;
+      ? informationMessage("information.size_available", { selectedSize: requestedSize })
+      : informationMessage("information.size_unavailable", {
+          selectedSize: requestedSize,
+          availableSizes: formatNaturalList(availableSizes),
+        });
   }
 
-  return `المقاسات المتوفرة هي: ${formatNaturalList(availableSizes)}.`;
+  return informationMessage("information.sizes_available", {
+    availableSizes: formatNaturalList(availableSizes),
+  });
 }
 
 export function getColorReply(
@@ -239,28 +265,33 @@ export function getColorReply(
   const requestedColor = getColorFromMessage(message);
 
   if (!availableColors.length) {
-    return "معلومة الألوان ما متوفراش عندي دابا، نقدر نأكدها لك من عند صاحب المتجر.";
+    return informationMessage("information.color_owner_fallback");
   }
 
   if (requestedColor) {
     return isAvailableColor(requestedColor, productContext)
-      ? `نعم، اللون ${requestedColor.replyName.replace(/^ال/, "")} متوفر.`
-      : `اللون ${requestedColor.replyName} ما متوفرش حالياً. المتوفر هو ${formatColorList(
-          availableColors,
-        )}.`;
+      ? informationMessage("information.color_available", {
+          selectedColor: requestedColor.replyName.replace(/^ال/, ""),
+        })
+      : informationMessage("information.color_unavailable", {
+          selectedColor: requestedColor.replyName,
+          availableColors: formatColorList(availableColors),
+        });
   }
 
-  return `الألوان المتوفرة هي: ${formatColorList(availableColors)}.`;
+  return informationMessage("information.colors_available", {
+    availableColors: formatColorList(availableColors),
+  });
 }
 
 export function getOrderReply(productContext: ProductContext): string {
   const orderFields = productContext.requiredOrderFields?.filter(Boolean);
 
   if (!orderFields?.length) {
-    return "أكيد، صيفط ليا الاسم الكامل، رقم الهاتف، المدينة والعنوان باش نوجد لك الطلب.";
+    return salesMessage("sales.order_default");
   }
 
-  return `أكيد، صيفط ليا ${formatNaturalList(
-    orderFields,
-  )} باش نوجد لك الطلب.`;
+  return salesMessage("sales.order_fields", {
+    orderFields: formatNaturalList(orderFields),
+  });
 }

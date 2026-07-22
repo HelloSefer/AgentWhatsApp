@@ -365,10 +365,8 @@ function Test-PreviewAndClickGuards {
   ) "$($firstMessage.kind)" $dispatchPreview.DurationMs
   Add-Result "First Entry Buttons" "first message includes product info" (
     $dispatchPreview.Ok -and
-    $firstMessage.text.Contains("المنتج:") -and
-    $firstMessage.text.Contains("الثمن:") -and
-    $firstMessage.text.Contains("التوصيل") -and
-    $firstMessage.text.Contains("الدفع عند الاستلام")
+    $firstMessage.text.Contains("صندالة نسائية متوفرة دابا بـ199 درهم،") -and
+    $firstMessage.text.Contains("والتوصيل متوفر لجميع المدن")
   ) ($firstMessage.text -replace "`r?`n", " | ") $dispatchPreview.DurationMs
   Add-Result "First Entry Buttons" "first message excludes old CTA question" (
     $dispatchPreview.Ok -and
@@ -381,7 +379,7 @@ function Test-PreviewAndClickGuards {
   ) "$($secondMessage.kind)" $dispatchPreview.DurationMs
   Add-Result "First Entry Buttons" "second message is short CTA question" (
     $dispatchPreview.Ok -and
-    $secondMessage.text -eq "شنو بغيتي ندير دابا؟"
+    $secondMessage.text -eq "شنو بغيتي دابا: دير الطلب ✅ ولا تعرف المزيد من المعلومات على المنتج؟"
   ) "$($secondMessage.text)" $dispatchPreview.DurationMs
   Add-Result "First Entry Buttons" "CTA metadata includes order and info" (
     $dispatchPreview.Ok -and
@@ -412,7 +410,7 @@ function Test-PreviewAndClickGuards {
     $dispatchPreview.Ok -and
     $dispatchPreview.Response.whatsappInteractivePreview.type -eq "interactive" -and
     $dispatchPreview.Response.whatsappInteractivePreview.interactive.type -eq "button" -and
-    $dispatchPreview.Response.whatsappInteractivePreview.interactive.body.text -eq "شنو بغيتي ندير دابا؟" -and
+    $dispatchPreview.Response.whatsappInteractivePreview.interactive.body.text -eq "شنو بغيتي دابا: دير الطلب ✅ ولا تعرف المزيد من المعلومات على المنتج؟" -and
     $buttonIds -contains "first_entry:order_now" -and
     $buttonIds -contains "first_entry:more_info"
   ) ($buttonIds -join ", ") $dispatchPreview.DurationMs

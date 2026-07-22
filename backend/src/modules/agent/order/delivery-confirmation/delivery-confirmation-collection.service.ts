@@ -8,6 +8,8 @@ import {
   buildGroupedDeliveryFieldPresentation,
   buildFinalOrderReviewPresentation,
 } from "./delivery-confirmation-presentation.service";
+import { deliveryMessage } from "../../../conversation-engine/adapters/delivery-conversation.adapter";
+import { arMaConjunctionList } from "../../../conversation-engine/locales/ar-MA/formatters";
 import {
   deliveryValuesEqual,
   evaluateDeliveryCommercial,
@@ -264,15 +266,20 @@ export function receiveGroupedDeliveryFieldValues(input: {
       ...result,
       presentation: {
         ...result.presentation,
-        text: "مزيان 👌 بقا لينا غير العنوان.\n\nصيفط ليا العنوان الكامل ديال التوصيل.",
+        text: deliveryMessage("delivery.address_request"),
       },
     };
   }
 
   const prefix = invalidRequirement
-    ? `${savedLabels.length ? `${savedLabels.join(" و")} تسجلو ✅\n` : ""}غير ${invalidRequirement.label} ما بانش صحيح.`
+    ? deliveryMessage("delivery.saved_partial_invalid", {
+        savedPrefix: savedLabels.length ? `${arMaConjunctionList(savedLabels)} تسجلو ✅\n` : "",
+        fieldLabel: invalidRequirement.label,
+      })
     : result.nextStep === "COLLECT_ORDER_FIELD" && remainingGrouped.length === 0
-      ? `تمام، تسجلو ${savedLabels.join(" و")} ✅`
+      ? deliveryMessage("delivery.saved_partial", {
+          savedLabels: arMaConjunctionList(savedLabels),
+        })
       : "";
   if (!prefix) return result;
   return {

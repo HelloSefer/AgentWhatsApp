@@ -9,6 +9,7 @@ import type {
   MultiItemOrderRuntimeMode,
   SellerConfig,
 } from "./seller-config.types";
+import { firstEntryLabel } from "../../conversation-engine/adapters/first-entry-conversation.adapter";
 
 type LegacyDeliveryConfig = SellerConfig["delivery"];
 
@@ -20,8 +21,8 @@ type SellerConfigInput = Omit<
   deliveryPolicy?: Partial<DeliveryPolicy>;
 };
 
-const defaultPrimaryCtaLabel = "أطلب الآن";
-const defaultSecondaryCtaLabel = "المزيد من المعلومات";
+const defaultPrimaryCtaLabel = firstEntryLabel("first_entry.order_now");
+const defaultSecondaryCtaLabel = firstEntryLabel("first_entry.more_info");
 
 const validCtaModes: FirstEntryCtaMode[] = [
   "order_or_info",

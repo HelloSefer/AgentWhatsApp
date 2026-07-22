@@ -6,6 +6,10 @@ import type {
   FinalOrderReview,
 } from "./delivery-confirmation.types";
 import { renderFinalOrderReview } from "./final-order-review-renderer.service";
+import {
+  deliveryLabel,
+  deliveryMessage,
+} from "../../../conversation-engine/adapters/delivery-conversation.adapter";
 
 const MAX_BUTTON_OPTIONS = 3;
 const MAX_ACTION_ID_LENGTH = 200;
@@ -60,7 +64,7 @@ export function buildDeliveryFieldValueActionId(
 }
 
 function fieldPrompt(field: DeliveryRequirement): string {
-  return field.prompt || `عافاك دخل ${field.label}`;
+  return field.prompt || deliveryMessage("delivery.field_prompt", { fieldLabel: field.label });
 }
 
 export function buildGroupedDeliveryFieldPresentation(
@@ -74,13 +78,12 @@ export function buildGroupedDeliveryFieldPresentation(
     kind: "COLLECT_FIELD",
     promptKey: "COLLECT_ORDER_FIELD",
     text: isStandardIdentityGroup
-      ? "مزيان 👌 دابا صيفط ليا الاسم الكامل، رقم الهاتف والمدينة باش نكملو ليك الطلب."
-      : [
-          "مزيان، السلة واجدة ✅",
-          "باش نكملو التوصيل، صيفط ليا فمساج واحد:",
-          "",
-          ...labels.map((label) => `• ${label}`),
-        ].join("\n"),
+      ? deliveryMessage("delivery.grouped_request")
+      : deliveryMessage("delivery.grouped_custom_request", {
+          fieldLines: labels
+            .map((label) => deliveryMessage("delivery.field_bullet", { fieldLabel: label }))
+            .join("\n"),
+        }),
     field: { key: fields.map((field) => field.key).join(","), label: labels.join("، ") },
   });
 }
@@ -136,9 +139,9 @@ export function buildFinalOrderReviewPresentation(
     purpose: "delivery_confirmation",
     body: rendered.confirmationText,
     options: [
-      { id: "order_checkout:confirm", label: "تأكيد الطلب" },
-      { id: "order_checkout:back_to_cart", label: "تعديل الطلب" },
-      { id: "order_checkout:edit_delivery", label: "تعديل التوصيل" },
+      { id: "order_checkout:confirm", label: deliveryLabel("checkout.confirm") },
+      { id: "order_checkout:back_to_cart", label: deliveryLabel("checkout.edit_order") },
+      { id: "order_checkout:edit_delivery", label: deliveryLabel("checkout.edit_delivery") },
     ],
     previewOnly: true,
   };
@@ -161,8 +164,8 @@ export function buildDeliveryFieldSelectorPresentation(
     ? {
         kind: options.length <= MAX_BUTTON_OPTIONS ? "buttons" : "list",
         purpose: "delivery_confirmation",
-        title: "معلومات التوصيل",
-        body: "اختار المعلومة اللي بغيتي تبدل",
+        title: deliveryLabel("delivery.title"),
+        body: deliveryMessage("delivery.edit_selector"),
         options: options.map(({ field, id }) => ({ id, label: field.label, value: field.key })),
         previewOnly: true,
       }
@@ -170,7 +173,7 @@ export function buildDeliveryFieldSelectorPresentation(
   return result({
     kind: "EDIT_FIELD_SELECTOR",
     promptKey: "EDIT_ORDER_FIELD",
-    text: "اختار المعلومة اللي بغيتي تبدل",
+    text: deliveryMessage("delivery.edit_selector"),
     ...(uiHints ? { uiHints } : {}),
   });
 }
@@ -179,7 +182,7 @@ export function buildCommercialResolutionPresentation(): DeliveryConfirmationPre
   return result({
     kind: "BLOCKED",
     promptKey: "RESOLVE_COMMERCIAL_STATE",
-    text: "العرض المختار ما بقاش مناسب للسلة. رجع للسلة باش تحل هاد المشكل.",
+    text: deliveryMessage("delivery.commercial_resolution"),
   });
 }
 

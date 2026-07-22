@@ -130,7 +130,7 @@ Add-Check $group "actions array empty" (@($greeting.actions).Count -eq 0) "count
 
 $group = "C Intent-aware first-entry paths"
 Add-Check $group "سلام greeting intent" ($greeting.firstEntry.intent.intent -eq "greeting") $greeting.firstEntry.intent.intent $greetingTimed.DurationMs
-Add-Check $group "سلام commercial opening" ($greeting.firstEntry.recommendedNextStep -eq "show_first_entry" -and $greeting.reply.Contains("المنتج متوفر")) $greeting.reply $greetingTimed.DurationMs
+Add-Check $group "سلام commercial opening" ($greeting.firstEntry.recommendedNextStep -eq "show_first_entry" -and $greeting.reply.Contains("بـ199 درهم،") -and $greeting.reply.Contains("التوصيل")) $greeting.reply $greetingTimed.DurationMs
 
 $priceTimed = Invoke-AgentTest -Message "شحال الثمن؟" -Phone "0612345602"
 $price = $priceTimed.Response

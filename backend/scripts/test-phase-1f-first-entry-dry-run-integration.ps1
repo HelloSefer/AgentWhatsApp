@@ -107,7 +107,7 @@ Add-Check $group "includes conversationKey" ($greeting.conversationKey -eq ("{0}
 
 $group = "B Intent dry-run paths"
 Add-Check $group "سلام greeting intent" ($greeting.result.intent.intent -eq "greeting") $greeting.result.intent.intent $greetingTimed.DurationMs
-Add-Check $group "سلام commercial opening" ($greeting.result.recommendedNextStep -eq "show_first_entry" -and $greeting.result.text.Contains("المنتج متوفر")) $greeting.result.recommendedNextStep $greetingTimed.DurationMs
+Add-Check $group "سلام commercial opening" ($greeting.result.recommendedNextStep -eq "show_first_entry" -and $greeting.result.text.Contains("بـ199 درهم،") -and $greeting.result.text.Contains("التوصيل")) $greeting.result.recommendedNextStep $greetingTimed.DurationMs
 
 $priceTimed = Invoke-FirstEntryDryRun -Message "شحال الثمن؟" -Phone "0612345679"
 $price = $priceTimed.Response

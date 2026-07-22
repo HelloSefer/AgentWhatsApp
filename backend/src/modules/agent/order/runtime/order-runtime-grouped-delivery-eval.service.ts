@@ -108,7 +108,7 @@ export async function evaluateGroupedDeliveryIntake(): Promise<GroupedDeliveryEv
     } as never,
     buildCartReviewCompletionCopy(2),
   );
-  add(assertions, "final planned-item completion keeps its friendly count", cartReview.text.includes("وجدنا ليك جوج قطع"));
+  add(assertions, "final planned-item completion uses the approved cart review", cartReview.text === "راجع السلة ديالك قبل ما نكملو");
   add(assertions, "cart-review sentence appears exactly once", count(cartReview.text, "راجع السلة ديالك قبل ما نكملو") === 1);
   add(assertions, "cart-review composition has no duplicated sentence", !cartReview.text.includes("راجع السلة ديالك قبل ما نكملو\n\nراجع السلة ديالك قبل ما نكملو"));
   add(assertions, "one-piece completion remains friendly", buildCartReviewCompletionCopy(1).includes("القطعة"));
@@ -117,7 +117,7 @@ export async function evaluateGroupedDeliveryIntake(): Promise<GroupedDeliveryEv
   const initial = start();
   const initialText = initial.presentation?.text || "";
   add(assertions, "cart review continue enters grouped delivery collection", initial.success && initial.cartAfter.status === "COLLECTING_DELIVERY");
-  add(assertions, "grouped handoff is friendly and shown once", initialText.includes("السلة واجدة") && count(initialText, "صيفط ليا فمساج واحد") === 1);
+  add(assertions, "grouped handoff is friendly and shown once", initialText === "مزيان 👌 دابا صيفط ليا الاسم الكامل، رقم الهاتف والمدينة باش نكملو ليك الطلب.");
   add(assertions, "grouped handoff includes name phone and city", ["الاسم الكامل", "رقم الهاتف", "المدينة"].every((label) => initialText.includes(label)));
   add(assertions, "grouped state records only configured standard fields", initial.previewState?.groupedFieldKeys?.join(",") === "fullName,phone,city");
 

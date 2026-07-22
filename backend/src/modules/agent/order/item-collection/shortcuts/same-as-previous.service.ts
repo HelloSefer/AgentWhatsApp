@@ -13,6 +13,10 @@ import {
   type SameAsPreviousPresentation,
   type SameAsPreviousPreviewState,
 } from "./same-as-previous.types";
+import {
+  orderLabel,
+  orderMessage,
+} from "../../../../conversation-engine/adapters/order-conversation.adapter";
 
 const SAME_ACTION_ID = "cart_item_previous:same" as const;
 const DIFFERENT_ACTION_ID = "cart_item_previous:different" as const;
@@ -158,10 +162,10 @@ export function buildSameAsPreviousPresentation(): SameAsPreviousPresentation {
     uiHints: {
       kind: "buttons",
       purpose: "field_options",
-      body: "بغيتي نفس الاختيارات ولا اختيارات مختلفة؟",
+      body: orderMessage("order.same_or_different_prompt"),
       options: [
-        { id: SAME_ACTION_ID, label: "نفس الاختيارات", value: "same" },
-        { id: DIFFERENT_ACTION_ID, label: "اختيارات مختلفة", value: "different" },
+        { id: SAME_ACTION_ID, label: orderLabel("order.same_options"), value: "same" },
+        { id: DIFFERENT_ACTION_ID, label: orderLabel("order.different_options"), value: "different" },
       ],
       previewOnly: true,
     },

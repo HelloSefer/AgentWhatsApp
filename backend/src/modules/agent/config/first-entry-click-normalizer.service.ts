@@ -120,7 +120,7 @@ export function normalizeFirstEntryClick(
     return buildOrderResult({
       rawInput,
       confidence: "high",
-      label: "أطلب الآن",
+      label: firstEntryLabel("first_entry.order_now"),
     });
   }
 
@@ -128,7 +128,7 @@ export function normalizeFirstEntryClick(
     return buildInfoResult({
       rawInput,
       confidence: "high",
-      label: "المزيد من المعلومات",
+      label: firstEntryLabel("first_entry.more_info"),
     });
   }
 
@@ -152,3 +152,4 @@ export function normalizeFirstEntryClick(
 
   return buildUnknownResult(rawInput);
 }
+import { firstEntryLabel } from "../../conversation-engine/adapters/first-entry-conversation.adapter";

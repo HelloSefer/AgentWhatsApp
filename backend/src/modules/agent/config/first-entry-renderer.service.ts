@@ -8,6 +8,16 @@ import type {
   GreetingStyle,
   SellerConfig,
 } from "./seller-config.types";
+import {
+  firstEntryCommercialIntro,
+  firstEntryCtaQuestion,
+  firstEntryDeliveryWithIcon,
+  firstEntryDeliveryLine,
+  firstEntryLabel,
+  firstEntryPaymentLine,
+  firstEntryProductLine,
+} from "../../conversation-engine/adapters/first-entry-conversation.adapter";
+import { commonLabel } from "../../conversation-engine/adapters/common-conversation.adapter";
 
 export type FirstEntryCtaKind = "order" | "info";
 
@@ -65,8 +75,8 @@ const unsafeCommercialClaims = [
   "علاج نهائي",
 ];
 
-const defaultPrimaryCtaLabel = "أطلب الآن";
-const defaultSecondaryCtaLabel = "المزيد من المعلومات";
+const defaultPrimaryCtaLabel = firstEntryLabel("first_entry.order_now");
+const defaultSecondaryCtaLabel = firstEntryLabel("first_entry.more_info");
 
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -77,7 +87,9 @@ function containsUnsafeClaim(value: string): boolean {
 }
 
 function getCurrencyLabel(currency: unknown): string {
-  return currency === "MAD" ? "درهم" : cleanText(currency) || "درهم";
+  return currency === "MAD"
+    ? commonLabel("common.currency_mad")
+    : cleanText(currency) || commonLabel("common.currency_mad");
 }
 
 function hasPrice(productContext: ProductContext): boolean {
@@ -131,14 +143,18 @@ export function renderFirstEntryDeliveryLine(
 
   if (deliveryPolicy.availability === "all_cities") {
     if (deliveryPolicy.isFree) {
-      return "التوصيل متوفر لجميع المدن بالمجان";
+      return firstEntryDeliveryLine({ kind: "all_free" });
     }
 
     if (deliveryPolicy.deliveryPrice !== undefined) {
-      return `التوصيل متوفر لجميع المدن بثمن ${deliveryPolicy.deliveryPrice} ${getCurrencyLabel(deliveryPolicy.currency)}`;
+      return firstEntryDeliveryLine({
+        kind: "all_paid",
+        deliveryAmount: deliveryPolicy.deliveryPrice,
+        currency: getCurrencyLabel(deliveryPolicy.currency),
+      });
     }
 
-    return "التوصيل متوفر لجميع المدن";
+    return firstEntryDeliveryLine({ kind: "all_unspecified" });
   }
 
   if (deliveryPolicy.availability === "selected_cities") {
@@ -151,7 +167,7 @@ export function renderFirstEntryDeliveryLine(
       return undefined;
     }
 
-    return `التوصيل متوفر حالياً في: ${formatList(cities)}`;
+    return firstEntryDeliveryLine({ kind: "selected_cities", cities: formatList(cities) });
   }
 
   if (deliveryPolicy.availability === "excluded_cities") {
@@ -163,14 +179,14 @@ export function renderFirstEntryDeliveryLine(
 
     if (!excludedCities.length) {
       warnings.push("excluded_cities_missing");
-      return "التوصيل متوفر حسب المدينة";
+      return firstEntryDeliveryLine({ kind: "by_city" });
     }
 
-    return `التوصيل متوفر لجميع المدن ما عدا: ${formatList(excludedCities)}`;
+    return firstEntryDeliveryLine({ kind: "excluded_cities", cities: formatList(excludedCities) });
   }
 
   if (deliveryPolicy.availability === "not_available") {
-    return "التوصيل غير متوفر حالياً";
+    return firstEntryDeliveryLine({ kind: "unavailable" });
   }
 
   return undefined;
@@ -185,40 +201,16 @@ export function renderFirstEntryPaymentLine(
   }
 
   const paymentText =
-    cleanText(sellerConfig.delivery.paymentText) || "الدفع عند الاستلام";
+    cleanText(sellerConfig.delivery.paymentText) || firstEntryLabel("first_entry.payment_cod");
 
-  return `${paymentText} متوفر.`;
+  return firstEntryPaymentLine(paymentText);
 }
 
 export function renderFirstEntryCtaLine(
   ctaMode: FirstEntryCtaMode,
   style: GreetingStyle,
 ): string | undefined {
-  if (ctaMode === "none") {
-    return undefined;
-  }
-
-  const professional = style === "professional";
-
-  if (ctaMode === "order_only") {
-    return professional
-      ? "هل ترغب في إتمام الطلب الآن؟"
-      : "بغيتي نوجد لك الطلب دابا؟";
-  }
-
-  if (ctaMode === "info_only") {
-    return professional
-      ? "هل ترغب في الاطلاع على المزيد من المعلومات؟"
-      : "بغيتي تشوف معلومات أكثر على المنتج؟";
-  }
-
-  if (style === "short") {
-    return "بغيتي تطلب دابا ولا تشوف معلومات أكثر؟";
-  }
-
-  return professional
-    ? "هل ترغب في إتمام الطلب أم الاطلاع على المزيد من المعلومات؟"
-    : "شنو بغيتي دابا: دير الطلب ✅ ولا تعرف المزيد من المعلومات على المنتج؟";
+  return firstEntryCtaQuestion(ctaMode, style);
 }
 
 function cleanCtaLabel(value: unknown, fallback: string): string {
@@ -326,7 +318,7 @@ export function buildFirstEntryUiHintsPreview(
     replyUi: {
       kind: buttons.length ? "buttons" : "none",
       purpose: "first_entry",
-      title: "اختيارات",
+      title: firstEntryLabel("first_entry.choice_title"),
       body,
       options,
       previewOnly: true,
@@ -378,7 +370,7 @@ export function renderFirstEntryMessage(
     policy.showProductName,
     warnings,
   );
-  const lines = ["السلام عليكم 👋 مرحبا بك"];
+  const lines = [firstEntryCommercialIntro()];
   const priceText = policy.showPrice
     ? formatFirstEntryPrice(input.productContext)
     : undefined;
@@ -386,13 +378,8 @@ export function renderFirstEntryMessage(
     ? renderFirstEntryDeliveryLine(deliveryPolicy, warnings)
     : undefined;
 
-  if (productName && priceText) {
-    lines.push("", `${productName} متوفرة دابا بـ${priceText}،`);
-  } else if (productName) {
-    lines.push("", `المنتج: ${productName}.`);
-  } else if (priceText) {
-    lines.push("", `الثمن ${priceText}.`);
-  }
+  const productLine = firstEntryProductLine({ productFullName: productName, price: priceText });
+  if (productLine) lines.push("", productLine);
 
   if (policy.showPrice && !priceText) {
     warnings.push("price_missing");
@@ -401,7 +388,7 @@ export function renderFirstEntryMessage(
   }
 
   if (deliveryLine) {
-    safePushLine(lines, `و${deliveryLine} 🚚`);
+    safePushLine(lines, firstEntryDeliveryWithIcon(deliveryLine));
   }
 
   const ctaLine = renderFirstEntryCtaLine(

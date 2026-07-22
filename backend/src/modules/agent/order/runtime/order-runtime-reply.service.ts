@@ -16,6 +16,11 @@ import {
   type PlannedItemOptionDisplay,
 } from "./order-runtime-presentation-copy.service";
 import { buildOrderEntryOptionPresentation } from "../item-collection/presentation/item-collection-presentation.service";
+import {
+  orderLabel,
+  orderMessage,
+} from "../../../conversation-engine/adapters/order-conversation.adapter";
+import { commonLabel } from "../../../conversation-engine/adapters/common-conversation.adapter";
 
 export type RuntimeReply = {
   text: string;
@@ -23,7 +28,7 @@ export type RuntimeReply = {
   orderConfirmationPresentation?: OrderConfirmationPresentation;
 };
 
-const retryText = "وقع مشكل فاختيارك. عاود اختار من الخيارات اللي باينين ليك.";
+const retryText = orderMessage("error.invalid_selection");
 
 function reply(text: string | undefined, replyUi?: AgentReplyUiHint): RuntimeReply {
   return { text: text?.trim() || retryText, ...(replyUi ? { replyUi } : {}) };
@@ -64,8 +69,10 @@ function currentSlotNumber(result: ItemCollectionPreviewResult): number {
 function currentOptionPrompt(result: ItemCollectionPreviewResult): string {
   const label = result.presentation?.field?.label?.trim();
   if (!label) return result.presentation?.text || retryText;
-  const verb = result.presentation?.kind === "OPTION_TEXT_INPUT" ? "دخل" : "اختار";
-  return `${verb} ${label} ديالها.`;
+  const verb = result.presentation?.kind === "OPTION_TEXT_INPUT"
+    ? commonLabel("common.enter")
+    : commonLabel("common.select");
+  return orderMessage("order.current_option_prompt", { verb, optionLabel: label });
 }
 
 function completedOptionDisplays(
@@ -100,11 +107,14 @@ function replyFromInitialSizeQuantitySelector(
     return undefined;
   }
 
-  const text = `باش نكمّلو الطلب، واش بغيتي غير هادي بالمقاس ${input.selectedSize}، ولا تزيد عليها ${input.productPluralName} خرين وتختار ليهم المقاس واللون من بعد؟`;
+  const text = orderMessage("order.piece_count_question_with_size", {
+    selectedSize: input.selectedSize,
+    productPluralName: input.productPluralName,
+  });
   const labels: Record<string, string> = {
-    "cart_quantity:1": "غير هادي",
-    "cart_quantity:2": "نزيد وحدة",
-    "cart_quantity:3": "نزيد جوج",
+    "cart_quantity:1": orderLabel("order.only_this"),
+    "cart_quantity:2": orderLabel("order.add_one"),
+    "cart_quantity:3": orderLabel("order.add_two"),
   };
 
   return replyWithVisibleInteractiveBody(text, {
@@ -129,7 +139,7 @@ export function replyFromPlanning(
   }
 
   if (result.prompt?.key === "REQUEST_CUSTOM_QUANTITY") {
-    return reply("شحال من قطعة بغيتي؟");
+    return reply(orderMessage("order.custom_quantity_prompt"));
   }
   return replyWithVisibleInteractiveBody(result.selector?.text, result.selector?.uiHints);
 }
@@ -167,7 +177,7 @@ export function replyFromItemCollection(
   if (actionId === "cart_item_previous:different") {
     const differentUi =
       result.presentation?.field?.key === "size" && interactiveUi?.kind === "list"
-        ? { ...interactiveUi, buttonText: "اختار المقاس" }
+        ? { ...interactiveUi, buttonText: orderLabel("order.size_list_button") }
         : interactiveUi;
     return replyWithVisibleInteractiveBody(
       buildDifferentChoicesCopy({
@@ -179,7 +189,7 @@ export function replyFromItemCollection(
   }
 
   return replyWithVisibleInteractiveBody(
-    presentation?.text || (result.shortcutPresentation ? "بغيتي نفس اختيارات القطعة اللي قبل ولا اختيارات مختلفة؟" : undefined),
+    presentation?.text || (result.shortcutPresentation ? orderMessage("order.same_or_different_prompt") : undefined),
     interactiveUi,
   );
 }
@@ -199,10 +209,19 @@ export function replyFromInitialPlannedItemCollection(
     result.presentation?.field?.key === "color"
   ) {
     const text = plannedPieceCount(result) === 1
-      ? `مزيان 👌 المقاس ${initialItemOptionSummary.selectedSize} تسجّل.\nدابا اختار اللون ديالها 👇`
+      ? orderMessage("order.first_item_progress_one", {
+          selectedSize: initialItemOptionSummary.selectedSize,
+        })
       : plannedPieceCount(result) === 2
-        ? `مزيان 👌 غادي يكونو جوج ${initialItemOptionSummary.productPluralName}.\n\nالأولى بالمقاس ${initialItemOptionSummary.selectedSize}، دابا اختار اللون ديالها 👇`
-        : `مزيان 👌 غادي يكونو ${plannedPieceCount(result)} ${initialItemOptionSummary.productPluralName}.\n\nالأولى بالمقاس ${initialItemOptionSummary.selectedSize}، دابا اختار اللون ديالها 👇`;
+        ? orderMessage("order.first_item_progress_two", {
+            selectedSize: initialItemOptionSummary.selectedSize,
+            productPluralName: initialItemOptionSummary.productPluralName,
+          })
+        : orderMessage("order.first_item_progress_many", {
+            itemCount: plannedPieceCount(result),
+            selectedSize: initialItemOptionSummary.selectedSize,
+            productPluralName: initialItemOptionSummary.productPluralName,
+          });
     return replyWithVisibleInteractiveBody(
       text,
       itemReply.replyUi,
@@ -252,9 +271,9 @@ export function replyFromDelivery(result: DeliveryConfirmationPreviewResult): Ru
 }
 
 export function staleActionReply(): RuntimeReply {
-  return { text: "هاد الاختيار ما بقاش صالح دابا. تبع آخر رسالة وصلاتك باش نكملو." };
+  return { text: orderMessage("error.stale_action") };
 }
 
 export function recoveryReply(): RuntimeReply {
-  return { text: "وقع مشكل صغير فمعلومات الطلب. عاود من آخر اختيار من فضلك." };
+  return { text: orderMessage("error.recovery") };
 }

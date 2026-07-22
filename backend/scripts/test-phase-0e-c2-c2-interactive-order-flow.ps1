@@ -216,7 +216,7 @@ $firstEntryInfoPhone = "2126000C2C2FE2"
 Clear-Session -SellerId "seller_demo_sandals" -Phone $firstEntryInfoPhone
 $firstEntryInfo = Send-CloudFlow -SellerId "seller_demo_sandals" -Phone $firstEntryInfoPhone -CloudMessage (New-ButtonReply -Id "first_entry:more_info" -Title "المزيد من المعلومات") -InputType "button"
 Add-Check "first entry info click normalized" ($firstEntryInfo.cloudNormalization.normalizedText -eq "first_entry:more_info")
-Add-Check "first entry info click opens menu" ($firstEntryInfo.reply -like "*شنو بغيتي تعرف على المنتج*")
+Add-Check "first entry info click opens menu" ($firstEntryInfo.reply -eq "أكيد 👌 شنو بغيتي تعرف على الصندالة؟")
 Add-Check "first entry info click has list preview" ($firstEntryInfo.meta.whatsappInteractivePreview.interactive.type -eq "list")
 Add-Check "first entry info menu includes price" (Has-PreviewListRowId -Result $firstEntryInfo -Id "info:price")
 Add-Check "first entry info menu includes order" (Has-PreviewListRowId -Result $firstEntryInfo -Id "info:order_now")

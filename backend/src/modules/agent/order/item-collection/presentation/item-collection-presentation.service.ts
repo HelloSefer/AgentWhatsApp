@@ -7,6 +7,11 @@ import type {
   ItemCollectionPresentationInput,
   ItemCollectionPresentationResult,
 } from "./item-collection-presentation.types";
+import {
+  orderLabel,
+  orderMessage,
+} from "../../../../conversation-engine/adapters/order-conversation.adapter";
+import { toConversationProductOption } from "../../../../conversation-engine/adapters/product-option.adapter";
 
 const MAX_BUTTON_OPTIONS = 3;
 const MAX_ACTION_ID_LENGTH = 200;
@@ -80,11 +85,14 @@ export function buildItemCollectionOptionActionId(
 export function buildOrderEntryOptionPresentation(
   field: RequiredOrderField,
 ): { text: string; uiHints?: AgentReplyUiHint } {
-  const isSize = field.key === "size";
+  const option = toConversationProductOption(field);
+  const isSize = option.key === "size";
   const text = isSize
-    ? "هادو هما المقاسات المتوفرة👇\nاختار المقاس المناسب ليك"
-    : `اختار ${field.label || field.key}`;
-  const options = field.options || [];
+    ? orderMessage("order.first_size_prompt")
+    : orderMessage("order.first_option_prompt", { optionLabel: option.label });
+  const options = option.values
+    .filter((value) => value.enabled)
+    .map((value) => value.canonicalValue);
 
   if (!options.length) {
     return { text };
@@ -111,7 +119,7 @@ export function buildOrderEntryOptionPresentation(
       kind: usesButtons ? "buttons" : "list",
       purpose: "field_options",
       ...(usesButtons ? {} : { title: field.label || field.key }),
-      ...(isSize && !usesButtons ? { buttonText: "اختار المقاس" } : {}),
+      ...(isSize && !usesButtons ? { buttonText: orderLabel("order.size_list_button") } : {}),
       body: text,
       options: mappedOptions,
       previewOnly: true,
@@ -187,7 +195,7 @@ export function buildItemCollectionPresentation(
       success: progression.success,
       kind: "START_COLLECTION",
       promptKey: "START_COLLECTION",
-      text: "بدا تجميع القطع",
+      text: orderMessage("order.next_item_start"),
       progress,
       itemNumber: currentItemNumber(progress),
       warnings: progression.warnings,
@@ -215,7 +223,7 @@ export function buildItemCollectionPresentation(
         success: progression.success,
         kind: "OPTION_TEXT_INPUT",
         promptKey: "ENTER_ITEM_OPTION",
-        text: `دخل ${field.label || field.key}`,
+        text: orderMessage("order.option_text_prompt", { optionLabel: field.label || field.key }),
         field: metadata,
         progress,
         itemNumber,
@@ -262,7 +270,7 @@ export function buildItemCollectionPresentation(
       });
     }
 
-    const text = `اختار ${field.label || field.key}`;
+    const text = orderMessage("order.item_option_prompt", { optionLabel: field.label || field.key });
     const uiHints: AgentReplyUiHint = {
       kind: usesButtons ? "buttons" : "list",
       purpose: "field_options",
@@ -290,7 +298,7 @@ export function buildItemCollectionPresentation(
       success: progression.success,
       kind: "QUANTITY_INPUT",
       promptKey: "SELECT_ITEM_QUANTITY",
-      text: "حدد كمية هاد القطعة",
+      text: orderMessage("order.item_quantity_prompt"),
       progress,
       itemNumber: currentItemNumber(progress),
       failureCode: progression.failureCode,
@@ -303,7 +311,7 @@ export function buildItemCollectionPresentation(
       success: progression.success,
       kind: "READY_TO_FINALIZE",
       promptKey: "CURRENT_ITEM_READY",
-      text: "معلومات هاد القطعة واجدة",
+      text: orderMessage("order.item_ready"),
       progress,
       itemNumber: currentItemNumber(progress),
       warnings: progression.warnings,
@@ -315,7 +323,7 @@ export function buildItemCollectionPresentation(
       success: progression.success,
       kind: "START_NEXT_ITEM",
       promptKey: "START_NEXT_ITEM",
-      text: "بدا القطعة الموالية",
+      text: orderMessage("order.next_item_start"),
       progress,
       itemNumber: progress.completedUnits + 1,
       warnings: progression.warnings,
@@ -326,7 +334,7 @@ export function buildItemCollectionPresentation(
     success: progression.success,
     kind: "CART_REVIEW_READY",
     promptKey: "CART_REVIEW_READY",
-    text: "الطلب واجد للمراجعة",
+    text: orderMessage("order.ready_for_review"),
     progress,
     warnings: progression.warnings,
   });

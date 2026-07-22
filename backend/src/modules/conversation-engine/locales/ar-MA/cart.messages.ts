@@ -1,0 +1,33 @@
+export const cartMessages = {
+  "cart.review_ready": "مزيان 👌 السلة ديالك واجدة.",
+  "cart.select_item_to_edit": "شنو بغيتي تعدل؟",
+  "cart.select_field_to_edit": "شنو بغيتي تبدل؟",
+  "cart.quantity_edit": "دخل الكمية الجديدة لهاد القطعة (دابا: {{quantity}})",
+  "cart.commercial_resolution_body": "العرض المختار ما بقاش مناسب لهاد السلة",
+  "cart.commercial_resolution_text": "خاصك تختار الثمن العادي قبل ما نكملو",
+  "cart.option_text_input": "دخل {{optionLabel}}",
+  "cart.option_text_input_body": "دخل القيمة الجديدة ومن بعد حفظ التغييرات",
+  "cart.select_new_size": "اختار المقاس الجديد",
+  "cart.select_new_color": "اختار اللون الجديد",
+  "cart.select_new_option": "بدل غير الاختيار اللي بغيتي، ومن بعد حفظ التغييرات",
+  "cart.item_row_title": "{{productConversationalName}} {{itemOrdinal}}",
+  "cart.item_option_description": "{{optionLabel}}: {{optionValue}}",
+  "cart.option_row": "{{optionLabel}}: {{optionValue}}",
+  "cart.option_row_current": "{{optionLabel}}: {{optionValue}} — الحالي",
+  "cart.option_row_now": "{{optionLabel}}: {{optionValue}} (دابا)",
+  "cart.edit_option_label": "بدل {{optionLabel}}",
+  "cart.edit_item_options": "بدل اختيارات هاد القطعة",
+} as const;
+
+export const cartLabels = {
+  "cart.continue": "كمل الطلب",
+  "cart.add_item": "زيد {{productConversationalName}}",
+  "cart.edit": "عدل السلة",
+  "cart.select_item_title": "اختار القطعة",
+  "cart.select_button": "اختار",
+  "cart.remove": "حذف من السلة",
+  "cart.use_standard": "اعتمد الثمن العادي",
+  "cart.save": "حفظ التغييرات",
+  "cart.cancel": "إلغاء",
+  "cart.edit_options_title": "بدل الاختيارات",
+} as const;

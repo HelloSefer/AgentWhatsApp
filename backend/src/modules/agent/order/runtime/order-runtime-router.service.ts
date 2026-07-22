@@ -40,6 +40,7 @@ import type {
   OrderRuntimeTurnInput,
   OrderRuntimeTurnResult,
 } from "./order-runtime.types";
+import { orderMessage } from "../../../conversation-engine/adapters/order-conversation.adapter";
 
 export function isGuardedOrderRuntimeAction(message: string): boolean {
   return /^(?:first_entry:order_now|info:(?:order_now|continue_order)|cart_offer:.+|cart_quantity:.+|cart_item_option:.+|cart_item_previous:(?:same|different)|cart_review:.+|cart_review_item:.+|cart_review_item_edit:.+|order_checkout:.+|order_checkout_field:.+)$/.test(message);
@@ -213,7 +214,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
 
   if (runtime.runtimeStage === "CONFIRMED") {
     return asTurnResult({
-      text: "الطلب ديالك تأكد من قبل. شكراً على الثقة ديالك.",
+      text: orderMessage("order.already_confirmed"),
       stage: "CONFIRMED",
       ...(runtime.confirmed?.publicOrderCode
         ? { publicOrderCode: runtime.confirmed.publicOrderCode }
@@ -511,7 +512,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
       };
       await persist(input, runtime, fields);
       return asTurnResult({
-        text: `تم تأكيد الطلب ديالك بنجاح ✅\nشكراً لك، غادي نتواصلو معاك قريباً لتأكيد التوصيل.\nرقم الطلب: ${publicOrderCode}\nهذا هو وصل الطلب ديالك:`,
+        text: orderMessage("order.confirmed_success", { publicOrderCode }),
         stage: "CONFIRMED",
         warnings: receipt.warnings,
         confirmedSnapshotId: receipt.snapshot.id,

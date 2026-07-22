@@ -165,26 +165,27 @@ export async function evaluateFriendlyOrderPresentation(): Promise<FriendlyOrder
     const one = identity("one");
     await reset(one);
     await turn(one, "first_entry:order_now");
+    await turn(one, `cart_item_option:size:${size}`);
     const oneStart = await turn(one, "cart_quantity:1");
     const oneBody = interactiveBody(oneStart);
     add(assertions, "one-piece start has an interactive payload", Boolean(oneBody));
-    add(assertions, "one-piece payload uses singular friendly copy", oneBody.includes("قطعة وحدة"));
-    add(assertions, "one-piece payload includes the missing option prompt", oneBody.includes("اختار"));
+    add(assertions, "one-piece payload uses singular friendly copy", oneBody.includes(`المقاس ${size} تسجّل`));
+    add(assertions, "one-piece payload includes the missing option prompt", oneBody.includes("اختار اللون"));
     add(assertions, "one-piece payload preserves the runtime reply", normalized(oneBody) === normalized(oneStart.reply));
 
     const two = identity("two");
     await reset(two);
     await turn(two, "first_entry:order_now");
+    await turn(two, `cart_item_option:size:${size}`);
     const twoStart = await turn(two, "cart_quantity:2");
     const twoBody = interactiveBody(twoStart);
-    add(assertions, "two-piece payload has a friendly prefix", twoBody.includes("تمام 👌") && twoBody.includes("جوج قطع"));
-    add(assertions, "two-piece payload includes the first item prompt", twoBody.includes("القطعة الأولى") && twoBody.includes("اختار"));
+    add(assertions, "two-piece payload has a friendly prefix", twoBody.includes("مزيان 👌") && twoBody.includes("غادي يكونو جوج"));
+    add(assertions, "two-piece payload includes the first item prompt", twoBody.includes(`الأولى بالمقاس ${size}`) && twoBody.includes("اختار اللون"));
     add(assertions, "two-piece interactive body does not collapse to the bare prompt", normalized(twoBody) !== "اختار المقاس");
     add(assertions, "initial payload retains configured option action IDs", actionIds(twoStart).some((id) => id.startsWith("cart_item_option:")));
     add(assertions, "initial planned payload never asks per-item quantity", !hasPerItemQuantityPrompt(twoStart));
 
     if (size && color && alternateSize && alternateColor) {
-      await turn(two, `cart_item_option:size:${size}`);
       const firstCompleted = await turn(two, `cart_item_option:color:${color}`);
       const firstCompletedBody = interactiveBody(firstCompleted);
       add(assertions, "first completed item is acknowledged", firstCompletedBody.includes("وجدنا القطعة الأولى"));
@@ -196,57 +197,58 @@ export async function evaluateFriendlyOrderPresentation(): Promise<FriendlyOrder
 
       const different = await turn(two, "cart_item_previous:different");
       const differentBody = interactiveBody(different);
-      add(assertions, "Different Choices has a friendly next-slot transition", differentBody.includes("باختيارات مختلفة") && differentBody.includes("القطعة الثانية"));
-      add(assertions, "Different Choices includes the dynamic missing option prompt", differentBody.includes("اختار"));
+      add(assertions, "Different Choices has a friendly next-slot transition", differentBody.includes("بالنسبة للثانية") && differentBody.includes("شنو المقاس"));
+      add(assertions, "Different Choices includes the dynamic missing option prompt", differentBody.includes("المقاس"));
       add(assertions, "Different Choices keeps option actions", actionIds(different).some((id) => id.startsWith("cart_item_option:")));
       add(assertions, "Different Choices never asks per-item quantity", !hasPerItemQuantityPrompt(different));
 
       await turn(two, `cart_item_option:size:${alternateSize}`);
       const finalPiece = await turn(two, `cart_item_option:color:${alternateColor}`);
       const finalBody = interactiveBody(finalPiece);
-      add(assertions, "last planned piece introduces cart review naturally", finalBody.includes("راجع السلة ديالك قبل ما نكملو"));
+      add(assertions, "last planned piece introduces cart review naturally", finalBody === "مزيان 👌 السلة ديالك واجدة.");
       add(assertions, "last planned piece does not reintroduce quantity capture", !hasPerItemQuantityPrompt(finalPiece));
 
       const same = identity("same");
       await reset(same);
       await turn(same, "first_entry:order_now");
-      await turn(same, "cart_quantity:2");
       await turn(same, `cart_item_option:size:${size}`);
+      await turn(same, "cart_quantity:2");
       await turn(same, `cart_item_option:color:${color}`);
       const sameResult = await turn(same, "cart_item_previous:same");
       const sameBody = interactiveBody(sameResult);
-      add(assertions, "Same as Previous is acknowledged", sameResult.reply?.includes("ضفنا القطعة الثانية بنفس الاختيارات") === true);
+      add(assertions, "Same as Previous is acknowledged", sameResult.reply === "مزيان 👌 السلة ديالك واجدة.");
       add(assertions, "Same as Previous completes without quantity prompt", !hasPerItemQuantityPrompt(sameResult));
-      add(assertions, "Same as Previous ends with a cart-review transition", sameResult.reply?.includes("راجع السلة ديالك قبل ما نكملو") === true);
-      add(assertions, "Same as Previous cart-review body remains customer-visible", sameBody.includes("ضفنا القطعة الثانية") && sameBody.includes("راجع السلة"));
+      add(assertions, "Same as Previous ends with a cart-review transition", actionIds(sameResult).includes("cart_review:continue"));
+      add(assertions, "Same as Previous cart-review body remains customer-visible", sameBody === "مزيان 👌 السلة ديالك واجدة.");
 
       const three = identity("three");
       await reset(three);
       await turn(three, "first_entry:order_now");
+      await turn(three, `cart_item_option:size:${size}`);
       const threeStart = await turn(three, "cart_quantity:3");
-      add(assertions, "three-piece start uses dynamic wording", interactiveBody(threeStart).includes("3 قطع"));
+      add(assertions, "three-piece start uses dynamic wording", interactiveBody(threeStart).includes("غادي يكونو 3"));
     }
 
     const plainReview = renderFinalOrderReview(reviewFixture({ withOffer: false })).text;
     const offerReview = renderFinalOrderReview(reviewFixture({ withOffer: true })).text;
-    add(assertions, "final review shows product names", (plainReview.match(/صندالة نسائية/g) || []).length === 2);
+    add(assertions, "final review shows product names", (plainReview.match(/صندالة نسائية (?:الأولى|الثانية|الثالثة)/g) || []).length === 3);
     add(assertions, "final review keeps product options visible", plainReview.includes("المقاس: 38") && plainReview.includes("اللون: أسود"));
     add(assertions, "final review omits quantity one", !plainReview.includes("الكمية: 1"));
-    add(assertions, "final review keeps merged quantity clear", plainReview.includes("صندالة نسائية ×2"));
+    add(assertions, "final review keeps merged quantity clear", plainReview.includes("صندالة نسائية الثانية") && plainReview.includes("صندالة نسائية الثالثة"));
     add(assertions, "final review omits per-item unit prices", !plainReview.includes("ثمن الوحدة"));
     add(assertions, "final review omits per-item line totals", !plainReview.includes("   المجموع:"));
-    add(assertions, "final review shows total physical pieces once", (plainReview.match(/عدد القطع:/g) || []).length === 1 && plainReview.includes("عدد القطع: 3"));
-    add(assertions, "final review shows merchandise subtotal once", (plainReview.match(/مجموع المنتجات:/g) || []).length === 1);
+    add(assertions, "final review omits redundant total physical pieces", !plainReview.includes("عدد القطع:"));
+    add(assertions, "final review shows merchandise subtotal once", (plainReview.match(/ثمن صندالة نسائية:/g) || []).length === 1);
     add(assertions, "final review hides discount without an offer", !plainReview.includes("التخفيض:"));
-    add(assertions, "final review shows discount once when applicable", (offerReview.match(/التخفيض:/g) || []).length === 1 && offerReview.includes("98 درهم"));
+    add(assertions, "final review keeps offer-adjusted subtotal without duplicate discount text", !offerReview.includes("التخفيض:") && offerReview.includes("ثمن صندالة نسائية: 499 درهم"));
     add(
       assertions,
       "final review shows delivery once",
-      plainReview.split("\n").filter((line) => line.trim().startsWith("التوصيل:")).length === 1 &&
-        plainReview.includes("التوصيل: مجاني"),
+      plainReview.split("\n").filter((line) => line.trim().startsWith("• التوصيل:")).length === 1 &&
+        plainReview.includes("• التوصيل: مجاني"),
     );
-    add(assertions, "final review shows authoritative final total once", (offerReview.match(/المجموع النهائي:/g) || []).length === 1 && offerReview.includes("499 درهم"));
-    add(assertions, "final review preserves server-calculated subtotal", plainReview.includes("مجموع المنتجات: 597 درهم"));
+    add(assertions, "final review shows authoritative final total once", (offerReview.match(/• المجموع:/g) || []).length === 1 && offerReview.includes("• المجموع: 499 درهم"));
+    add(assertions, "final review preserves server-calculated subtotal", plainReview.includes("ثمن صندالة نسائية: 597 درهم"));
 
     const moreInfo = identity("more-info");
     await reset(moreInfo);

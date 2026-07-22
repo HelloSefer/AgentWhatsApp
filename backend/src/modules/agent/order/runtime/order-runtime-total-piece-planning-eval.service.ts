@@ -108,15 +108,15 @@ export async function evaluateTotalPiecePlanning(): Promise<TotalPiecePlanningEv
     await reset(different);
     const entry = await turn(different, "first_entry:order_now");
     add(assertions, "First Entry enters canonical planning", entry.handled === true && entry.stage === "PLANNING");
+    await turn(different, `cart_item_option:size:${firstSize}`);
     const selectedTwo = await turn(different, "cart_quantity:2");
     let state = await runtime(different);
     add(assertions, "planned count 2 creates fixed two-piece semantics", state?.cart.targetItemCount === 2 && state.cart.initialCollectionMode === "IMPLICIT_PLANNED_PIECE_SLOTS");
     add(assertions, "planned count 2 creates only the first slot draft", state?.cart.items.length === 0 && Boolean(state?.cart.currentItemDraft) && state?.cart.currentItemDraft?.quantity === 1);
-    add(assertions, "first transition is friendly and includes the actual first prompt", Boolean(selectedTwo.reply?.includes("غادي نوجد ليك")) && Boolean(selectedTwo.reply?.includes("اختار")));
+    add(assertions, "first transition is friendly and includes the actual first prompt", Boolean(selectedTwo.reply?.includes("غادي يكونو جوج")) && Boolean(selectedTwo.reply?.includes(`الأولى بالمقاس ${firstSize}`)) && Boolean(selectedTwo.reply?.includes("اختار اللون")));
     add(assertions, "initial planned collection does not ask a per-item quantity", !hasQuantityPrompt(selectedTwo));
 
-    const firstOption = await turn(different, `cart_item_option:size:${firstSize}`);
-    add(assertions, "first slot continues through configured options", firstOption.handled === true && !hasQuantityPrompt(firstOption));
+    add(assertions, "first slot continues through configured options", selectedTwo.handled === true && optionIds(selectedTwo).some((id) => id.startsWith("cart_item_option:color:")) && !hasQuantityPrompt(selectedTwo));
     const firstCompleted = await turn(different, `cart_item_option:color:${firstColor}`);
     state = await runtime(different);
     add(assertions, "first slot finalizes automatically with one implicit piece", itemUnits(state) === 1 && state?.cart.items[0]?.quantitySource === "IMPLICIT_PLANNED_SLOT");
@@ -147,8 +147,8 @@ export async function evaluateTotalPiecePlanning(): Promise<TotalPiecePlanningEv
     const same = identity("same");
     await reset(same);
     await turn(same, "first_entry:order_now");
-    await turn(same, "cart_quantity:2");
     await turn(same, `cart_item_option:size:${firstSize}`);
+    await turn(same, "cart_quantity:2");
     const sameFirst = await turn(same, `cart_item_option:color:${firstColor}`);
     const sameSecond = await turn(same, "cart_item_previous:same");
     state = await runtime(same);
@@ -159,8 +159,8 @@ export async function evaluateTotalPiecePlanning(): Promise<TotalPiecePlanningEv
     const three = identity("three");
     await reset(three);
     await turn(three, "first_entry:order_now");
-    await turn(three, "cart_quantity:3");
     await turn(three, `cart_item_option:size:${firstSize}`);
+    await turn(three, "cart_quantity:3");
     await turn(three, `cart_item_option:color:${firstColor}`);
     await turn(three, "cart_item_previous:same");
     const thirdComplete = await turn(three, "cart_item_previous:same");
@@ -181,7 +181,7 @@ export async function evaluateTotalPiecePlanning(): Promise<TotalPiecePlanningEv
     add(assertions, "info:order_now shares the canonical First Entry planner", state?.runtimeStage === "PLANNING" && state.lastHandledAction === "first_entry:order_now" && infoOrder.handled === true);
     const pendingSizeStart = await turn(infoSize, "cart_quantity:2");
     state = await runtime(infoSize);
-    add(assertions, "pending size is reused for the first planned slot", state?.cart.currentItemDraft?.selectedOptions.size === firstSize && !pendingSizeStart.reply?.includes("المقاس"));
+    add(assertions, "pending size is reused for the first planned slot", state?.cart.currentItemDraft?.selectedOptions.size === firstSize && !optionIds(pendingSizeStart).some((id) => id.startsWith("cart_item_option:size:")));
     add(assertions, "first pending-size slot asks only its remaining option", Boolean(pendingSizeStart.reply?.includes("اللون")) && !hasQuantityPrompt(pendingSizeStart));
     await turn(infoSize, `cart_item_option:color:${firstColor}`);
     const pendingDifferent = await turn(infoSize, "cart_item_previous:different");
@@ -200,11 +200,10 @@ export async function evaluateTotalPiecePlanning(): Promise<TotalPiecePlanningEv
     const infoInvalid = identity("info-invalid");
     await reset(infoInvalid);
     await updateConversationProductInfoState({ ...infoInvalid, customerId: infoInvalid.conversationKey, pendingOrderSelections: { size: "invalid-size", color: "invalid-color" } });
-    await turn(infoInvalid, "info:order_now");
-    const invalidStart = await turn(infoInvalid, "cart_quantity:1");
+    const invalidStart = await turn(infoInvalid, "info:order_now");
     state = await runtime(infoInvalid);
-    add(assertions, "invalid pending options are ignored safely", Object.keys(state?.cart.currentItemDraft?.selectedOptions || {}).length === 0 && Boolean(invalidStart.reply?.includes("اختار")));
-    add(assertions, "invalid pending options never create a completed cart item", state?.cart.items.length === 0 && state?.runtimeStage === "COLLECTING_ITEM");
+    add(assertions, "invalid pending options are ignored safely", state?.orderEntryFieldKey === "size" && Boolean(invalidStart.reply?.includes("اختار")));
+    add(assertions, "invalid pending options never create a completed cart item", state?.cart.items.length === 0 && state?.runtimeStage === "PLANNING" && !state.cart.currentItemDraft);
   } finally {
     for (const scope of scopes) {
       await reset(scope);

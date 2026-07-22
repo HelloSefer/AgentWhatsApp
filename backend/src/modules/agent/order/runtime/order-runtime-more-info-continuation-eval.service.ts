@@ -159,7 +159,7 @@ export async function evaluateMoreInfoOrderContinuation(): Promise<MoreInfoConti
     add(assertions, "information exploration does not enter item collection", currentSession.orderState.orderCycleId === undefined && currentSession.orderState.collected.size === undefined);
 
     const sizes = await turn(flowA, "info:sizes");
-    add(assertions, "size information answer remains unchanged", sizes.reply.includes("المقاسات المتوفرة عندنا"));
+    add(assertions, "size information answer remains unchanged", sizes.reply === "هادو هما المقاسات المتوفرة👇\nاختار المقاس المناسب ليك");
     add(assertions, "size list remains actionable", hasOption(sizes, `size:${firstSize}`) && hasOption(sizes, `size:${secondSize}`));
 
     const selectedSize = await turn(flowA, `size:${firstSize}`);
@@ -176,14 +176,14 @@ export async function evaluateMoreInfoOrderContinuation(): Promise<MoreInfoConti
     const continueOrder = await turn(flowA, "info:continue_order");
     let state = await runtime(flowA);
     add(assertions, "info:continue_order enters canonical PLANNING stage", continueOrder.meta?.orderRuntime?.stage === "PLANNING" && state?.runtimeStage === "PLANNING");
-    add(assertions, "info:continue_order asks total physical piece count", continueOrder.reply.includes("قبل ما نبدأو، شحال من قطعة بغيتي؟"));
+    add(assertions, "info:continue_order asks total physical piece count", continueOrder.reply.includes("باش نكمّلو الطلب") && continueOrder.reply.includes(`المقاس ${firstSize}`));
     add(assertions, "info:continue_order does not assume one piece", hasOption(continueOrder, "cart_quantity:2") && state?.cart.targetItemCount === undefined);
 
     const twoPieces = await turn(flowA, "cart_quantity:2");
     state = await runtime(flowA);
     add(assertions, "cart_quantity:2 starts canonical two-slot planning", state?.cart.targetItemCount === 2 && state.cart.initialCollectionMode === "IMPLICIT_PLANNED_PIECE_SLOTS");
     add(assertions, "pending size applies to the first slot", state?.cart.currentItemDraft?.selectedOptions.size === firstSize);
-    add(assertions, "first slot does not ask size again", !hasOptionPrefix(twoPieces, "cart_item_option:size:") && !twoPieces.reply.includes("المقاس"));
+    add(assertions, "first slot does not ask size again", !hasOptionPrefix(twoPieces, "cart_item_option:size:") && state?.cart.currentItemDraft?.selectedOptions.size === firstSize);
     add(assertions, "first slot asks only the next missing option", hasOptionPrefix(twoPieces, "cart_item_option:color:") && twoPieces.reply.includes("اللون"));
     add(assertions, "first slot does not ask per-item quantity", !hasQuantityPrompt(twoPieces));
 
@@ -230,12 +230,11 @@ export async function evaluateMoreInfoOrderContinuation(): Promise<MoreInfoConti
       customerId: stale.conversationKey,
       pendingOrderSelections: { size: "999", color: firstColor },
     });
-    await turn(stale, "info:continue_order");
-    const staleStart = await turn(stale, "cart_quantity:1");
+    const staleStart = await turn(stale, "info:continue_order");
     state = await runtime(stale);
-    add(assertions, "invalid pending values are ignored safely", state?.cart.currentItemDraft?.selectedOptions.size === undefined && staleStart.reply.includes("المقاس"));
-    add(assertions, "valid pending values remain when another pending value is invalid", state?.cart.currentItemDraft?.selectedOptions.color === firstColor);
-    add(assertions, "stale pending values do not create completed items", state?.cart.items.length === 0 && state?.runtimeStage === "COLLECTING_ITEM");
+    add(assertions, "invalid pending values are ignored safely", state?.orderEntryFieldKey === "size" && staleStart.reply.includes("المقاس"));
+    add(assertions, "valid pending values remain when another pending value is invalid", state?.pendingInitialItemOptions?.color === firstColor);
+    add(assertions, "stale pending values do not create completed items", state?.cart.items.length === 0 && state?.runtimeStage === "PLANNING" && !state.cart.currentItemDraft);
 
     const replace = identity("replace");
     await turn(replace, "first_entry:more_info");

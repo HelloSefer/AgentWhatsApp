@@ -220,30 +220,30 @@ $duration = $snapshotTimed.DurationMs
 
 $group = "A Renderer styles"
 Add-Check $group "friendly greeting renders" ($cases.friendly.text.Contains("سلام") -and $cases.friendly.text.Contains("مرحبا")) $cases.friendly.text $duration
-Add-Check $group "short greeting renders" ($cases.short.text.StartsWith("سلام") -and $cases.short.lines.Count -lt $cases.friendly.lines.Count) $cases.short.text $duration
-Add-Check $group "professional greeting renders" ($cases.professional.text.Contains("مرحباً بك") -and $cases.professional.text.Contains("هل ترغب")) $cases.professional.text $duration
+Add-Check $group "short CTA style renders" ($cases.short.text.Contains("السلام عليكم 👋 مرحبا بك") -and $cases.short.text.Contains("بغيتي تطلب دابا ولا تشوف معلومات أكثر؟")) $cases.short.text $duration
+Add-Check $group "professional CTA style renders" ($cases.professional.text.Contains("السلام عليكم 👋 مرحبا بك") -and $cases.professional.text.Contains("هل ترغب في إتمام الطلب أم الاطلاع على المزيد من المعلومات؟")) $cases.professional.text $duration
 
 $group = "B Product and price"
 Add-Check $group "product name appears when enabled" ($cases.showProductName.text.Contains($data.productName)) $cases.showProductName.text $duration
 Add-Check $group "product name hidden when disabled" (-not $cases.hideProductName.text.Contains($data.productName) -and $cases.hideProductName.text.Contains("المنتج")) $cases.hideProductName.text $duration
-Add-Check $group "product name not attached to availability" (-not $cases.showProductName.text.Contains(("{0} متوفر" -f $data.productName))) $cases.showProductName.text $duration
-Add-Check $group "price appears when configured" ($cases.priceShown.text.Contains("الثمن: 199 درهم.")) $cases.priceShown.text $duration
-Add-Check $group "missing price omitted" (-not $cases.priceMissing.text.Contains("الثمن:") -and $cases.priceMissing.warnings -contains "price_missing") ($cases.priceMissing.warnings -join ", ") $duration
+Add-Check $group "product availability uses approved commercial line" ($cases.showProductName.text.Contains(("{0} متوفرة دابا" -f $data.productName))) $cases.showProductName.text $duration
+Add-Check $group "price appears inline when configured" ($cases.priceShown.text.Contains("بـ199 درهم،")) $cases.priceShown.text $duration
+Add-Check $group "missing price omitted" (-not $cases.priceMissing.text.Contains("بـ") -and $cases.priceMissing.warnings -contains "price_missing") ($cases.priceMissing.warnings -join ", ") $duration
 Add-Check $group "no undefined or null text" (-not ($data.allText -match "undefined|null")) "" $duration
 
 $group = "C Delivery rendering"
-Add-Check $group "all_cities renders" ($cases.allCities.text.Contains("التوصيل متوفر لجميع المدن.")) $cases.allCities.text $duration
-Add-Check $group "all_cities free renders" ($cases.allCitiesFree.text.Contains("التوصيل مجاني ومتوفر لجميع المدن")) $cases.allCitiesFree.text $duration
-Add-Check $group "all_cities delivery price renders" ($cases.allCitiesPrice.text.Contains("التوصيل متوفر لجميع المدن بثمن 25 درهم.")) $cases.allCitiesPrice.text $duration
+Add-Check $group "all_cities renders" ($cases.allCities.text.Contains("والتوصيل متوفر لجميع المدن 🚚")) $cases.allCities.text $duration
+Add-Check $group "all_cities free renders" ($cases.allCitiesFree.text.Contains("والتوصيل متوفر لجميع المدن بالمجان 🚚")) $cases.allCitiesFree.text $duration
+Add-Check $group "all_cities delivery price renders" ($cases.allCitiesPrice.text.Contains("والتوصيل متوفر لجميع المدن بثمن 25 درهم 🚚")) $cases.allCitiesPrice.text $duration
 Add-Check $group "selected_cities renders list" ($cases.selectedCities.text.Contains("الدار البيضاء") -and $cases.selectedCities.text.Contains("مراكش") -and $cases.selectedCities.text.Contains("الرباط")) $cases.selectedCities.text $duration
 Add-Check $group "excluded_cities renders list" ($cases.excludedCities.text.Contains("ما عدا") -and $cases.excludedCities.text.Contains("طنجة") -and $cases.excludedCities.text.Contains("أكادير")) $cases.excludedCities.text $duration
-Add-Check $group "not_available renders safe line" ($cases.notAvailableDelivery.text.Contains("التوصيل غير متوفر حالياً.")) $cases.notAvailableDelivery.text $duration
+Add-Check $group "not_available renders safe line" ($cases.notAvailableDelivery.text.Contains("والتوصيل غير متوفر حالياً 🚚")) $cases.notAvailableDelivery.text $duration
 Add-Check $group "not_mentioned omits delivery" (-not $cases.notMentionedDelivery.text.Contains("التوصيل")) $cases.notMentionedDelivery.text $duration
 
 $group = "D Payment trust and CTA"
-Add-Check $group "payment line renders when allowed" ($cases.paymentShown.text.Contains("الدفع عند الاستلام متوفر.")) $cases.paymentShown.text $duration
+Add-Check $group "compact opening does not duplicate payment line" (-not $cases.paymentShown.text.Contains("الدفع عند الاستلام متوفر.")) $cases.paymentShown.text $duration
 Add-Check $group "payment line hidden when disabled" (-not $cases.paymentHidden.text.Contains("الاستلام")) $cases.paymentHidden.text $duration
-Add-Check $group "trust line renders safely" ($cases.trustShown.text.Contains("تأكيد الطلب") -or $cases.trustShown.text.Contains("تأكيد تفاصيل الطلب")) $cases.trustShown.text $duration
+Add-Check $group "compact opening does not add a separate trust line" (-not $cases.trustShown.text.Contains("تأكيد تفاصيل الطلب")) $cases.trustShown.text $duration
 Add-Check $group "order_or_info CTA renders" ($cases.ctaOrderOrInfo.text.Contains("الطلب") -and $cases.ctaOrderOrInfo.text.Contains("معلومات")) $cases.ctaOrderOrInfo.text $duration
 Add-Check $group "order_only CTA renders" ($cases.ctaOrderOnly.text.Contains("الطلب") -and -not $cases.ctaOrderOnly.text.Contains("معلومات أكثر؟")) $cases.ctaOrderOnly.text $duration
 Add-Check $group "info_only CTA renders" ($cases.ctaInfoOnly.text.Contains("معلومات أكثر") -and -not $cases.ctaInfoOnly.text.Contains("دير الطلب")) $cases.ctaInfoOnly.text $duration
@@ -256,7 +256,7 @@ $preview = $previewTimed.Response
 $previewJson = $preview | ConvertTo-Json -Depth 80
 Add-Check $group "preview endpoint ok" ($preview.ok -eq $true -and $preview.previewOnly -eq $true) "" $previewTimed.DurationMs
 Add-Check $group "preview result previewOnly" ($preview.result.previewOnly -eq $true) "" $previewTimed.DurationMs
-Add-Check $group "preview includes text" ([string]$preview.result.text -and $preview.result.text.Contains("الثمن")) $preview.result.text $previewTimed.DurationMs
+Add-Check $group "preview includes approved commercial text" ([string]$preview.result.text -and $preview.result.text.Contains("بـ199 درهم،") -and $preview.result.text.Contains("التوصيل")) $preview.result.text $previewTimed.DurationMs
 Add-Check $group "preview includes CTA metadata" ($preview.result.ctas.previewOnly -eq $true -and @($preview.result.ctas.items).Count -ge 1) "count=$(@($preview.result.ctas.items).Count)" $previewTimed.DurationMs
 Add-Check $group "preview has no send payload" (-not $previewJson.Contains("messaging_product") -and -not $previewJson.Contains("dispatchResult") -and -not $previewJson.Contains("interactiveResult")) "" $previewTimed.DurationMs
 

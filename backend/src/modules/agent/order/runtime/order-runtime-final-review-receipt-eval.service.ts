@@ -133,8 +133,8 @@ async function action(
 async function startStandardCart(scope: Scope, units: 1 | 2): Promise<WebhookResult> {
   await receive({ scope, text: "سلام" });
   await action(scope, "first_entry:order_now");
-  let result = await action(scope, `cart_quantity:${units}`);
   await action(scope, "cart_item_option:size:38");
+  let result = await action(scope, `cart_quantity:${units}`);
   result = await action(scope, "cart_item_option:color:أسود");
   if (units === 2) {
     await action(scope, "cart_item_previous:different");
@@ -288,18 +288,18 @@ export async function evaluateOrderRuntimeFinalReviewReceipt(): Promise<OrderRun
     add(assertions, "last delivery field advances to FINAL_ORDER_REVIEW", runtime?.runtimeStage === "FINAL_ORDER_REVIEW");
     add(assertions, "full review and CTA are two ordered messages", initialFinal.outboundMessages.length === 2 && initialReview?.kind === "text" && initialCta?.kind === "interactive");
     add(assertions, "review text is dispatched before CTA", initialFinal.outboundMessages.indexOf(initialReview) < initialFinal.outboundMessages.indexOf(initialCta));
-    add(assertions, "review includes every cart item", (initialText.match(/صندالة نسائية/g) || []).length === 2);
+    add(assertions, "review includes every cart item", (initialText.match(/الصندالة (?:الأولى|الثانية)/g) || []).length === 2);
     add(assertions, "review includes first selected size", initialText.includes("المقاس: 38"));
     add(assertions, "review includes second selected size", initialText.includes("المقاس: 40"));
     add(assertions, "review includes every selected color", initialText.includes("اللون: أسود") && initialText.includes("اللون: وردي"));
     add(assertions, "review omits redundant quantity one lines", !initialText.includes("الكمية: 1"));
     add(assertions, "review omits per-item unit prices", !initialText.includes("ثمن الوحدة:"));
     add(assertions, "review omits per-item line totals", !initialText.includes("   المجموع:"));
-    add(assertions, "review includes authoritative standard subtotal once", (initialText.match(/مجموع المنتجات:/g) || []).length === 1 && initialText.includes("مجموع المنتجات: 398 درهم"));
+    add(assertions, "review includes authoritative standard subtotal once", (initialText.match(/ثمن صندالات:/g) || []).length === 1 && initialText.includes("ثمن صندالات: 398 درهم"));
     add(assertions, "review includes configured paid delivery", initialText.includes("التوصيل: 30 درهم"));
-    add(assertions, "review includes final total with delivery", initialText.includes("المجموع النهائي: 428 درهم"));
-    add(assertions, "review includes full name", initialText.includes("الاسم الكامل: عمر العزري"));
-    add(assertions, "review includes phone", initialText.includes("رقم الهاتف: 0612345678"));
+    add(assertions, "review includes final total with delivery", initialText.includes("المجموع: 428 درهم"));
+    add(assertions, "review includes full name", initialText.includes("الاسم: عمر العزري"));
+    add(assertions, "review includes phone", initialText.includes("الهاتف: 0612345678"));
     add(assertions, "review includes city", initialText.includes("المدينة: مراكش"));
     add(assertions, "review includes address", initialText.includes("العنوان: حي السلام زنقة 4 رقم 12"));
     add(assertions, "generic sentence does not replace the full review", initialText.trim() !== "راجع معلومات الطلب ومن بعد أكد الطلب" && initialText.length > 200);
@@ -317,14 +317,13 @@ export async function evaluateOrderRuntimeFinalReviewReceipt(): Promise<OrderRun
     add(
       assertions,
       "cart edit opens the canonical item selector directly",
-      actionIds(editCart).some((id) => id.startsWith("cart_review_item:select:")) && editCart.outboundMessages[0]?.text.includes("اختار قطعة") === true,
+      actionIds(editCart).some((id) => id.startsWith("cart_review_item:select:")) && editCart.outboundMessages[0]?.text === "شنو بغيتي تعدل؟",
       JSON.stringify({ actionIds: actionIds(editCart), text: editCart.outboundMessages[0]?.text }),
     );
     add(assertions, "cart edit does not require a second generic review click", !actionIds(editCart).includes("cart_review:edit") && !editCart.outboundMessages[0]?.text.includes("راجع السلة ديالك قبل ما نكملو"));
     await action(scope, `cart_review_item:select:${firstItemId}`);
-    await action(scope, `cart_review_item:options:${firstItemId}`);
+    await action(scope, `cart_review_item:option:size:${firstItemId}`);
     await action(scope, "cart_item_option:size:39");
-    await action(scope, "cart_review_item_edit:save");
     runtime = await loadRuntime(scope);
     add(assertions, "item edit updates authoritative cart", runtime?.cart.items[0]?.selectedOptions.size === "39");
     add(assertions, "cart edit preserves delivery fields", runtime?.cart.orderLevelFields.city === "مراكش" && runtime.cart.orderLevelFields.address === "حي السلام زنقة 4 رقم 12");
@@ -332,7 +331,7 @@ export async function evaluateOrderRuntimeFinalReviewReceipt(): Promise<OrderRun
     runtime = await loadRuntime(scope);
     add(assertions, "cart edit returns directly to FINAL_ORDER_REVIEW", runtime?.runtimeStage === "FINAL_ORDER_REVIEW");
     add(assertions, "updated cart review is rendered in full again", afterCartEdit.outboundMessages.length === 2 && afterCartEdit.outboundMessages[0]?.text.includes("المقاس: 39") === true);
-    add(assertions, "pricing is refreshed after cart edit", afterCartEdit.outboundMessages[0]?.text.includes("المجموع النهائي: 428 درهم") === true);
+    add(assertions, "pricing is refreshed after cart edit", afterCartEdit.outboundMessages[0]?.text.includes("المجموع: 428 درهم") === true);
 
     const deliverySelector = await action(scope, "order_checkout:edit_delivery");
     runtime = await loadRuntime(scope);
@@ -344,7 +343,7 @@ export async function evaluateOrderRuntimeFinalReviewReceipt(): Promise<OrderRun
     add(assertions, "delivery edit updates only selected city", runtime?.cart.orderLevelFields.city === "الرباط" && runtime.cart.orderLevelFields.address === "حي السلام زنقة 4 رقم 12");
     add(assertions, "city edit returns updated full review", runtime?.runtimeStage === "FINAL_ORDER_REVIEW" && cityEdited.outboundMessages.length === 2 && cityEdited.outboundMessages[0]?.text.includes("المدينة: الرباط") === true);
     add(assertions, "delivery amount is repriced after city edit", cityEdited.outboundMessages[0]?.text.includes("التوصيل: 25 درهم") === true);
-    add(assertions, "final total is repriced after city edit", cityEdited.outboundMessages[0]?.text.includes("المجموع النهائي: 423 درهم") === true);
+    add(assertions, "final total is repriced after city edit", cityEdited.outboundMessages[0]?.text.includes("المجموع: 423 درهم") === true);
     await action(scope, "order_checkout:edit_delivery");
     await action(scope, "order_checkout_field:select:address");
     const addressEdited = await receive({ scope, text: "حي النصر رقم 8" });
@@ -386,9 +385,9 @@ export async function evaluateOrderRuntimeFinalReviewReceipt(): Promise<OrderRun
     add(assertions, "duplicate confirm returns safe already-confirmed response", duplicate.outboundMessages[0]?.text.includes("تأكد من قبل") === true);
 
     const offerRendered = renderFinalOrderReview(buildOfferReviewFixture()).text;
-    add(assertions, "offer review includes configured label", offerRendered.includes("العرض: عرض ثلاث قطع"));
-    add(assertions, "offer review includes authoritative discount", offerRendered.includes("التخفيض: 98 درهم"));
-    add(assertions, "offer review includes delivery and offer-adjusted final", offerRendered.includes("التوصيل: 25 درهم") && offerRendered.includes("المجموع النهائي: 524 درهم"));
+    add(assertions, "offer review uses authoritative offer-adjusted product total", offerRendered.includes("ثمن منتج تجريبي: 499 درهم"));
+    add(assertions, "offer review keeps the approved compact totals format", !offerRendered.includes("التخفيض:") && !offerRendered.includes("العرض:"));
+    add(assertions, "offer review includes delivery and offer-adjusted final", offerRendered.includes("التوصيل: 25 درهم") && offerRendered.includes("المجموع: 524 درهم"));
     add(assertions, "offer review excludes implementation IDs", !offerRendered.includes("internal-offer-never-render") && !offerRendered.includes("internal-item-never-render"));
 
     await reset(scope);

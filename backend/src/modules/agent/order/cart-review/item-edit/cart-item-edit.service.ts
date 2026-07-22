@@ -391,11 +391,19 @@ function applyWorkingOption(input: {
     changed,
     cartBefore,
     cartAfter: cartBefore,
-    editState: makeState({
-      source,
-      selectedOptions: canonical.selectedOptions,
-      originalItemFingerprint: input.state.originalItemFingerprint,
-    }),
+    editState: {
+      ...makeState({
+        source,
+        selectedOptions: canonical.selectedOptions,
+        originalItemFingerprint: input.state.originalItemFingerprint,
+      }),
+      ...(input.state.focusedFieldKey
+        ? { focusedFieldKey: input.state.focusedFieldKey }
+        : {}),
+      ...(input.state.autoSaveOnSelection
+        ? { autoSaveOnSelection: true }
+        : {}),
+    },
     warnings: [],
   });
 }

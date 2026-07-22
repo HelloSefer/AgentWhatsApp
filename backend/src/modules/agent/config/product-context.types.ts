@@ -46,6 +46,8 @@ export type ProductContext = {
   name: string;
   /** Short natural name used only in customer-facing conversational copy. */
   conversationalName?: string;
+  /** Configured singular label used only in customer-facing conversation copy. */
+  singularName?: string;
   /** Configured plural label used only in customer-facing multi-piece copy. */
   pluralName?: string;
   description?: string;

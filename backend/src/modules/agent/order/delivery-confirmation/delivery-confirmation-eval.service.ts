@@ -164,7 +164,7 @@ export async function evaluateDeliveryConfirmation(): Promise<DeliveryConfirmati
   add(cases, "entry does not clear existing cart data", JSON.stringify(initial) === initialJson && started.cartAfter.items.length === 2);
   add(cases, "requirements follow configuration order", requirements.map((field) => field.key).join(",") === "fullName,phone,city,address,deliveryZone,deliveryInstructions");
   add(cases, "item fields are excluded from delivery requirements", !requirements.some((field) => ["size", "color", "quantity"].includes(field.key)));
-  add(cases, "initial standard delivery fields are presented as one safe group", started.previewState?.currentFieldKey === "fullName" && started.previewState?.groupedFieldKeys?.join(",") === "fullName,phone,city" && ["Nom complet", "Téléphone", "Ville"].every((label) => started.presentation?.text?.includes(label) === true));
+  add(cases, "initial standard delivery fields are presented as one safe group", started.previewState?.currentFieldKey === "fullName" && started.previewState?.groupedFieldKeys?.join(",") === "fullName,phone,city" && started.presentation?.text === "مزيان 👌 دابا صيفط ليا الاسم الكامل، رقم الهاتف والمدينة باش نكملو ليك الطلب.");
   add(cases, "open text field has no unsafe option actions", !started.presentation?.uiHints);
 
   const incomplete = run({ cart: reviewedCart({ targetItemCount: 4 }) });
