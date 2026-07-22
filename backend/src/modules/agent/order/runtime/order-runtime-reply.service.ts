@@ -15,6 +15,7 @@ import {
   buildSameOrDifferentCopy,
   type PlannedItemOptionDisplay,
 } from "./order-runtime-presentation-copy.service";
+import { buildOrderEntryOptionPresentation } from "../item-collection/presentation/item-collection-presentation.service";
 
 export type RuntimeReply = {
   text: string;
@@ -85,14 +86,14 @@ function completedOptionDisplays(
     });
 }
 
-type MoreInfoContinuationPresentation = {
+type InitialItemOptionSummary = {
   selectedSize: string;
   productPluralName: string;
 };
 
-function replyFromMoreInfoQuantitySelector(
+function replyFromInitialSizeQuantitySelector(
   result: CartPlanningPreviewResult,
-  input: MoreInfoContinuationPresentation,
+  input: InitialItemOptionSummary,
 ): RuntimeReply | undefined {
   const selector = result.selector;
   if (!selector?.uiHints || selector.promptKey !== "SELECT_QUANTITY") {
@@ -117,12 +118,12 @@ function replyFromMoreInfoQuantitySelector(
 
 export function replyFromPlanning(
   result: CartPlanningPreviewResult,
-  moreInfoContinuation?: MoreInfoContinuationPresentation,
+  initialItemOptionSummary?: InitialItemOptionSummary,
 ): RuntimeReply {
-  if (moreInfoContinuation) {
-    const continuationReply = replyFromMoreInfoQuantitySelector(
+  if (initialItemOptionSummary) {
+    const continuationReply = replyFromInitialSizeQuantitySelector(
       result,
-      moreInfoContinuation,
+      initialItemOptionSummary,
     );
     if (continuationReply) return continuationReply;
   }
@@ -187,21 +188,21 @@ export function replyFromItemCollection(
 export function replyFromInitialPlannedItemCollection(
   result: ItemCollectionPreviewResult,
   fields: readonly RequiredOrderField[] = [],
-  moreInfoContinuation?: MoreInfoContinuationPresentation,
+  initialItemOptionSummary?: InitialItemOptionSummary,
 ): RuntimeReply {
   if (result.nextStep === "SAME_OR_DIFFERENT_ITEM_OPTIONS") {
     return replyFromItemCollection(result, fields);
   }
   const itemReply = replyFromItemCollection(result, fields);
   if (
-    moreInfoContinuation &&
+    initialItemOptionSummary &&
     result.presentation?.field?.key === "color"
   ) {
     const text = plannedPieceCount(result) === 1
-      ? `مزيان 👌 المقاس ${moreInfoContinuation.selectedSize} تسجّل.\nدابا اختار اللون ديالها 👇`
+      ? `مزيان 👌 المقاس ${initialItemOptionSummary.selectedSize} تسجّل.\nدابا اختار اللون ديالها 👇`
       : plannedPieceCount(result) === 2
-        ? `مزيان 👌 غادي يكونو جوج ${moreInfoContinuation.productPluralName}.\nالأولى بالمقاس ${moreInfoContinuation.selectedSize}، دابا اختار اللون ديالها 👇`
-        : `مزيان 👌 غادي يكونو ${plannedPieceCount(result)} ${moreInfoContinuation.productPluralName}.\nالأولى بالمقاس ${moreInfoContinuation.selectedSize}، دابا اختار اللون ديالها 👇`;
+        ? `مزيان 👌 غادي يكونو جوج ${initialItemOptionSummary.productPluralName}.\n\nالأولى بالمقاس ${initialItemOptionSummary.selectedSize}، دابا اختار اللون ديالها 👇`
+        : `مزيان 👌 غادي يكونو ${plannedPieceCount(result)} ${initialItemOptionSummary.productPluralName}.\n\nالأولى بالمقاس ${initialItemOptionSummary.selectedSize}، دابا اختار اللون ديالها 👇`;
     return replyWithVisibleInteractiveBody(
       text,
       itemReply.replyUi,
@@ -212,6 +213,11 @@ export function replyFromInitialPlannedItemCollection(
     optionPrompt: currentOptionPrompt(result),
   });
   return replyWithVisibleInteractiveBody(text, itemReply.replyUi);
+}
+
+export function replyFromOrderEntryOption(field: RequiredOrderField): RuntimeReply {
+  const presentation = buildOrderEntryOptionPresentation(field);
+  return replyWithVisibleInteractiveBody(presentation.text, presentation.uiHints);
 }
 
 export function replyFromCartReview(

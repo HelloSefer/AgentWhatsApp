@@ -13,6 +13,12 @@ import { prepareConfirmedOrderReceipt } from "../confirmed-order/confirmed-order
 import { runCartReviewPreview } from "../cart-review/cart-review-preview.service";
 import { runDeliveryConfirmationPreview } from "../delivery-confirmation/delivery-confirmation-preview.service";
 import { runItemCollectionPreview } from "../item-collection/preview/item-collection-preview.service";
+import {
+  getRequiredItemCollectionFields,
+  validateItemCollectionOption,
+} from "../item-collection/item-collection-requirements.service";
+import { normalizeItemOptionActionId } from "../item-collection/actions/item-option-action-normalizer.service";
+import type { SupportedOrderFieldValue } from "../cart-state.types";
 import { runCartPlanningPreview } from "../planning/preview/cart-planning-preview.service";
 import {
   recoveryReply,
@@ -21,6 +27,7 @@ import {
   replyFromDelivery,
   replyFromInitialPlannedItemCollection,
   replyFromItemCollection,
+  replyFromOrderEntryOption,
   replyFromPlanning,
   staleActionReply,
   type RuntimeReply,
@@ -70,6 +77,24 @@ function stageForCartReview(nextStep: string | undefined): OrderRuntimeStage {
     : nextStep === "DELIVERY_COLLECTION_READY" ? "COLLECTING_DELIVERY"
     : nextStep === "SHOW_ITEM_ACTIONS" || nextStep === "ENTER_ITEM_QUANTITY" ? "EDITING_CART_ITEM"
     : "CART_REVIEW";
+}
+
+function validInitialItemOptions(
+  fields: RequiredOrderField[],
+  options: Record<string, unknown>,
+): Record<string, SupportedOrderFieldValue> {
+  const valid: Record<string, SupportedOrderFieldValue> = {};
+  for (const [key, value] of Object.entries(options)) {
+    const validation = validateItemCollectionOption({ fields, optionKey: key, value });
+    if (validation.valid) valid[validation.option.field.key] = validation.option.value;
+  }
+  return valid;
+}
+
+function initialSelectableItemOption(
+  fields: RequiredOrderField[],
+): RequiredOrderField | undefined {
+  return getRequiredItemCollectionFields(fields).find((field) => field.options?.length);
 }
 
 function asTurnResult(input: RuntimeReply & { stage: OrderRuntimeStage; warnings?: readonly string[]; failureCode?: string; confirmedSnapshotId?: string; receiptReady?: boolean; publicOrderCode?: string; receiptArtifact?: OrderRuntimeTurnResult["receiptArtifact"] }): OrderRuntimeTurnResult {
@@ -144,6 +169,34 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
   const message = normalizeRuntimeMessage(rawMessage, runtime.runtimeStage);
   const now = new Date();
 
+  const initialItemOptionSummary = () => {
+    const selectedSize = runtime.pendingInitialItemOptions?.size;
+    return typeof selectedSize === "string" && selectedSize.trim()
+      ? {
+          selectedSize: selectedSize.trim(),
+          productPluralName: productContext.pluralName?.trim() || productContext.name,
+        }
+      : undefined;
+  };
+
+  const startCanonicalPlanning = () => {
+    const planning = runCartPlanningPreview({
+      previewEnabled: true,
+      rawActionId: "first_entry:order_now",
+      sellerId: input.sellerId,
+      productContext,
+      offerLookup: offers,
+      cart: runtime.cart,
+      previewPlanningState: runtime.planningState,
+      now,
+    });
+    runtime.cart = planning.cartAfter;
+    runtime.planningState = planning.previewPlanningState;
+    runtime.runtimeStage = "PLANNING";
+    runtime.lastHandledAction = "first_entry:order_now";
+    return planning;
+  };
+
   console.info(JSON.stringify({
     event: "agent.order_runtime.route_requested",
     conversationScope: input.conversationKey.length > 8
@@ -182,6 +235,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
       await persist(input, runtime, fields);
       return asTurnResult({ text: firstEntry.text, replyUi: firstEntry.uiHints.replyUi, stage: "FIRST_ENTRY", warnings: firstEntry.warnings });
     }
+    delete runtime.orderEntryFieldKey;
     const pendingInitialItemOptions = await takeConversationPendingOrderSelections({
       customerId: input.conversationKey,
       customerPhone: input.customerPhone,
@@ -189,29 +243,30 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
       sellerId: input.sellerId,
       productId: productContext.productId,
     });
-    if (Object.keys(pendingInitialItemOptions).length > 0) {
-      runtime.pendingInitialItemOptions = pendingInitialItemOptions;
-      const selectedSize = pendingInitialItemOptions.size;
-      if (typeof selectedSize === "string" && selectedSize.trim()) {
-        runtime.moreInfoContinuation = { selectedSize: selectedSize.trim() };
-      }
+    const validPendingOptions = validInitialItemOptions(fields, pendingInitialItemOptions);
+    if (Object.keys(validPendingOptions).length > 0) {
+      runtime.pendingInitialItemOptions = validPendingOptions;
+    } else {
+      delete runtime.pendingInitialItemOptions;
     }
-    const planning = runCartPlanningPreview({ previewEnabled: true, rawActionId: "first_entry:order_now", sellerId: input.sellerId, productContext, offerLookup: offers, cart: runtime.cart, previewPlanningState: runtime.planningState, now });
-    runtime.cart = planning.cartAfter;
-    runtime.planningState = planning.previewPlanningState;
-    runtime.runtimeStage = "PLANNING";
-    runtime.lastHandledAction = "first_entry:order_now";
+    const firstConfiguredOption = initialSelectableItemOption(fields);
+    const firstMissingOption = firstConfiguredOption && validPendingOptions[firstConfiguredOption.key] === undefined
+      ? firstConfiguredOption
+      : undefined;
+    if (firstMissingOption) {
+      runtime.orderEntryFieldKey = firstMissingOption.key;
+      runtime.runtimeStage = "PLANNING";
+      runtime.lastHandledAction = "first_entry:order_now";
+      await persist(input, runtime, fields);
+      return asTurnResult({
+        ...replyFromOrderEntryOption(firstMissingOption),
+        stage: runtime.runtimeStage,
+      });
+    }
+    const planning = startCanonicalPlanning();
     await persist(input, runtime, fields);
     return asTurnResult({
-      ...replyFromPlanning(
-        planning,
-        runtime.moreInfoContinuation
-          ? {
-              selectedSize: runtime.moreInfoContinuation.selectedSize,
-              productPluralName: productContext.pluralName?.trim() || productContext.name,
-            }
-          : undefined,
-      ),
+      ...replyFromPlanning(planning, initialItemOptionSummary()),
       stage: runtime.runtimeStage,
       warnings: planning.warnings,
       failureCode: planning.failureCode,
@@ -219,6 +274,44 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
   }
 
   if (runtime.runtimeStage === "PLANNING") {
+    if (runtime.orderEntryFieldKey) {
+      const selection = normalizeItemOptionActionId(message);
+      if (
+        !selection.recognized ||
+        !selection.valid ||
+        !selection.action ||
+        selection.action.fieldKey !== runtime.orderEntryFieldKey
+      ) {
+        return isGuardedOrderRuntimeAction(message)
+          ? asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage })
+          : { handled: false, warnings: [] };
+      }
+
+      const validation = validateItemCollectionOption({
+        fields,
+        optionKey: selection.action.fieldKey,
+        value: selection.action.canonicalValue,
+      });
+      if (!validation.valid) {
+        return asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage });
+      }
+
+      runtime.pendingInitialItemOptions = {
+        ...(runtime.pendingInitialItemOptions || {}),
+        [validation.option.field.key]: validation.option.value,
+      };
+      delete runtime.orderEntryFieldKey;
+
+      const planning = startCanonicalPlanning();
+      await persist(input, runtime, fields);
+      return asTurnResult({
+        ...replyFromPlanning(planning, initialItemOptionSummary()),
+        stage: runtime.runtimeStage,
+        warnings: planning.warnings,
+        failureCode: planning.failureCode,
+      });
+    }
+
     const planning = runCartPlanningPreview({ previewEnabled: true, rawActionId: isGuardedOrderRuntimeAction(message) ? message : undefined, planningText: !isGuardedOrderRuntimeAction(message) ? message : undefined, sellerId: input.sellerId, productContext, offerLookup: offers, cart: runtime.cart, previewPlanningState: runtime.planningState, now });
     if (!planning.handled) return isGuardedOrderRuntimeAction(message) ? asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage }) : { handled: false, warnings: [] };
     if (!planning.planningResult?.success && planning.failureCode) return asTurnResult({ ...recoveryReply(), stage: runtime.runtimeStage, warnings: planning.warnings, failureCode: planning.failureCode });
@@ -226,7 +319,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     runtime.planningState = planning.previewPlanningState;
     runtime.lastHandledAction = isGuardedOrderRuntimeAction(message) ? message : undefined;
     if (planning.nextStep === "START_ITEM_COLLECTION") {
-      const moreInfoContinuation = runtime.moreInfoContinuation;
+      const initialItemSummary = initialItemOptionSummary();
       const item = runItemCollectionPreview({
         previewEnabled: true,
         sellerId: input.sellerId,
@@ -239,7 +332,6 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
       runtime.cart = item.cartAfter;
       runtime.itemCollectionState = item.previewState;
       delete runtime.pendingInitialItemOptions;
-      delete runtime.moreInfoContinuation;
       if (item.nextStep === "CART_REVIEW_READY") {
         const review = runCartReviewPreview({
           previewEnabled: true,
@@ -268,12 +360,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
         ...replyFromInitialPlannedItemCollection(
           item,
           fields,
-          moreInfoContinuation
-            ? {
-                selectedSize: moreInfoContinuation.selectedSize,
-                productPluralName: productContext.pluralName?.trim() || productContext.name,
-              }
-            : undefined,
+          initialItemSummary,
         ),
         stage: runtime.runtimeStage,
         warnings: [...planning.warnings, ...item.warnings],

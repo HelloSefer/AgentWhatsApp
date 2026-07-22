@@ -76,6 +76,49 @@ export function buildItemCollectionOptionActionId(
     : undefined;
 }
 
+/** Reuses the canonical item-option action IDs before the first planned item exists. */
+export function buildOrderEntryOptionPresentation(
+  field: RequiredOrderField,
+): { text: string; uiHints?: AgentReplyUiHint } {
+  const isSize = field.key === "size";
+  const text = isSize
+    ? "هادو هما المقاسات المتوفرة👇\nاختار المقاس المناسب ليك"
+    : `اختار ${field.label || field.key}`;
+  const options = field.options || [];
+
+  if (!options.length) {
+    return { text };
+  }
+
+  const usesButtons = options.length <= MAX_BUTTON_OPTIONS;
+  const mappedOptions: NonNullable<AgentReplyUiHint["options"]> = [];
+  for (const canonicalValue of options) {
+    const id = buildItemCollectionOptionActionId(field.key, canonicalValue);
+    if (!id) return { text };
+    mappedOptions.push({
+      id,
+      label: displayLabel({
+        canonicalValue,
+        maximumLength: usesButtons ? MAX_BUTTON_LABEL_LENGTH : MAX_LIST_LABEL_LENGTH,
+      }),
+      value: canonicalValue,
+    });
+  }
+
+  return {
+    text,
+    uiHints: {
+      kind: usesButtons ? "buttons" : "list",
+      purpose: "field_options",
+      ...(usesButtons ? {} : { title: field.label || field.key }),
+      ...(isSize && !usesButtons ? { buttonText: "اختار المقاس" } : {}),
+      body: text,
+      options: mappedOptions,
+      previewOnly: true,
+    },
+  };
+}
+
 function displayLabel(input: {
   canonicalValue: string;
   labels?: Readonly<Record<string, string>>;
