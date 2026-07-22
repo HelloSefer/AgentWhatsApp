@@ -156,7 +156,7 @@ export function buildDeliveryCollectionResult(input: {
     cartBefore: input.cartBefore,
     cartAfter: lifecycle.cart,
     previewState: state,
-    presentation: buildFinalOrderReviewPresentation(review),
+    presentation: buildFinalOrderReviewPresentation(review, input.productContext),
     finalReview: review,
     commercialEvaluation: input.commercial,
     ...(input.action ? { normalizedAction: input.action } : {}),
@@ -250,6 +250,24 @@ export function receiveGroupedDeliveryFieldValues(input: {
     .map((field) => field.label);
   const invalidRequirement = grouped.find((field) => parsed.invalidFieldKeys.includes(field.key));
   if (!result.presentation || (!savedLabels.length && !invalidRequirement)) return result;
+
+  const savedStandardIdentityGroup = ["fullName", "phone", "city"].every(
+    (key) => grouped.some((field) => field.key === key) && parsed.values.has(key),
+  );
+  if (
+    !invalidRequirement &&
+    savedStandardIdentityGroup &&
+    remainingGrouped.length === 0 &&
+    result.presentation.field?.key === "address"
+  ) {
+    return {
+      ...result,
+      presentation: {
+        ...result.presentation,
+        text: "مزيان 👌 بقا لينا غير العنوان.\n\nصيفط ليا العنوان الكامل ديال التوصيل.",
+      },
+    };
+  }
 
   const prefix = invalidRequirement
     ? `${savedLabels.length ? `${savedLabels.join(" و")} تسجلو ✅\n` : ""}غير ${invalidRequirement.label} ما بانش صحيح.`
@@ -370,7 +388,7 @@ export function renderDeliveryFinalReview(input: {
     cartBefore: input.cartBefore,
     cartAfter: lifecycle.cart,
     previewState: state,
-    presentation: buildFinalOrderReviewPresentation(finalReview),
+    presentation: buildFinalOrderReviewPresentation(finalReview, input.source.productContext),
     finalReview,
     commercialEvaluation: commercial,
     ...(input.action ? { normalizedAction: input.action } : {}),

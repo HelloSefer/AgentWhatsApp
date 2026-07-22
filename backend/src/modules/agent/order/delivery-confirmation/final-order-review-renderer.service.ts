@@ -1,4 +1,5 @@
 import type { OrderConfirmationPresentation } from "../../reply/reply-renderer.types";
+import type { ProductContext } from "../../config/product-context.types";
 import type { FinalOrderReview } from "./delivery-confirmation.types";
 
 function safeText(value: unknown): string {
@@ -23,68 +24,73 @@ function formatMinor(valueMinor: number, currency: string): string {
 function renderItem(
   item: FinalOrderReview["items"][number],
   index: number,
+  conversationalProductName?: string,
 ): string {
+  const ordinals = ["الأولى", "الثانية", "الثالثة", "الرابعة", "الخامسة", "السادسة", "السابعة", "الثامنة", "التاسعة", "العاشرة"];
   const options = item.options.map(
     (option) => `• ${safeText(option.label)}: ${safeText(option.value)}`,
   );
-  const quantitySuffix = item.quantity > 1 ? ` ×${item.quantity}` : "";
 
   return [
-    `${index + 1}) ${safeText(item.productName)}${quantitySuffix}`,
+    `${safeText(conversationalProductName || item.productName)} ${ordinals[index] || `رقم ${index + 1}`}:`,
     ...options,
   ].join("\n");
 }
 
+function deliveryFieldLabel(field: FinalOrderReview["orderFields"][number]): string {
+  const standardLabels: Record<string, string> = {
+    fullName: "الاسم",
+    phone: "الهاتف",
+    city: "المدينة",
+    address: "العنوان",
+  };
+  return standardLabels[field.key] || safeText(field.label);
+}
+
 /** Renders only detached Phase 6.3F review data; no request or session values. */
-export function renderFinalOrderReview(review: FinalOrderReview): {
+export function renderFinalOrderReview(
+  review: FinalOrderReview,
+  productContext?: Pick<ProductContext, "conversationalName" | "pluralName">,
+): {
   text: string;
   confirmationText: string;
   fallbackText: string;
   presentation: OrderConfirmationPresentation;
 } {
   const itemLines = review.items.map((item, index) =>
-    renderItem(item, index),
+    renderItem(item, index, productContext?.conversationalName),
   );
   const deliveryLines = review.orderFields.map(
-    (field) => `${safeText(field.label)}: ${safeText(field.value)}`,
+    (field) => `• ${deliveryFieldLabel(field)}: ${safeText(field.value)}`,
   );
+  const productPluralName = safeText(productContext?.pluralName || review.items[0]?.productName || "المنتجات");
   const totals = [
-    `مجموع المنتجات: ${formatMinor(review.standardSubtotalMinor, review.currency)}`,
+    `• ثمن ${productPluralName}: ${formatMinor(review.merchandiseTotalMinor, review.currency)}`,
+    `• التوصيل: ${review.deliveryFee?.type === "FREE"
+      ? "مجاني"
+      : review.deliveryFee
+        ? formatMinor(review.deliveryFee.amountMinor, review.deliveryFee.currency)
+        : "غير مذكور"}`,
+    `• المجموع: ${formatMinor(review.finalTotalMinor, review.currency)}`,
   ];
 
-  if (review.selectedOffer) {
-    totals.push(`العرض: ${safeText(review.selectedOffer.label || "العرض المختار")}`);
-    totals.push(`التخفيض: ${formatMinor(review.selectedOffer.discountMinor, review.currency)}`);
-  }
-
-  if (review.deliveryFee) {
-    totals.push(
-      review.deliveryFee.type === "FREE"
-        ? "التوصيل: مجاني"
-        : `التوصيل: ${formatMinor(review.deliveryFee.amountMinor, review.deliveryFee.currency)}`,
-    );
-  }
-  totals.push(`المجموع النهائي: ${formatMinor(review.finalTotalMinor, review.currency)}`);
-
   const text = [
-    "راجع الطلب ديالك قبل التأكيد 👇",
-    "",
-    "المنتجات:",
+    "هاهو الطلب ديالك 👇",
+    "راجعو مزيان قبل التأكيد.",
     "",
     itemLines.join("\n\n"),
-    "",
-    `عدد القطع: ${review.completedUnits}`,
     "",
     "معلومات التوصيل:",
     ...deliveryLines,
     "",
+    "الحساب:",
     ...totals,
   ].join("\n");
-  const confirmationText = "واش نأكد لك الطلب ولا بغيتي تبدل شي حاجة؟";
+  const confirmationText = "واش نأكد ليك الطلب، ولا بغيتي تعدل شي حاجة؟";
   const buttons = [
-    { id: "order_checkout:confirm", label: "أكد الطلب" },
-    { id: "order_checkout:back_to_cart", label: "بدل المنتجات" },
-    { id: "order_checkout:edit_delivery", label: "بدل التوصيل" },
+    { id: "order_checkout:confirm", label: "تأكيد الطلب" },
+    { id: "order_checkout:back_to_cart", label: "تعديل الطلب" },
+    { id: "order_checkout:edit_delivery", label: "تعديل التوصيل" },
   ];
   const fallbackText = [
     confirmationText,

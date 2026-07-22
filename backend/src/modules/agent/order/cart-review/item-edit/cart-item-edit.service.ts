@@ -67,6 +67,8 @@ function cloneState(state: CartItemEditPreviewState): CartItemEditPreviewState {
       selectedOptions: { ...state.workingItem.selectedOptions },
     },
     ...(state.awaitingTextFieldKey ? { awaitingTextFieldKey: state.awaitingTextFieldKey } : {}),
+    ...(state.focusedFieldKey ? { focusedFieldKey: state.focusedFieldKey } : {}),
+    ...(state.autoSaveOnSelection === true ? { autoSaveOnSelection: true } : {}),
   };
 }
 

@@ -50,6 +50,14 @@ function cloneState(state: CartReviewPreviewState): CartReviewPreviewState {
   };
 }
 
+function resetEditInteractionState(state: CartReviewPreviewState): CartReviewPreviewState {
+  return {
+    version: CART_REVIEW_PREVIEW_STATE_VERSION,
+    awaitingInput: { kind: "NONE" },
+    ...(state.standardAccepted ? { standardAccepted: true } : {}),
+  };
+}
+
 function cloneItemEditState(state: CartItemEditPreviewState): CartItemEditPreviewState {
   return {
     ...state,
@@ -211,6 +219,8 @@ export function runCartReviewPreview(
   const initialReviewAction = typeof input.rawActionId === "string"
     ? normalizeCartReviewAction(input.rawActionId)
     : undefined;
+  const startsFreshCartEdit = initialReviewAction?.valid && initialReviewAction.action?.type === "EDIT";
+  const activeItemEditState = startsFreshCartEdit ? undefined : input.cartItemEditPreviewState;
   const itemEditStartItemId = initialReviewAction?.valid &&
     (initialReviewAction.action?.type === "EDIT_ITEM_OPTIONS" || initialReviewAction.action?.type === "EDIT_ITEM_OPTION")
     ? initialReviewAction.action.itemId
@@ -219,12 +229,12 @@ export function runCartReviewPreview(
     ? initialReviewAction.action.fieldKey
     : undefined;
   const isExplicitItemEditControl = typeof input.rawActionId === "string" && input.rawActionId.startsWith("cart_review_item_edit:");
-  if (itemEditStartItemId || input.cartItemEditPreviewState !== undefined || isExplicitItemEditControl) {
+  if (itemEditStartItemId || activeItemEditState !== undefined || isExplicitItemEditControl) {
     const itemEdit = runCartItemEditPreview({
       previewEnabled: true,
       rawActionId: input.rawActionId,
       cartReviewText: input.cartReviewText,
-      editState: input.cartItemEditPreviewState,
+      editState: activeItemEditState,
       ...(itemEditStartItemId ? { startItemId: itemEditStartItemId } : {}),
       ...(itemEditStartFieldKey ? { startFieldKey: itemEditStartFieldKey } : {}),
       hasCartReviewConflict: previewState.awaitingInput.kind !== "NONE",
@@ -235,16 +245,30 @@ export function runCartReviewPreview(
       cart: cartBefore,
       now: input.now,
     });
+    const isItemOptionSelection = typeof input.rawActionId === "string" && input.rawActionId.startsWith("cart_item_option:");
+    const returnsToCartReview = itemEdit.nextStep === "RETURN_TO_CART_REVIEW" || itemEdit.nextStep === "REVIEW_ITEM_CHANGES";
+    const postSelectionReadiness = isItemOptionSelection && returnsToCartReview
+      ? inspectCartReviewReadiness(contextFor(input, itemEdit.cartAfter))
+      : undefined;
+    const postSelectionPresentation = postSelectionReadiness?.ready && postSelectionReadiness.review
+      ? mainPresentation({
+          review: postSelectionReadiness.review,
+          commercialState: postSelectionReadiness.commercialEvaluation?.state,
+          conversationalProductName: input.productContext.conversationalName,
+        })
+      : undefined;
     return result({
       handled: itemEdit.handled,
       success: itemEdit.success,
       changed: itemEdit.changed,
       cartBefore,
       cartAfter: itemEdit.cartAfter,
-      ...(itemEdit.review ? { review: itemEdit.review } : {}),
-      ...(itemEdit.presentation ? { presentation: itemEdit.presentation } : {}),
-      ...(itemEdit.commercialEvaluation ? { commercialEvaluation: itemEdit.commercialEvaluation } : {}),
-      previewState,
+      ...(postSelectionReadiness?.review || itemEdit.review ? { review: postSelectionReadiness?.review || itemEdit.review } : {}),
+      ...(postSelectionPresentation || itemEdit.presentation ? { presentation: postSelectionPresentation || itemEdit.presentation } : {}),
+      ...(postSelectionReadiness?.commercialEvaluation || itemEdit.commercialEvaluation ? { commercialEvaluation: postSelectionReadiness?.commercialEvaluation || itemEdit.commercialEvaluation } : {}),
+      previewState: isItemOptionSelection && returnsToCartReview
+        ? resetEditInteractionState(previewState)
+        : previewState,
       ...(itemEdit.editState ? { cartItemEditPreviewState: itemEdit.editState } : {}),
       cartItemEditPreview: itemEdit,
       ...(itemEdit.planningResult ? { planningResult: itemEdit.planningResult } : {}),
@@ -411,7 +435,7 @@ export function runCartReviewPreview(
         input.productContext.conversationalName,
       ),
       commercialEvaluation,
-      previewState: { ...previewState, awaitingInput: { kind: "NONE" } },
+      previewState: resetEditInteractionState(previewState),
       normalizedAction: action,
       nextStep: "SELECT_CART_ITEM",
       warnings: readiness.warnings,

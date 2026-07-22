@@ -310,11 +310,33 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
   }
 
   if (runtime.runtimeStage === "CART_REVIEW" || runtime.runtimeStage === "EDITING_CART_ITEM") {
+    if (message === "cart_review:edit") {
+      delete runtime.itemEditState;
+      runtime.cartReviewState = runtime.cartReviewState
+        ? {
+            version: runtime.cartReviewState.version,
+            awaitingInput: { kind: "NONE" },
+            ...(runtime.cartReviewState.standardAccepted ? { standardAccepted: true } : {}),
+          }
+        : undefined;
+    }
     const review = runCartReviewPreview({ previewEnabled: true, rawActionId: isGuardedOrderRuntimeAction(message) ? message : undefined, cartReviewText: !isGuardedOrderRuntimeAction(message) ? message : undefined, sellerId: input.sellerId, productContext, requiredFields: fields, offerLookup: offers, cart: runtime.cart, previewState: runtime.cartReviewState, cartItemEditPreviewState: runtime.itemEditState, now });
     if (!review.handled) return isGuardedOrderRuntimeAction(message) ? asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage }) : { handled: false, warnings: [] };
     runtime.cart = review.cartAfter;
     runtime.cartReviewState = review.previewState;
-    runtime.itemEditState = review.cartItemEditPreviewState;
+    const completedFocusedEdit = /^cart_item_option:(?:size|color):/u.test(message) && review.nextStep === "SHOW_CART_REVIEW";
+    if (completedFocusedEdit) {
+      delete runtime.itemEditState;
+      runtime.cartReviewState = {
+        version: review.previewState.version,
+        awaitingInput: { kind: "NONE" },
+        ...(review.previewState.standardAccepted ? { standardAccepted: true } : {}),
+      };
+    } else if (review.cartItemEditPreviewState) {
+      runtime.itemEditState = review.cartItemEditPreviewState;
+    } else {
+      delete runtime.itemEditState;
+    }
     runtime.runtimeStage = stageForCartReview(review.nextStep);
     if (review.nextStep === "DELIVERY_COLLECTION_READY") {
       const delivery = runDeliveryConfirmationPreview({ previewEnabled: true, sellerId: input.sellerId, conversationScopeId: input.conversationKey, productContext, requiredFields: fields, offerLookup: offers, deliveryPricing: sellerConfig.deliveryPolicy.pricing, cart: runtime.cart, now });

@@ -1,4 +1,5 @@
 import type { AgentReplyUiHint } from "../../reply/reply-renderer.types";
+import type { ProductContext } from "../../config/product-context.types";
 import type {
   DeliveryConfirmationPresentation,
   DeliveryRequirement,
@@ -66,15 +67,20 @@ export function buildGroupedDeliveryFieldPresentation(
   fields: readonly DeliveryRequirement[],
 ): DeliveryConfirmationPresentation {
   const labels = fields.map((field) => field.label).filter(Boolean);
+  const isStandardIdentityGroup = fields.length === 3 && ["fullName", "phone", "city"].every(
+    (key) => fields.some((field) => field.key === key),
+  );
   return result({
     kind: "COLLECT_FIELD",
     promptKey: "COLLECT_ORDER_FIELD",
-    text: [
-      "مزيان، السلة واجدة ✅",
-      "باش نكملو التوصيل، صيفط ليا فمساج واحد:",
-      "",
-      ...labels.map((label) => `• ${label}`),
-    ].join("\n"),
+    text: isStandardIdentityGroup
+      ? "مزيان 👌 دابا صيفط ليا الاسم الكامل، رقم الهاتف والمدينة باش نكملو ليك الطلب."
+      : [
+          "مزيان، السلة واجدة ✅",
+          "باش نكملو التوصيل، صيفط ليا فمساج واحد:",
+          "",
+          ...labels.map((label) => `• ${label}`),
+        ].join("\n"),
     field: { key: fields.map((field) => field.key).join(","), label: labels.join("، ") },
   });
 }
@@ -122,16 +128,17 @@ export function buildDeliveryFieldPresentation(
 
 export function buildFinalOrderReviewPresentation(
   review: FinalOrderReview,
+  productContext?: Pick<ProductContext, "conversationalName" | "pluralName">,
 ): DeliveryConfirmationPresentation {
-  const rendered = renderFinalOrderReview(review);
+  const rendered = renderFinalOrderReview(review, productContext);
   const uiHints: AgentReplyUiHint = {
     kind: "buttons",
     purpose: "delivery_confirmation",
     body: rendered.confirmationText,
     options: [
-      { id: "order_checkout:confirm", label: "أكد الطلب" },
-      { id: "order_checkout:back_to_cart", label: "بدل المنتجات" },
-      { id: "order_checkout:edit_delivery", label: "بدل التوصيل" },
+      { id: "order_checkout:confirm", label: "تأكيد الطلب" },
+      { id: "order_checkout:back_to_cart", label: "تعديل الطلب" },
+      { id: "order_checkout:edit_delivery", label: "تعديل التوصيل" },
     ],
     previewOnly: true,
   };

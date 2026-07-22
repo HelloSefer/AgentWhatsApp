@@ -84,7 +84,9 @@ function buildEditPresentation(input: {
 }): CartReviewPresentationResult {
   const fields = getItemCollectionOptionFields(input.context.requiredFields)
     .filter((field) => !input.state.focusedFieldKey || field.key === input.state.focusedFieldKey);
+  const isFocusedField = Boolean(input.state.focusedFieldKey);
   const isFocusedSize = input.state.focusedFieldKey === "size";
+  const isFocusedColor = input.state.focusedFieldKey === "color";
   const awaitingField = input.state.awaitingTextFieldKey
     ? fields.find((field) => field.key === input.state.awaitingTextFieldKey)
     : undefined;
@@ -119,10 +121,10 @@ function buildEditPresentation(input: {
         options.push({
           id,
           label: truncateItemCollectionPresentationText(
-            isFocusedSize ? sizeLabel : `${field.label || field.key}: ${canonicalValue}${current ? " (دابا)" : ""}`,
+            isFocusedField ? sizeLabel : `${field.label || field.key}: ${canonicalValue}${current ? " (دابا)" : ""}`,
             48,
           ),
-          ...(isFocusedSize ? {} : { value: canonicalValue }),
+          ...(isFocusedField ? {} : { value: canonicalValue }),
         });
       }
       continue;
@@ -150,6 +152,8 @@ function buildEditPresentation(input: {
     ...(options.length > MAX_BUTTON_OPTIONS ? { title: "بدل الاختيارات" } : {}),
     body: isFocusedSize
       ? "اختار المقاس الجديد"
+      : isFocusedColor
+        ? "اختار اللون الجديد"
       : "بدل غير الاختيار اللي بغيتي، ومن بعد حفظ التغييرات",
     options,
     previewOnly: true,
@@ -158,7 +162,11 @@ function buildEditPresentation(input: {
     success: true,
     kind: "ITEM_OPTION_EDIT",
     promptKey: "EDIT_CART_ITEM_OPTIONS",
-    text: isFocusedSize ? "اختار المقاس الجديد" : "بدل اختيارات هاد القطعة",
+    text: isFocusedSize
+      ? "اختار المقاس الجديد"
+      : isFocusedColor
+        ? "اختار اللون الجديد"
+        : "بدل اختيارات هاد القطعة",
     selectedItemId: input.state.sourceItemId,
     uiHints,
     warnings: [],
