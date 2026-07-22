@@ -456,6 +456,8 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
   }
 
   if (runtime.runtimeStage === "COLLECTING_DELIVERY" || runtime.runtimeStage === "FINAL_ORDER_REVIEW") {
+    const cartBeforeDelivery = runtime.cart;
+    const deliveryStateBefore = runtime.deliveryConfirmationState;
     const delivery = runDeliveryConfirmationPreview({ previewEnabled: true, rawActionId: isGuardedOrderRuntimeAction(message) ? message : undefined, deliveryConfirmationText: !isGuardedOrderRuntimeAction(message) ? message : undefined, previewState: runtime.deliveryConfirmationState, sellerId: input.sellerId, conversationScopeId: input.conversationKey, productContext, requiredFields: fields, offerLookup: offers, deliveryPricing: sellerConfig.deliveryPolicy.pricing, cart: runtime.cart, now, cartReviewPreviewState: runtime.cartReviewState, cartItemEditPreviewState: runtime.itemEditState });
     if (!delivery.handled) return isGuardedOrderRuntimeAction(message) ? asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage }) : { handled: false, warnings: [] };
     runtime.cart = delivery.cartAfter;
@@ -542,6 +544,10 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
             confirmationIdempotencyKey: publicOrderCode,
           });
           if (writeResult.status === "failed") {
+            runtime.cart = cartBeforeDelivery;
+            runtime.deliveryConfirmationState = deliveryStateBefore;
+            runtime.runtimeStage = "FINAL_ORDER_REVIEW";
+            await persist(input, runtime, fields);
             return {
               success: false as const,
               failureCode: "PERSISTENCE_FAILED",
