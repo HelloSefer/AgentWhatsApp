@@ -61,6 +61,17 @@ import type { CloudReplyDispatchResult } from "./cloud-reply-dispatch.types";
 import { cloudReplyDispatchService } from "./cloud-reply-dispatch.service";
 import { normalizeCloudIncomingMessage } from "./cloud-interactive-reply-normalizer.service";
 import { activateTypingIndicator, applyReplyPacing } from "./whatsapp-cloud-typing-indicator.service";
+import type {
+  WhatsAppOutboundAgentReplyCommand,
+  WhatsAppOutboundCommandResult,
+} from "./outbound-queue/whatsapp-outbound-command.types";
+import {
+  WHATSAPP_OUTBOUND_SCHEMA_VERSION,
+  type WhatsAppOutboundGroupDispatcher,
+  type WhatsAppOutboundResponseGroup,
+} from "./outbound-queue/whatsapp-outbound-job.types";
+
+export type CloudPreparedResponseGroupDispatcher = WhatsAppOutboundGroupDispatcher;
 
 const GRAPH_API_BASE_URL = "https://graph.facebook.com";
 const PREVIEW_LENGTH = 90;
@@ -165,6 +176,10 @@ type ProcessCloudWebhookOptions = {
   forceDryRun?: boolean;
   /** Internal evaluator-only document transport injection. */
   runtimeDocumentTransport?: typeof sendDocument;
+  /** Composition-owned outbound dispatch boundary. Omitted means direct Cloud dispatch. */
+  outboundGroupDispatcher?: WhatsAppOutboundGroupDispatcher;
+  /** Neutral alias used by inbound processing to avoid importing queue semantics. */
+  preparedResponseGroupDispatcher?: CloudPreparedResponseGroupDispatcher;
 };
 
 type ReplyButtonPreset = "order_confirmation" | "color_choice" | "after_price";
@@ -1661,6 +1676,62 @@ async function dispatchRuntimeReceiptArtifact(input: {
   }
 }
 
+async function stageRuntimeReceiptArtifactForOutboundQueue(input: {
+  artifact: OrderRuntimeReceiptArtifact;
+  to: string;
+  phoneNumberId: string;
+}): Promise<WhatsAppOutboundResponseGroup["commands"][number] | undefined> {
+  const target = input.to.replace(/\D/g, "");
+  const expectedTarget = input.artifact.runtimeIdentity.customerPhone.replace(/\D/g, "");
+  if (!target || target !== expectedTarget) {
+    await updateRuntimeReceiptDispatch(input.artifact, {
+      status: "FAILED",
+      failureCode: "RECIPIENT_MISMATCH",
+      failureMessage: "Receipt recipient does not match the confirmed runtime conversation",
+    });
+    return undefined;
+  }
+  const outputDir = path.resolve(getOrderReceiptOutputDir());
+  const safeFilename = path.basename(input.artifact.document.filename)
+    .replace(/[^A-Za-z0-9._-]/g, "_");
+  const filePath = path.resolve(outputDir, safeFilename);
+  if (!safeFilename || path.dirname(filePath) !== outputDir) {
+    await updateRuntimeReceiptDispatch(input.artifact, {
+      status: "FAILED",
+      failureCode: "UNSAFE_FILENAME",
+      failureMessage: "Unsafe runtime receipt filename",
+    });
+    return undefined;
+  }
+  try {
+    await fs.mkdir(outputDir, { recursive: true });
+    await fs.writeFile(filePath, input.artifact.buffer, { flag: "wx" });
+  } catch (error) {
+    await updateRuntimeReceiptDispatch(input.artifact, {
+      status: "FAILED",
+      failureCode: "TEMP_FILE_WRITE_FAILED",
+      failureMessage: error instanceof Error ? error.message : "Unable to stage receipt PDF",
+    });
+    return undefined;
+  }
+  return {
+    type: "runtime_receipt_document",
+    to: input.to,
+    phoneNumberId: input.phoneNumberId,
+    filePath,
+    filename: safeFilename,
+    caption: `هذا وصل الطلب ديالك ✅\nرقم الطلب: ${input.artifact.publicOrderCode}`,
+    runtimeDispatch: {
+      sellerId: input.artifact.runtimeIdentity.sellerId,
+      conversationKey: input.artifact.runtimeIdentity.conversationKey,
+      customerPhone: input.artifact.runtimeIdentity.customerPhone,
+      productId: input.artifact.runtimeIdentity.productId,
+      snapshotId: input.artifact.snapshotId,
+      publicOrderCode: input.artifact.publicOrderCode,
+    },
+  };
+}
+
 export async function sendOrderReceiptDocumentForOrder(input: {
   to: string;
   phoneNumberId?: string;
@@ -1884,6 +1955,122 @@ export async function sendOrderReceiptDocumentForOrder(input: {
       ...deleteResult,
     };
   }
+}
+
+export async function dispatchPreparedOutboundGroupDirectly(
+  group: WhatsAppOutboundResponseGroup,
+): Promise<{ accepted: true; duplicate: false; commandResults: WhatsAppOutboundCommandResult[] }> {
+  const commandResults: WhatsAppOutboundCommandResult[] = [];
+  for (const [index, command] of group.commands.entries()) {
+    if (command.type === "agent_reply") {
+      const result = await cloudReplyDispatchService.dispatchAgentReply({
+        to: command.to,
+        phoneNumberId: command.phoneNumberId,
+        replyText: command.replyText,
+        whatsappInteractivePreview: command.whatsappInteractivePreview,
+        interactiveSendDecision: command.interactiveSendDecision,
+        forceDryRun: command.forceDryRun,
+        cloudDryRunOverride: command.cloudDryRunOverride,
+        interactiveLiveSendAllowedOverride:
+          command.interactiveLiveSendAllowedOverride,
+        simulateNoProviderCall: command.simulateNoProviderCall,
+      });
+      commandResults.push({
+        ok: result.ok,
+        type: command.type,
+        dryRun: result.dryRun,
+        mode: result.mode,
+        error: result.error,
+      });
+      if (!result.ok) break;
+      continue;
+    }
+    if (command.type === "confirmed_order_receipt") {
+      const order = getConfirmedOrderById(command.confirmedOrderId);
+      if (!order) {
+        commandResults.push({
+          ok: false,
+          type: command.type,
+          dryRun: env.whatsappCloudDryRun,
+          mode: "document",
+          error: "Confirmed order not found",
+        });
+        break;
+      }
+      const result = await sendOrderReceiptDocumentForOrder({
+        to: command.to,
+        phoneNumberId: command.phoneNumberId,
+        order,
+      });
+      commandResults.push({
+        ok: result.success,
+        type: command.type,
+        dryRun: result.dryRun,
+        mode: result.response && typeof result.response === "object" && "skipped" in result.response
+          ? "skipped"
+          : "document",
+        error: result.errorMessage,
+      });
+      if (!result.success) break;
+      continue;
+    }
+    if (command.type === "runtime_receipt_document") {
+      try {
+        const result = await sendDocument({
+          to: command.to,
+          phoneNumberId: command.phoneNumberId,
+          filePath: command.filePath,
+          filename: command.filename,
+          caption: command.caption,
+          sendUploadFailureText: false,
+        });
+        if (result.success) {
+          await recordOrderRuntimeReceiptDispatch({
+            ...command.runtimeDispatch,
+            status: "SENT",
+            at: new Date().toISOString(),
+            cloudMessageIdMasked: getSafeCloudMessageId(result.response),
+          });
+        } else {
+          await recordOrderRuntimeReceiptDispatch({
+            ...command.runtimeDispatch,
+            status: "FAILED",
+            at: new Date().toISOString(),
+            failureCode: result.graphCode ? `CLOUD_${result.graphCode}` : "DOCUMENT_SEND_FAILED",
+            failureMessage: result.errorMessage || result.graphDetails || "Document send failed",
+          });
+        }
+        commandResults.push({
+          ok: result.success,
+          type: command.type,
+          dryRun: result.dryRun,
+          mode: "document",
+          error: result.errorMessage,
+        });
+        await fs.unlink(command.filePath).catch(() => undefined);
+        if (!result.success) break;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Document send failed";
+        await recordOrderRuntimeReceiptDispatch({
+          ...command.runtimeDispatch,
+          status: "FAILED",
+          at: new Date().toISOString(),
+          failureCode: "DOCUMENT_SEND_FAILED",
+          failureMessage: errorMessage,
+        });
+        commandResults.push({
+          ok: false,
+          type: command.type,
+          dryRun: env.whatsappCloudDryRun,
+          mode: "document",
+          error: `Command ${index + 1} failed`,
+        });
+        await fs.unlink(command.filePath).catch(() => undefined);
+        break;
+      }
+    }
+  }
+  return { accepted: true, duplicate: false, commandResults };
 }
 
 export async function sendCtaUrl(input: {
@@ -2638,6 +2825,64 @@ async function sendAgentCloudResult(input: {
   return dispatchResult;
 }
 
+function buildAgentReplyOutboundCommand(input: {
+  to: string;
+  phoneNumberId: string;
+  result: AgentResult;
+  forceDryRun?: boolean;
+  cloudDryRunOverride?: boolean;
+  interactiveLiveSendAllowedOverride?: boolean;
+  simulateNoProviderCall?: boolean;
+}): WhatsAppOutboundAgentReplyCommand {
+  return {
+    type: "agent_reply",
+    to: input.to,
+    phoneNumberId: input.phoneNumberId,
+    replyText: buildCloudInteractiveFallbackText(input.result),
+    whatsappInteractivePreview:
+      input.result.meta?.whatsappInteractivePreview ?? null,
+    interactiveSendDecision:
+      input.result.meta?.interactiveSendDecision ?? null,
+    forceDryRun: input.forceDryRun ?? env.whatsappCloudDryRun,
+    cloudDryRunOverride: input.cloudDryRunOverride,
+    interactiveLiveSendAllowedOverride: input.interactiveLiveSendAllowedOverride,
+    simulateNoProviderCall: input.simulateNoProviderCall,
+  };
+}
+
+function buildOutboundResponseGroup(input: {
+  sellerId: string;
+  conversationKey: string;
+  to: string;
+  phoneNumberId: string;
+  sourceType: WhatsAppOutboundResponseGroup["source"]["type"];
+  sourceId: string;
+  responseGroupRole: string;
+  commands: WhatsAppOutboundResponseGroup["commands"];
+}): WhatsAppOutboundResponseGroup {
+  return {
+    schemaVersion: WHATSAPP_OUTBOUND_SCHEMA_VERSION,
+    sellerId: input.sellerId,
+    conversationKey: input.conversationKey,
+    recipient: { waId: input.to },
+    sender: { phoneNumberId: input.phoneNumberId },
+    source: { type: input.sourceType, id: input.sourceId },
+    responseGroupId: `${input.sourceType}.${input.sourceId}.${input.responseGroupRole}`,
+    responseGroupRole: input.responseGroupRole,
+    createdAt: new Date().toISOString(),
+    commands: input.commands,
+  };
+}
+
+function queuedDispatchResult(mode: CloudReplyDispatchResult["mode"]): CloudReplyDispatchResult {
+  return {
+    ok: true,
+    mode,
+    dryRun: env.whatsappCloudDryRun,
+    reason: "queued_outbound_delivery",
+  };
+}
+
 export type CloudAgentDispatchFlowResult = {
   dispatchResult: CloudReplyDispatchResult;
   reviewDispatchResult?: CloudReplyDispatchResult;
@@ -2651,12 +2896,63 @@ export async function dispatchAgentResultThroughCloud(input: {
   customerId: string;
   userMessage: string;
   result: AgentResult;
+  sellerId?: string;
+  conversationKey?: string;
+  sourceMessageId?: string;
+  outboundGroupDispatcher?: WhatsAppOutboundGroupDispatcher;
   forceDryRun?: boolean;
   cloudDryRunOverride?: boolean;
   interactiveLiveSendAllowedOverride?: boolean;
   simulateNoProviderCall?: boolean;
 }): Promise<CloudAgentDispatchFlowResult> {
   const orderConfirmationMessages = getOrderConfirmationMessages(input.result);
+  if (input.outboundGroupDispatcher) {
+    const sellerId = input.sellerId || "";
+    const conversationKey = input.conversationKey || input.customerId;
+    const sourceMessageId = input.sourceMessageId || input.userMessage;
+    const commands = orderConfirmationMessages
+      ? [
+          buildAgentReplyOutboundCommand({
+            ...input,
+            result: buildTextOnlyAgentResult(
+              input.result,
+              orderConfirmationMessages.review.text,
+            ),
+          }),
+          buildAgentReplyOutboundCommand({
+            ...input,
+            result: buildOrderConfirmationCtaResult(input.result),
+          }),
+        ]
+      : [buildAgentReplyOutboundCommand(input)];
+    await input.outboundGroupDispatcher.dispatchOutboundGroup(
+      buildOutboundResponseGroup({
+        sellerId,
+        conversationKey,
+        to: input.to,
+        phoneNumberId: input.phoneNumberId,
+        sourceType: "inbound_message",
+        sourceId: sourceMessageId,
+        responseGroupRole: orderConfirmationMessages
+          ? "agent_reply.order_confirmation"
+          : "agent_reply.main",
+        commands,
+      }),
+    );
+    return {
+      dispatchResult: queuedDispatchResult(
+        input.result.meta?.interactiveSendDecision?.mode === "interactive_preview"
+          ? "interactive"
+          : "text",
+      ),
+      ...(orderConfirmationMessages
+        ? {
+            reviewDispatchResult: queuedDispatchResult("text"),
+            orderConfirmationSplit: true,
+          }
+        : { orderConfirmationSplit: false }),
+    };
+  }
 
   if (!orderConfirmationMessages) {
     return {
@@ -3309,6 +3605,11 @@ export async function processNormalizedCloudMessage(
         customerId,
         userMessage: message.text,
         result,
+        sellerId: identity.sellerId,
+        conversationKey: identity.conversationKey,
+        sourceMessageId: message.messageId,
+        outboundGroupDispatcher:
+          options.preparedResponseGroupDispatcher || options.outboundGroupDispatcher,
         forceDryRun: options.forceDryRun,
       });
       const sendResult = dispatchFlow.dispatchResult;
@@ -3373,13 +3674,50 @@ export async function processNormalizedCloudMessage(
       const runtimeReceiptArtifact = result[AGENT_INTERNAL_RECEIPT_ARTIFACT];
       if (runtimeReceiptArtifact) {
         if (sendResult.ok) {
-          const receiptDispatch = await dispatchRuntimeReceiptArtifact({
-            artifact: runtimeReceiptArtifact,
-            to: message.waId,
-            phoneNumberId: message.phoneNumberId,
-            forceDryRun: options.forceDryRun,
-            transport: options.runtimeDocumentTransport,
-          });
+          let receiptDispatch: RuntimeReceiptDispatchResult;
+          const responseGroupDispatcher =
+            options.preparedResponseGroupDispatcher || options.outboundGroupDispatcher;
+          if (responseGroupDispatcher) {
+            const command = await stageRuntimeReceiptArtifactForOutboundQueue({
+              artifact: runtimeReceiptArtifact,
+              to: message.waId,
+              phoneNumberId: message.phoneNumberId,
+            });
+            if (command) {
+              await responseGroupDispatcher.dispatchOutboundGroup(
+                buildOutboundResponseGroup({
+                  sellerId: identity.sellerId,
+                  conversationKey: identity.conversationKey,
+                  to: message.waId,
+                  phoneNumberId: message.phoneNumberId,
+                  sourceType: "runtime_receipt",
+                  sourceId: runtimeReceiptArtifact.snapshotId,
+                  responseGroupRole: "runtime_receipt_document",
+                  commands: [command],
+                }),
+              );
+              receiptDispatch = {
+                attempted: true,
+                success: true,
+                dryRun: env.whatsappCloudDryRun,
+              };
+            } else {
+              receiptDispatch = {
+                attempted: false,
+                success: false,
+                dryRun: env.whatsappCloudDryRun,
+                errorMessage: "Receipt artifact could not be staged",
+              };
+            }
+          } else {
+            receiptDispatch = await dispatchRuntimeReceiptArtifact({
+              artifact: runtimeReceiptArtifact,
+              to: message.waId,
+              phoneNumberId: message.phoneNumberId,
+              forceDryRun: options.forceDryRun,
+              transport: options.runtimeDocumentTransport,
+            });
+          }
           runtimeReceiptSuccess = receiptDispatch.success;
           perMessageResult.outboundMessages.push({
             kind: "document",
@@ -3420,18 +3758,42 @@ export async function processNormalizedCloudMessage(
           ).receipt;
 
           if (receiptConfig.enabled && receiptConfig.sendAfterConfirmation) {
-            sendOrderReceiptDocumentForOrder({
-              to: message.waId,
-              phoneNumberId: message.phoneNumberId,
-              order: confirmedOrder,
-            }).catch((error) => {
-              logJson({
-                event: "order_receipt.whatsapp.document_failed",
-                waId: maskPhone(message.waId),
-                errorMessage:
-                  error instanceof Error ? error.message : "Unknown error",
+            const responseGroupDispatcher =
+              options.preparedResponseGroupDispatcher || options.outboundGroupDispatcher;
+            if (responseGroupDispatcher) {
+              await responseGroupDispatcher.dispatchOutboundGroup(
+                buildOutboundResponseGroup({
+                  sellerId: identity.sellerId,
+                  conversationKey: identity.conversationKey,
+                  to: message.waId,
+                  phoneNumberId: message.phoneNumberId,
+                  sourceType: "confirmed_order_receipt",
+                  sourceId: confirmedOrder.id,
+                  responseGroupRole: "confirmed_order_receipt",
+                  commands: [
+                    {
+                      type: "confirmed_order_receipt",
+                      to: message.waId,
+                      phoneNumberId: message.phoneNumberId,
+                      confirmedOrderId: confirmedOrder.id,
+                    },
+                  ],
+                }),
+              );
+            } else {
+              sendOrderReceiptDocumentForOrder({
+                to: message.waId,
+                phoneNumberId: message.phoneNumberId,
+                order: confirmedOrder,
+              }).catch((error) => {
+                logJson({
+                  event: "order_receipt.whatsapp.document_failed",
+                  waId: maskPhone(message.waId),
+                  errorMessage:
+                    error instanceof Error ? error.message : "Unknown error",
+                });
               });
-            });
+            }
           } else {
             updateConfirmedOrderReceipt(confirmedOrder.id, {
               receiptSendStatus: "NOT_REQUESTED",

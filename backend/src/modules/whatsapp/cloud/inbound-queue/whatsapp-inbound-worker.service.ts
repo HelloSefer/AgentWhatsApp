@@ -11,7 +11,7 @@ import {
 import { whatsappInboundQueueDefinition } from "./whatsapp-inbound-queue.definition";
 import type { WhatsAppInboundJobData, WhatsAppInboundJobResult } from "./whatsapp-inbound-job.types";
 import { WhatsAppInboundJobValidationError } from "./whatsapp-inbound.errors";
-import { processNormalizedCloudMessage, buildCloudAgentIdentity } from "../whatsapp-cloud.service";
+import { processNormalizedCloudMessage, buildCloudAgentIdentity, type CloudPreparedResponseGroupDispatcher } from "../whatsapp-cloud.service";
 import type { WhatsAppCloudIncomingMessage } from "../whatsapp-cloud.types";
 
 function validateInboundJobData(data: unknown): WhatsAppInboundJobData {
@@ -88,13 +88,18 @@ function startLeaseRenewal(
   };
 }
 
-async function processValidatedJob(data: WhatsAppInboundJobData): Promise<WhatsAppInboundJobResult> {
+async function processValidatedJob(
+  data: WhatsAppInboundJobData,
+  options: Readonly<{ groupDispatcher?: CloudPreparedResponseGroupDispatcher }> = {},
+): Promise<WhatsAppInboundJobResult> {
   const message = jobDataToNormalizedMessage(data);
   const identity = buildCloudAgentIdentity({
     phoneNumberId: data.phoneNumberId,
     waId: data.customerPhone,
   });
-  const result = await processNormalizedCloudMessage(message, identity, {});
+  const result = await processNormalizedCloudMessage(message, identity, {
+    preparedResponseGroupDispatcher: options.groupDispatcher,
+  });
 
   return {
     ok: result.ok,
@@ -109,12 +114,13 @@ async function deferAheadOfTurnJob(job: Job<WhatsAppInboundJobData, WhatsAppInbo
 
 function createInboundProcessor(
   orderingCoordinator?: ConversationOrderingCoordinator,
+  options: Readonly<{ groupDispatcher?: CloudPreparedResponseGroupDispatcher }> = {},
 ): QueueJobProcessor<WhatsAppInboundJobData, WhatsAppInboundJobResult> {
   return async (job): Promise<WhatsAppInboundJobResult> => {
     const data = validateInboundJobData(job.data);
 
     if (data.schemaVersion !== 2 || !orderingCoordinator) {
-      return processValidatedJob(data);
+      return processValidatedJob(data, options);
     }
 
     const claimResult = await orderingCoordinator.tryClaimTurn(
@@ -134,7 +140,7 @@ function createInboundProcessor(
 
     const renewal = startLeaseRenewal(orderingCoordinator, claimResult.claim);
     try {
-      const result = await processValidatedJob(data);
+      const result = await processValidatedJob(data, options);
       if (renewal.lost()) {
         throw new Error("conversation_ordering_lease_lost");
       }
@@ -155,12 +161,17 @@ function createInboundProcessor(
 export function createWhatsAppInboundWorker(
   connectionManager: QueueConnectionManager,
   orderingCoordinator?: ConversationOrderingCoordinator,
-  options: Readonly<{ concurrency?: number }> = {},
+  options: Readonly<{
+    concurrency?: number;
+    groupDispatcher?: CloudPreparedResponseGroupDispatcher;
+  }> = {},
   queueDefinition: QueueDefinition<"whatsapp-inbound.process", WhatsAppInboundJobData, WhatsAppInboundJobResult> = whatsappInboundQueueDefinition,
 ): ManagedQueueWorker {
   return createManagedQueueWorker(
     queueDefinition,
-    createInboundProcessor(orderingCoordinator),
+    createInboundProcessor(orderingCoordinator, {
+      groupDispatcher: options.groupDispatcher,
+    }),
     connectionManager,
     options,
   );

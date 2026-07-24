@@ -20,7 +20,8 @@
     "test:persistence-runtime-order-writes": "npm run build && node dist/composition/runtime-write/testing/phase-7f3-test.command.js",
     "test:queue-infrastructure": "npm run build && node dist/infrastructure/queue/testing/phase-8a-test.command.js",
     "test:phase-8b-inbound-webhook": "npm run build && node dist/modules/whatsapp/cloud/inbound-queue/testing/phase-8b-test.command.js",
-    "test:phase-8c-conversation-ordering": "npm run build && node dist/modules/agent/conversation-ordering/testing/phase-8c-test.command.js"
+    "test:phase-8c-conversation-ordering": "npm run build && node dist/modules/agent/conversation-ordering/testing/phase-8c-test.command.js",
+    "test:phase-8d-outbound-queue": "npm run build && node dist/modules/whatsapp/cloud/outbound-queue/testing/phase-8d-test.command.js"
   },
   "keywords": [],
   "author": "",

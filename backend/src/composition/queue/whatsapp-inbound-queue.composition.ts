@@ -7,12 +7,17 @@ import {
 import { whatsappInboundQueueDefinition } from "../../modules/whatsapp/cloud/inbound-queue/whatsapp-inbound-queue.definition";
 import { WhatsAppInboundProducerService } from "../../modules/whatsapp/cloud/inbound-queue/whatsapp-inbound-producer.service";
 import { createWhatsAppInboundWorker } from "../../modules/whatsapp/cloud/inbound-queue/whatsapp-inbound-worker.service";
+import { whatsappOutboundQueueDefinition } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-queue.definition";
+import { WhatsAppOutboundProducerService } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-producer.service";
+import { createWhatsAppOutboundWorker } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-worker.service";
 import { ValkeyConversationOrderingAdapter } from "../../modules/agent/conversation-ordering";
 
 let connectionManager: QueueConnectionManager | undefined;
 let registry: QueueRegistry | undefined;
 let producer: WhatsAppInboundProducerService | undefined;
 let worker: ReturnType<typeof createWhatsAppInboundWorker> | undefined;
+let outboundProducer: WhatsAppOutboundProducerService | undefined;
+let outboundWorker: ReturnType<typeof createWhatsAppOutboundWorker> | undefined;
 let orderingCoordinator: ValkeyConversationOrderingAdapter | undefined;
 let started = false;
 
@@ -32,6 +37,10 @@ export function getWhatsAppConversationOrderingCoordinator(): ValkeyConversation
   return orderingCoordinator;
 }
 
+export function getWhatsAppOutboundProducer(): WhatsAppOutboundProducerService | undefined {
+  return outboundProducer;
+}
+
 export async function startWhatsAppInboundQueue(): Promise<void> {
   if (env.whatsappInboundQueueEnabled !== true) return;
   if (started) return;
@@ -39,14 +48,27 @@ export async function startWhatsAppInboundQueue(): Promise<void> {
   connectionManager = new QueueConnectionManager();
   registry = new QueueRegistry(connectionManager);
   registry.register(whatsappInboundQueueDefinition);
+  if (env.whatsappOutboundQueueEnabled === true) {
+    registry.register(whatsappOutboundQueueDefinition);
+  }
   orderingCoordinator =
     env.whatsappConversationOrderingEnabled === true
       ? new ValkeyConversationOrderingAdapter()
       : undefined;
   producer = new WhatsAppInboundProducerService(registry, orderingCoordinator);
+  outboundProducer = env.whatsappOutboundQueueEnabled === true
+    ? new WhatsAppOutboundProducerService(registry)
+    : undefined;
+  outboundWorker = env.whatsappOutboundQueueEnabled === true
+    ? createWhatsAppOutboundWorker(connectionManager, { concurrency: 4 })
+    : undefined;
   worker = createWhatsAppInboundWorker(connectionManager, orderingCoordinator, {
     concurrency: env.whatsappConversationOrderingEnabled === true ? 8 : undefined,
+    groupDispatcher: outboundProducer,
   });
+  if (outboundWorker) {
+    await outboundWorker.start();
+  }
   await worker.start();
   started = true;
 }
@@ -55,6 +77,11 @@ export async function shutdownWhatsAppInboundQueue(): Promise<void> {
   if (worker) {
     await worker.close();
     worker = undefined;
+  }
+
+  if (outboundWorker) {
+    await outboundWorker.close();
+    outboundWorker = undefined;
   }
 
   if (connectionManager) {
@@ -66,6 +93,7 @@ export async function shutdownWhatsAppInboundQueue(): Promise<void> {
 
   registry = undefined;
   producer = undefined;
+  outboundProducer = undefined;
   orderingCoordinator = undefined;
   started = false;
 }
