@@ -477,7 +477,7 @@ function isUnknownConfiguredPhoneNumberId(phoneNumberId: string): boolean {
   );
 }
 
-function buildCloudAgentIdentity(input: {
+export function buildCloudAgentIdentity(input: {
   phoneNumberId: string;
   waId: string;
 }): AgentIdentity {
@@ -2798,116 +2798,27 @@ function buildOrderConfirmationCombinedFallbackResult(result: AgentResult): Agen
   return buildTextOnlyAgentResult(result, combinedText);
 }
 
-export async function processCloudWebhookBody(
-  body: unknown,
-  options: ProcessCloudWebhookOptions = {},
+/**
+ * Authoritative per-message processor shared by the legacy webhook path and
+ * the queued inbound worker. Accepts a normalised incoming message and a
+ * resolved agent identity; returns the same result contract as
+ * processCloudWebhookBody for a single message.
+ */
+export async function processNormalizedCloudMessage(
+  message: WhatsAppCloudIncomingMessage,
+  identity: AgentIdentity,
+  options: ProcessCloudWebhookOptions,
 ): Promise<ProcessCloudWebhookResult> {
-  const inspection = inspectWebhookBody(body);
-
-  logJson({
-    event: "whatsapp.cloud.webhook.received",
-    object: inspection.object,
-    entriesCount: inspection.entriesCount,
-    changesCount: inspection.changesCount,
-    hasMessages: inspection.hasMessages,
-    hasStatuses: inspection.hasStatuses,
-  });
-  recordStatusWebhooks(body);
-
-  const messages = extractIncomingMessages(body);
-  recordUnsupportedMessages(body, messages);
-
-  if (!messages.length) {
-    const valueKeys = inspection.values.flatMap((value) => Object.keys(value || {}));
-    logJson({
-      event: "whatsapp.cloud.webhook.no_messages",
-      reason: inspection.hasStatuses ? "status_webhook" : "no_supported_messages",
-      valueKeys,
-    });
-    return {
-      ok: true,
-      handled: false,
-      actionsCount: 0,
-      sendAttempted: false,
-      sendSuccess: false,
-      outboundMessages: [],
-    };
-  }
-
-  const processResult: ProcessCloudWebhookResult = {
+  const customerId = identity.conversationKey;
+  const perMessageResult: ProcessCloudWebhookResult = {
     ok: true,
     handled: false,
+    identity,
     actionsCount: 0,
     sendAttempted: false,
     sendSuccess: false,
     outboundMessages: [],
   };
-
-  const prepareReply = async (
-    message: WhatsAppCloudIncomingMessage,
-    replyText: string,
-    processingDurationMs: number,
-    sellerId: string,
-    guardBlocked = false,
-  ) => {
-    const typing = await activateTypingIndicator({
-      messageId: message.messageId,
-      phoneNumberId: message.phoneNumberId,
-      messageType: message.type,
-      sellerId,
-      dryRun: options.forceDryRun === true || env.whatsappCloudDryRun,
-      guardBlocked,
-      transport: postCloudMessage,
-    });
-    if (options.forceDryRun !== true) {
-      await applyReplyPacing({
-        replyText,
-        processingDurationMs: processingDurationMs + typing.durationMs,
-      });
-    }
-    return typing;
-  };
-
-  for (const message of messages) {
-    if (
-      !options.allowUnknownPhoneNumberId &&
-      isUnknownConfiguredPhoneNumberId(message.phoneNumberId)
-    ) {
-      recordIgnoredUnknownPhoneNumberId({
-        phoneNumberId: message.phoneNumberId,
-        waId: message.waId,
-        messageId: message.messageId,
-        messageType: message.type,
-      });
-      continue;
-    }
-
-    if (message.messageId && isDuplicateMessage(message.messageId)) {
-      const now = new Date().toISOString();
-      webhookDiagnostics.totalDuplicates += 1;
-      pushDiagnosticEvent({
-        timestamp: now,
-        method: "POST",
-        path: "/api/whatsapp/cloud/webhook",
-        type: "duplicate",
-        phoneNumberId: message.phoneNumberId,
-        waIdMasked: maskPhone(message.waId),
-        messageId: message.messageId,
-        messageType: message.type,
-      });
-      logJson({
-        event: "whatsapp.cloud.webhook.duplicate",
-        messageId: message.messageId,
-      });
-      continue;
-    }
-
-    const identity = buildCloudAgentIdentity({
-      phoneNumberId: message.phoneNumberId,
-      waId: message.waId,
-    });
-    const customerId = identity.conversationKey;
-    processResult.identity = identity;
 
     const now = new Date().toISOString();
     webhookDiagnostics.lastIncomingMessageAt = now;
@@ -2956,11 +2867,34 @@ export async function processCloudWebhookBody(
       });
     }
 
+    const prepareReply = async (
+      replyText: string,
+      processingDurationMs: number,
+      guardBlocked = false,
+    ) => {
+      const typing = await activateTypingIndicator({
+        messageId: message.messageId,
+        phoneNumberId: message.phoneNumberId,
+        messageType: message.type,
+        sellerId: identity.sellerId,
+        dryRun: options.forceDryRun === true || env.whatsappCloudDryRun,
+        guardBlocked,
+        transport: postCloudMessage,
+      });
+      if (options.forceDryRun !== true) {
+        await applyReplyPacing({
+          replyText,
+          processingDurationMs: processingDurationMs + typing.durationMs,
+        });
+      }
+      return typing;
+    };
+
     try {
       const transportActionId = getAuthoritativeAgentActionId(message);
       const runtimeActionId = getGuardedRuntimeActionId(message);
-      processResult.inputSourceType = message.sourceType;
-      processResult.normalizedActionId = transportActionId;
+      perMessageResult.inputSourceType = message.sourceType;
+      perMessageResult.normalizedActionId = transportActionId;
       const firstEntryLiveSmoke = await buildFirstEntryLiveSmokeResult({
         customerPhone: identity.customerPhone,
         phoneNumberId: identity.phoneNumberId || message.phoneNumberId,
@@ -2989,12 +2923,12 @@ export async function processCloudWebhookBody(
           recipientAllowed: firstEntryLiveSmoke.readiness.recipientAllowed,
           sellerIdConfigured: firstEntryLiveSmoke.readiness.sellerIdConfigured,
         });
-        processResult.handled = false;
-        processResult.agentReplyPreview = "";
-        processResult.actionsCount = 0;
-        processResult.sendAttempted = false;
-        processResult.sendSuccess = false;
-        continue;
+        perMessageResult.handled = false;
+        perMessageResult.agentReplyPreview = "";
+        perMessageResult.actionsCount = 0;
+        perMessageResult.sendAttempted = false;
+        perMessageResult.sendSuccess = false;
+        return perMessageResult;
       }
 
       if (!firstEntryLiveSmoke.handled || bypassFirstEntryLiveSmoke) {
@@ -3035,10 +2969,8 @@ export async function processCloudWebhookBody(
           (item) => item.kind === "interactive_buttons",
         );
         await prepareReply(
-          message,
           firstEntryLiveSmoke.result.reply,
           Date.now() - startedAt,
-          identity.sellerId,
           isInteractiveLiveGuardBlocked(firstEntryLiveSmoke.result),
         );
         const firstSendResult = infoMessage
@@ -3146,7 +3078,7 @@ export async function processCloudWebhookBody(
 
 
         if (infoMessage && firstSendResult) {
-          processResult.outboundMessages.push({
+          perMessageResult.outboundMessages.push({
             kind: firstSendResult.mode === "interactive" ? "interactive" : "text",
             text: infoMessage.text,
             actionIds: [],
@@ -3155,7 +3087,7 @@ export async function processCloudWebhookBody(
           });
         }
         if (ctaMessage && shouldSendCta) {
-          processResult.outboundMessages.push({
+          perMessageResult.outboundMessages.push({
             kind: sendResult.mode === "interactive" ? "interactive" : "text",
             text: ctaMessage.text,
             actionIds: ctaMessage.buttons?.map((button) => button.id) || [],
@@ -3163,7 +3095,7 @@ export async function processCloudWebhookBody(
             success: sendResult.ok,
           });
         } else if (!infoMessage) {
-          processResult.outboundMessages.push({
+          perMessageResult.outboundMessages.push({
             kind: sendResult.mode === "interactive" ? "interactive" : "text",
             text: firstEntryLiveSmoke.result.reply,
             actionIds: getReplyActionIds(firstEntryLiveSmoke.result),
@@ -3172,16 +3104,16 @@ export async function processCloudWebhookBody(
           });
         }
 
-        processResult.handled = true;
-        processResult.agentReplyPreview = previewText(
+        perMessageResult.handled = true;
+        perMessageResult.agentReplyPreview = previewText(
           firstEntryLiveSmoke.result.reply,
         );
-        processResult.actionsCount = firstEntryLiveSmoke.result.actions.length;
-        processResult.sendAttempted = true;
-        processResult.sendSuccess = Boolean(
+        perMessageResult.actionsCount = firstEntryLiveSmoke.result.actions.length;
+        perMessageResult.sendAttempted = true;
+        perMessageResult.sendSuccess = Boolean(
           (firstSendResult?.ok ?? true) && sendResult.ok,
         );
-        continue;
+        return perMessageResult;
       }
 
       if (message.isFlowSubmission) {
@@ -3216,19 +3148,19 @@ export async function processCloudWebhookBody(
             errorMessage: webhookDiagnostics.lastFlowParseError,
           });
 
-          await prepareReply(message, fallbackText, 0, identity.sellerId);
+          await prepareReply(fallbackText, 0);
           const sendResult = await sendCloudText({
             to: message.waId,
             phoneNumberId: message.phoneNumberId,
             text: fallbackText,
           });
 
-          processResult.handled = true;
-          processResult.agentReplyPreview = previewText(fallbackText);
-          processResult.actionsCount = 0;
-          processResult.sendAttempted = true;
-          processResult.sendSuccess = sendResult.success;
-          continue;
+          perMessageResult.handled = true;
+          perMessageResult.agentReplyPreview = previewText(fallbackText);
+          perMessageResult.actionsCount = 0;
+          perMessageResult.sendAttempted = true;
+          perMessageResult.sendSuccess = sendResult.success;
+          return perMessageResult;
         }
 
         const missingFields = getFlowMissingFields(message.flowOrder);
@@ -3247,7 +3179,7 @@ export async function processCloudWebhookBody(
         });
 
         const reply = buildFlowOrderSummary(message.flowOrder);
-        await prepareReply(message, reply, 0, identity.sellerId);
+        await prepareReply(reply, 0);
         const sendResult = await sendCloudText({
           to: message.waId,
           phoneNumberId: message.phoneNumberId,
@@ -3260,12 +3192,12 @@ export async function processCloudWebhookBody(
           success: sendResult.success,
         });
 
-        processResult.handled = true;
-        processResult.agentReplyPreview = previewText(reply);
-        processResult.actionsCount = 0;
-        processResult.sendAttempted = true;
-        processResult.sendSuccess = sendResult.success;
-        continue;
+        perMessageResult.handled = true;
+        perMessageResult.agentReplyPreview = previewText(reply);
+        perMessageResult.actionsCount = 0;
+        perMessageResult.sendAttempted = true;
+        perMessageResult.sendSuccess = sendResult.success;
+        return perMessageResult;
       }
 
       if (isFlowTriggerText(message.text)) {
@@ -3275,7 +3207,7 @@ export async function processCloudWebhookBody(
           triggerTextPreview: previewText(message.text),
         });
 
-        await prepareReply(message, "باش نكملو الطلب بسرعة، عمّر هاد المعلومات:", 0, identity.sellerId);
+        await prepareReply("باش نكملو الطلب بسرعة، عمّر هاد المعلومات:", 0);
         const flowResult = await sendOrderFlow(message.waId, { customerId });
         const sendResult =
           !flowResult.success && isFlowIntegrityBlocked(flowResult)
@@ -3286,14 +3218,14 @@ export async function processCloudWebhookBody(
               })
             : flowResult;
 
-        processResult.handled = true;
-        processResult.agentReplyPreview = flowResult.success
+        perMessageResult.handled = true;
+        perMessageResult.agentReplyPreview = flowResult.success
           ? "WhatsApp Flow sent"
           : "Order form fallback sent";
-        processResult.actionsCount = 0;
-        processResult.sendAttempted = true;
-        processResult.sendSuccess = sendResult.success;
-        continue;
+        perMessageResult.actionsCount = 0;
+        perMessageResult.sendAttempted = true;
+        perMessageResult.sendSuccess = sendResult.success;
+        return perMessageResult;
       }
 
       if (
@@ -3307,7 +3239,7 @@ export async function processCloudWebhookBody(
           triggerTextPreview: previewText(message.text),
         });
 
-        await prepareReply(message, "باش نكملو الطلب بسرعة، عمّر هاد المعلومات:", 0, identity.sellerId);
+        await prepareReply("باش نكملو الطلب بسرعة، عمّر هاد المعلومات:", 0);
         const flowResult = await sendOrderFlow(message.waId, { customerId });
         const sendResult =
           !flowResult.success && isFlowIntegrityBlocked(flowResult)
@@ -3318,14 +3250,14 @@ export async function processCloudWebhookBody(
               })
             : flowResult;
 
-        processResult.handled = true;
-        processResult.agentReplyPreview = flowResult.success
+        perMessageResult.handled = true;
+        perMessageResult.agentReplyPreview = flowResult.success
           ? "WhatsApp Flow sent"
           : "Order form fallback sent";
-        processResult.actionsCount = 0;
-        processResult.sendAttempted = true;
-        processResult.sendSuccess = sendResult.success;
-        continue;
+        perMessageResult.actionsCount = 0;
+        perMessageResult.sendAttempted = true;
+        perMessageResult.sendSuccess = sendResult.success;
+        return perMessageResult;
       }
 
       // The multi-item runtime remains globally default-off. It is activated
@@ -3351,10 +3283,8 @@ export async function processCloudWebhookBody(
       });
       const durationMs = result.meta?.durationMs ?? Date.now() - startedAt;
       await prepareReply(
-        message,
         result.reply,
         durationMs,
-        identity.sellerId,
         isInteractiveLiveGuardBlocked(result),
       );
 
@@ -3386,7 +3316,7 @@ export async function processCloudWebhookBody(
 
       if (dispatchFlow.orderConfirmationSplit && splitMessages) {
         if (dispatchFlow.reviewDispatchResult) {
-          processResult.outboundMessages.push({
+          perMessageResult.outboundMessages.push({
             kind: "text",
             text: splitMessages.review.text,
             actionIds: [],
@@ -3395,7 +3325,7 @@ export async function processCloudWebhookBody(
           });
         }
         if (dispatchFlow.reviewFailureFallbackResult) {
-          processResult.outboundMessages.push({
+          perMessageResult.outboundMessages.push({
             kind: dispatchFlow.reviewFailureFallbackResult.mode === "interactive" ? "interactive" : "text",
             text: `${splitMessages.review.text}\n\n${splitMessages.confirmation.fallbackText}`,
             actionIds: [],
@@ -3403,7 +3333,7 @@ export async function processCloudWebhookBody(
             success: dispatchFlow.reviewFailureFallbackResult.ok,
           });
         } else {
-          processResult.outboundMessages.push({
+          perMessageResult.outboundMessages.push({
             kind: sendResult.mode === "interactive" ? "interactive" : "text",
             text: splitMessages.confirmation.text,
             actionIds: splitMessages.confirmation.buttons.map((button) => button.id),
@@ -3412,7 +3342,7 @@ export async function processCloudWebhookBody(
           });
         }
       } else {
-        processResult.outboundMessages.push({
+        perMessageResult.outboundMessages.push({
           kind: sendResult.mode === "interactive" ? "interactive" : "text",
           text: result.reply,
           actionIds: getReplyActionIds(result),
@@ -3434,11 +3364,11 @@ export async function processCloudWebhookBody(
         });
       }
 
-      processResult.handled = true;
-      processResult.agentSource = result.source;
-      processResult.agentReplyPreview = previewText(result.reply);
-      processResult.actionsCount = result.actions.length;
-      processResult.sendAttempted = true;
+      perMessageResult.handled = true;
+      perMessageResult.agentSource = result.source;
+      perMessageResult.agentReplyPreview = previewText(result.reply);
+      perMessageResult.actionsCount = result.actions.length;
+      perMessageResult.sendAttempted = true;
       let runtimeReceiptSuccess = true;
       const runtimeReceiptArtifact = result[AGENT_INTERNAL_RECEIPT_ARTIFACT];
       if (runtimeReceiptArtifact) {
@@ -3451,7 +3381,7 @@ export async function processCloudWebhookBody(
             transport: options.runtimeDocumentTransport,
           });
           runtimeReceiptSuccess = receiptDispatch.success;
-          processResult.outboundMessages.push({
+          perMessageResult.outboundMessages.push({
             kind: "document",
             text: `وصل الطلب ${runtimeReceiptArtifact.publicOrderCode}`,
             actionIds: [],
@@ -3471,7 +3401,7 @@ export async function processCloudWebhookBody(
           });
         }
       }
-      processResult.sendSuccess = Boolean(
+      perMessageResult.sendSuccess = Boolean(
         (dispatchFlow.reviewDispatchResult?.ok ?? true) && sendResult.ok,
       ) && runtimeReceiptSuccess;
 
@@ -3523,6 +3453,105 @@ export async function processCloudWebhookBody(
         errorMessage,
       });
     }
+  return perMessageResult;
+}
+
+export async function processCloudWebhookBody(
+  body: unknown,
+  options: ProcessCloudWebhookOptions = {},
+): Promise<ProcessCloudWebhookResult> {
+  const inspection = inspectWebhookBody(body);
+
+  logJson({
+    event: "whatsapp.cloud.webhook.received",
+    object: inspection.object,
+    entriesCount: inspection.entriesCount,
+    changesCount: inspection.changesCount,
+    hasMessages: inspection.hasMessages,
+    hasStatuses: inspection.hasStatuses,
+  });
+  recordStatusWebhooks(body);
+
+  const messages = extractIncomingMessages(body);
+  recordUnsupportedMessages(body, messages);
+
+  if (!messages.length) {
+    const valueKeys = inspection.values.flatMap((value) => Object.keys(value || {}));
+    logJson({
+      event: "whatsapp.cloud.webhook.no_messages",
+      reason: inspection.hasStatuses ? "status_webhook" : "no_supported_messages",
+      valueKeys,
+    });
+    return {
+      ok: true,
+      handled: false,
+      actionsCount: 0,
+      sendAttempted: false,
+      sendSuccess: false,
+      outboundMessages: [],
+    };
+  }
+
+  const processResult: ProcessCloudWebhookResult = {
+    ok: true,
+    handled: false,
+    actionsCount: 0,
+    sendAttempted: false,
+    sendSuccess: false,
+    outboundMessages: [],
+  };
+
+  for (const message of messages) {
+    if (
+      !options.allowUnknownPhoneNumberId &&
+      isUnknownConfiguredPhoneNumberId(message.phoneNumberId)
+    ) {
+      recordIgnoredUnknownPhoneNumberId({
+        phoneNumberId: message.phoneNumberId,
+        waId: message.waId,
+        messageId: message.messageId,
+        messageType: message.type,
+      });
+      continue;
+    }
+
+    if (message.messageId && isDuplicateMessage(message.messageId)) {
+      const now = new Date().toISOString();
+      webhookDiagnostics.totalDuplicates += 1;
+      pushDiagnosticEvent({
+        timestamp: now,
+        method: "POST",
+        path: "/api/whatsapp/cloud/webhook",
+        type: "duplicate",
+        phoneNumberId: message.phoneNumberId,
+        waIdMasked: maskPhone(message.waId),
+        messageId: message.messageId,
+        messageType: message.type,
+      });
+      logJson({
+        event: "whatsapp.cloud.webhook.duplicate",
+        messageId: message.messageId,
+      });
+      continue;
+    }
+
+    const identity = buildCloudAgentIdentity({
+      phoneNumberId: message.phoneNumberId,
+      waId: message.waId,
+    });
+
+    const messageResult = await processNormalizedCloudMessage(message, identity, options);
+
+    processResult.identity = messageResult.identity;
+    processResult.actionsCount += messageResult.actionsCount;
+    processResult.outboundMessages.push(...messageResult.outboundMessages);
+    if (messageResult.handled) processResult.handled = true;
+    if (messageResult.sendAttempted) processResult.sendAttempted = true;
+    if (messageResult.sendSuccess) processResult.sendSuccess = true;
+    if (messageResult.agentReplyPreview !== undefined) processResult.agentReplyPreview = messageResult.agentReplyPreview;
+    if (messageResult.agentSource !== undefined) processResult.agentSource = messageResult.agentSource;
+    if (messageResult.inputSourceType !== undefined) processResult.inputSourceType = messageResult.inputSourceType;
+    if (messageResult.normalizedActionId !== undefined) processResult.normalizedActionId = messageResult.normalizedActionId;
   }
 
   return processResult;

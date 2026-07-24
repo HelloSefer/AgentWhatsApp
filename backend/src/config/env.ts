@@ -107,4 +107,6 @@ export const env = {
   whatsappTypingMinDelayMs,
   whatsappTypingMaxDelayMs,
   whatsappTypingRequestTimeoutMs: Math.max(1, Math.min(5000, Number(process.env.WHATSAPP_TYPING_REQUEST_TIMEOUT_MS) || 1200)),
+  whatsappInboundQueueEnabled:
+    process.env.WHATSAPP_INBOUND_QUEUE_ENABLED === "true",
 };

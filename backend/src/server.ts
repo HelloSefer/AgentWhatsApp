@@ -4,6 +4,7 @@ import { env } from "./config/env";
 import { warmNaturalReplyModel } from "./modules/agent/natural-reply/natural-reply-generator.service";
 import { cleanupOldOrderReceiptPdfs } from "./modules/order-receipt/order-receipt.service";
 import { closeDatabasePool } from "./infrastructure/database/client/database-pool.service";
+import { startWhatsAppInboundQueue, shutdownWhatsAppInboundQueue } from "./composition/queue/whatsapp-inbound-queue.composition";
 
 const logger = pino({
   transport:
@@ -30,6 +31,14 @@ const server = app.listen(env.port, () => {
 
   if (env.whatsappProvider === "cloud_api") {
     logger.info("WhatsApp provider is Cloud API");
+
+    startWhatsAppInboundQueue().then(() => {
+      if (env.whatsappInboundQueueEnabled === true) {
+        logger.info("WhatsApp inbound queue Worker started");
+      }
+    }).catch((error) => {
+      logger.error({ error }, "Failed to start WhatsApp inbound queue Worker");
+    });
   } else {
     logger.error(
       { configuredProvider: env.whatsappProvider },
@@ -46,10 +55,11 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   logger.info({ signal }, "Shutting down backend");
   server.close(async () => {
     try {
+      await shutdownWhatsAppInboundQueue();
       await closeDatabasePool();
       process.exit(0);
     } catch {
-      logger.error("Database pool shutdown failed");
+      logger.error("Backend shutdown failed");
       process.exit(1);
     }
   });

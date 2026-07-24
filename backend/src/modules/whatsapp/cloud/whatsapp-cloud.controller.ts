@@ -12,6 +12,7 @@ import {
   buildSimulatedIncomingWebhook,
   checkSubscribedApps,
   dispatchAgentResultThroughCloud,
+  extractIncomingMessages,
   getCloudDiagnostics,
   processCloudWebhookBody,
   recordCloudWebhookVerify,
@@ -24,6 +25,29 @@ import {
   verifyWebhookSignature,
   isReplyButtonPreset,
 } from "./whatsapp-cloud.service";
+import { getWhatsAppInboundProducer } from "../../../composition/queue/whatsapp-inbound-queue.composition";
+import type { WhatsAppInboundJobData } from "./inbound-queue/whatsapp-inbound-job.types";
+import { sellerResolverService } from "../../agent/identity/seller-resolver.service";
+import { conversationKeyService } from "../../agent/identity/conversation-key.service";
+
+type WhatsAppInboundProducerProvider = typeof getWhatsAppInboundProducer;
+type CloudWebhookProcessor = typeof processCloudWebhookBody;
+
+let whatsappInboundProducerProvider: WhatsAppInboundProducerProvider =
+  getWhatsAppInboundProducer;
+let cloudWebhookProcessor: CloudWebhookProcessor = processCloudWebhookBody;
+
+export function setWhatsAppInboundProducerProviderForTesting(
+  provider: WhatsAppInboundProducerProvider | undefined,
+): void {
+  whatsappInboundProducerProvider = provider || getWhatsAppInboundProducer;
+}
+
+export function setCloudWebhookProcessorForTesting(
+  processor: CloudWebhookProcessor | undefined,
+): void {
+  cloudWebhookProcessor = processor || processCloudWebhookBody;
+}
 
 function getQueryString(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -105,9 +129,64 @@ export async function receiveWhatsAppCloudWebhook(req: Request, res: Response) {
     });
   }
 
+  if (env.whatsappInboundQueueEnabled === true) {
+    const producer = whatsappInboundProducerProvider();
+
+    if (!producer) {
+      return res.status(503).json({ ok: false });
+    }
+
+    const messages = extractIncomingMessages(req.body);
+
+    if (!messages.length) {
+      res.status(200).json({ ok: true });
+
+      cloudWebhookProcessor(req.body, {
+        publicBaseUrl: getRequestBaseUrl(req),
+      }).catch((error) => {
+        console.error(
+          JSON.stringify({
+            event: "whatsapp.cloud.error",
+            step: "webhook_background_processing",
+            errorMessage: error instanceof Error ? error.message : "Unknown error",
+          }),
+        );
+      });
+
+      return;
+    }
+
+    try {
+      for (const message of messages) {
+        const sellerId = sellerResolverService.resolveSellerIdByPhoneNumberId(message.phoneNumberId);
+        const conversationKey = conversationKeyService.buildConversationKey(sellerId, message.waId);
+
+        const jobData: WhatsAppInboundJobData = {
+          schemaVersion: 1 as const,
+          sellerId,
+          conversationKey,
+          customerPhone: message.waId,
+          phoneNumberId: message.phoneNumberId,
+          messageId: message.messageId,
+          sourceType: message.sourceType || "text",
+          text: message.text,
+          ...(message.buttonReplyId ? { buttonReplyId: message.buttonReplyId } : {}),
+          ...(message.buttonReplyTitle ? { buttonReplyTitle: message.buttonReplyTitle } : {}),
+          ...(message.timestamp ? { timestamp: message.timestamp } : {}),
+        };
+
+        await producer.enqueueInboundJob(jobData);
+      }
+
+      return res.status(200).json({ ok: true });
+    } catch (error) {
+      return res.status(503).json({ ok: false });
+    }
+  }
+
   res.status(200).json({ ok: true });
 
-  processCloudWebhookBody(req.body, {
+  cloudWebhookProcessor(req.body, {
     publicBaseUrl: getRequestBaseUrl(req),
   }).catch((error) => {
     console.error(
