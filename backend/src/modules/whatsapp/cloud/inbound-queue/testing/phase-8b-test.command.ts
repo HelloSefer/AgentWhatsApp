@@ -1193,8 +1193,9 @@ async function runFuturePhaseContainmentChecks(): Promise<void> {
     return (await Promise.all(productionFiles.map((f) => readFile(path.resolve(process.cwd(), f), "utf8")))).join("\n");
   })();
 
-  add("No per-conversation locking or ordering implementation is added",
-    !/lock|ordering|sequential|mutex|semaphore/i.test(allInboundSource));
+  add("Conversation ordering remains delegated to the Agent-owned coordinator",
+    /ConversationOrderingCoordinator/.test(allInboundSource) &&
+    !/new\s+(Map|WeakMap)|mutex|semaphore|class\s+.*Ordering/i.test(allInboundSource));
 
   add("No outbound queue, Outbox, migration, Shipping, Campaign, Auth, Dashboard, or unrelated feature is added",
     !/outbound|outbox|migration|shipping|campaign|auth|dashboard/i.test(allInboundSource) &&

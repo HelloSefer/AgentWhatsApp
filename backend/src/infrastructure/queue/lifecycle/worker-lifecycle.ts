@@ -10,6 +10,10 @@ export type ManagedQueueWorker = Readonly<{
   isStarted: () => boolean;
 }>;
 
+export type ManagedQueueWorkerOptions = Readonly<{
+  concurrency?: number;
+}>;
+
 export function createManagedQueueWorker<
   TJobName extends string,
   TData extends Record<string, unknown>,
@@ -18,6 +22,7 @@ export function createManagedQueueWorker<
   definition: QueueDefinition<TJobName, TData, TResult>,
   processor: QueueJobProcessor<TData, TResult>,
   connectionManager: QueueConnectionManager = getDefaultQueueConnectionManager(),
+  workerOptions: ManagedQueueWorkerOptions = {},
 ): ManagedQueueWorker {
   let worker: Worker<TData, TResult, TJobName> | undefined;
   let started = false;
@@ -28,6 +33,7 @@ export function createManagedQueueWorker<
     const configuration = getQueueConfiguration();
     const options: WorkerOptions = {
       autorun: false,
+      ...(workerOptions.concurrency ? { concurrency: workerOptions.concurrency } : {}),
       connection: connectionManager.createConnection("worker"),
       prefix: configuration.keyPrefix,
     };
