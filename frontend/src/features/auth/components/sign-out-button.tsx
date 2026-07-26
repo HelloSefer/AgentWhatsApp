@@ -1,12 +1,20 @@
+"use client";
+
 import { buttonVariants } from "@/components/ui/button";
-import { signOutFromDashboard } from "../actions/auth-actions";
+import { useLogoutMutation } from "../hooks/use-auth-session";
 
 export function SignOutButton() {
+  const logout = useLogoutMutation();
+
   return (
-    <form action={signOutFromDashboard}>
-      <button className={buttonVariants({ variant: "outline", className: "h-10 px-4" })} type="submit">
-        Sign out
-      </button>
-    </form>
+    <button
+      aria-busy={logout.isPending}
+      className={buttonVariants({ variant: "outline", className: "h-10 px-4" })}
+      disabled={logout.isPending}
+      onClick={() => logout.mutate()}
+      type="button"
+    >
+      {logout.isPending ? "Signing out..." : "Sign out"}
+    </button>
   );
 }

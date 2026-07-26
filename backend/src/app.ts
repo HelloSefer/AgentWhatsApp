@@ -33,7 +33,7 @@ app.use("/", healthRoutes);
 app.use("/", legalRoutes);
 app.use("/", orderFormRoutes);
 app.use("/", orderReceiptRoutes);
-app.use("/api/ai", aiRoutes);
+app.use("/api/ai", aiRoutes);                                   
 app.use("/api/agent", agentRoutes);
 app.use("/api/agent/conversation-config", conversationConfigRoutes);
 app.use("/api/agent", intentRouterRoutes);

@@ -1,16 +1,11 @@
-import Image from "next/image";
+"use client";
+
 import { SignOutButton } from "./sign-out-button";
+import { useAuthSession } from "../hooks/use-auth-session";
 
-type DashboardEntryProps = Readonly<{
-  user: Readonly<{
-    name?: string | null;
-    email?: string | null;
-    image?: string | null;
-  }>;
-}>;
-
-export function DashboardEntry({ user }: DashboardEntryProps) {
-  const userName = user.name || "there";
+export function DashboardEntry() {
+  const { isAuthenticated, isLoading, memberships, needsOnboarding, user } = useAuthSession();
+  const userName = user?.emailNormalized || "there";
   const initial = userName.charAt(0).toUpperCase();
 
   return (
@@ -25,26 +20,21 @@ export function DashboardEntry({ user }: DashboardEntryProps) {
             Your full sales workspace will be built in the next phase.
           </p>
         </div>
-        <SignOutButton />
+        {isAuthenticated ? <SignOutButton /> : null}
       </div>
-      <div className="mt-8 flex items-center gap-4 rounded-xl border border-marketing-border bg-marketing-canvas p-4">
-        {user.image ? (
-          <Image
-            alt={`Profile for ${userName}`}
-            className="size-12 rounded-full border border-marketing-border object-cover"
-            height={48}
-            src={user.image}
-            unoptimized
-            width={48}
-          />
-        ) : (
-          <span aria-hidden="true" className="flex size-12 items-center justify-center rounded-full bg-marketing-subtle text-base font-semibold text-marketing-primary">
-            {initial}
-          </span>
-        )}
+      <div className="mt-8 flex items-center gap-4 rounded-xl border border-marketing-border bg-marketing-canvas p-4" aria-busy={isLoading}>
+        <span aria-hidden="true" className="flex size-12 shrink-0 items-center justify-center rounded-full bg-marketing-subtle text-base font-semibold text-marketing-primary">
+          {isLoading ? "" : initial}
+        </span>
         <div className="min-w-0">
-          <p className="truncate font-semibold text-foreground">{userName}</p>
-          {user.email ? <p className="truncate text-sm text-muted-foreground">{user.email}</p> : null}
+          <p className="truncate font-semibold text-foreground">
+            {isLoading ? "Checking your session..." : isAuthenticated ? userName : "Not signed in"}
+          </p>
+          <p className="truncate text-sm text-muted-foreground">
+            {isAuthenticated
+              ? `${memberships.length} active membership${memberships.length === 1 ? "" : "s"}${needsOnboarding ? " · onboarding needed" : ""}`
+              : "Log in to load your workspace session."}
+          </p>
         </div>
       </div>
     </section>

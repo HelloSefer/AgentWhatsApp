@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { LockKeyhole } from "lucide-react";
 import type { AuthScreenContent, AuthScreenMode } from "../config/auth-screen-content";
+import { AuthForm } from "./auth-form";
 import { GoogleAuthButton } from "./google-auth-button";
 
 type AuthPanelProps = Readonly<{
@@ -27,9 +28,15 @@ export function AuthPanel({ mode, content, hasSignInError }: AuthPanelProps) {
       <div className="mt-8">
         <GoogleAuthButton label={content.googleActionLabel} />
       </div>
+      <div className="mt-6 flex items-center gap-3" aria-hidden="true">
+        <span className="h-px flex-1 bg-marketing-border" />
+        <span className="text-xs font-medium text-muted-foreground">or</span>
+        <span className="h-px flex-1 bg-marketing-border" />
+      </div>
+      <AuthForm mode={mode} />
       <p className="mt-6 flex gap-2.5 text-xs leading-5 text-muted-foreground">
         <LockKeyhole aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-marketing-primary" />
-        Google handles authentication securely. AgentWhatsApp never receives your Google password.
+        AgentWhatsApp uses secure HTTP-only backend sessions. Passwords and Google sign-in are handled by the backend.
       </p>
       <p className="mt-8 border-t border-marketing-border pt-6 text-sm text-muted-foreground">
         {content.alternatePrompt}{" "}

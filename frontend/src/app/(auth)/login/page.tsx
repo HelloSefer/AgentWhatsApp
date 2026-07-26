@@ -1,6 +1,4 @@
-import { auth } from "@/auth";
 import { AuthScreen } from "@/features/auth/components/auth-screen";
-import { redirect } from "next/navigation";
 
 type LoginPageProps = Readonly<{
   searchParams: Promise<{
@@ -9,12 +7,6 @@ type LoginPageProps = Readonly<{
 }>;
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const session = await auth();
-
-  if (session?.user) {
-    redirect("/dashboard");
-  }
-
   const { error } = await searchParams;
 
   return <AuthScreen hasSignInError={Boolean(error)} mode="login" />;
