@@ -299,6 +299,18 @@ export class PostgreSqlAuthRepository implements AuthRepositories {
     }
   }
 
+  async revokeActiveSessionsForUser(userId: string, revokedAt: Date, options?: RepositoryOptions): Promise<number> {
+    try {
+      const result = await executor(options).execute({
+        text: "UPDATE auth_sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL",
+        values: [validateAuthId(userId), validateExpiry(revokedAt)],
+      });
+      return result.rowCount;
+    } catch (error) {
+      mapUniqueOrPersistence(error);
+    }
+  }
+
   async createEmailVerificationToken(input: Readonly<{ tokenId: string; userId: string; tokenHash: string; emailNormalized: string; expiresAt: Date }>, options?: RepositoryOptions): Promise<EmailVerificationToken> {
     try {
       const result = await executor(options).execute<EmailTokenRow>({
@@ -323,7 +335,10 @@ export class PostgreSqlAuthRepository implements AuthRepositories {
 
   async markEmailVerificationTokenUsed(tokenId: string, usedAt: Date, options?: RepositoryOptions): Promise<EmailVerificationToken> {
     try {
-      const result = await executor(options).execute<EmailTokenRow>({ text: `UPDATE email_verification_tokens SET used_at = $2 WHERE token_id = $1 RETURNING ${emailTokenColumns}`, values: [validateAuthId(tokenId), validateExpiry(usedAt)] });
+      const result = await executor(options).execute<EmailTokenRow>({
+        text: `UPDATE email_verification_tokens SET used_at = $2 WHERE token_id = $1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > NOW() RETURNING ${emailTokenColumns}`,
+        values: [validateAuthId(tokenId), validateExpiry(usedAt)],
+      });
       if (!result.rows[0]) throw new AuthNotFoundError();
       return mapEmailToken(result.rows[0]);
     } catch (error) {
@@ -336,6 +351,18 @@ export class PostgreSqlAuthRepository implements AuthRepositories {
       const result = await executor(options).execute<EmailTokenRow>({ text: `UPDATE email_verification_tokens SET revoked_at = $2 WHERE token_id = $1 RETURNING ${emailTokenColumns}`, values: [validateAuthId(tokenId), validateExpiry(revokedAt)] });
       if (!result.rows[0]) throw new AuthNotFoundError();
       return mapEmailToken(result.rows[0]);
+    } catch (error) {
+      mapUniqueOrPersistence(error);
+    }
+  }
+
+  async revokeActiveEmailVerificationTokensForUser(userId: string, revokedAt: Date, options?: RepositoryOptions): Promise<number> {
+    try {
+      const result = await executor(options).execute({
+        text: "UPDATE email_verification_tokens SET revoked_at = $2 WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL",
+        values: [validateAuthId(userId), validateExpiry(revokedAt)],
+      });
+      return result.rowCount;
     } catch (error) {
       mapUniqueOrPersistence(error);
     }
@@ -365,7 +392,10 @@ export class PostgreSqlAuthRepository implements AuthRepositories {
 
   async markPasswordResetTokenUsed(tokenId: string, usedAt: Date, options?: RepositoryOptions): Promise<PasswordResetToken> {
     try {
-      const result = await executor(options).execute<ResetTokenRow>({ text: `UPDATE password_reset_tokens SET used_at = $2 WHERE token_id = $1 RETURNING ${resetTokenColumns}`, values: [validateAuthId(tokenId), validateExpiry(usedAt)] });
+      const result = await executor(options).execute<ResetTokenRow>({
+        text: `UPDATE password_reset_tokens SET used_at = $2 WHERE token_id = $1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > NOW() RETURNING ${resetTokenColumns}`,
+        values: [validateAuthId(tokenId), validateExpiry(usedAt)],
+      });
       if (!result.rows[0]) throw new AuthNotFoundError();
       return mapResetToken(result.rows[0]);
     } catch (error) {
@@ -378,6 +408,18 @@ export class PostgreSqlAuthRepository implements AuthRepositories {
       const result = await executor(options).execute<ResetTokenRow>({ text: `UPDATE password_reset_tokens SET revoked_at = $2 WHERE token_id = $1 RETURNING ${resetTokenColumns}`, values: [validateAuthId(tokenId), validateExpiry(revokedAt)] });
       if (!result.rows[0]) throw new AuthNotFoundError();
       return mapResetToken(result.rows[0]);
+    } catch (error) {
+      mapUniqueOrPersistence(error);
+    }
+  }
+
+  async revokeActivePasswordResetTokensForUser(userId: string, revokedAt: Date, options?: RepositoryOptions): Promise<number> {
+    try {
+      const result = await executor(options).execute({
+        text: "UPDATE password_reset_tokens SET revoked_at = $2 WHERE user_id = $1 AND used_at IS NULL AND revoked_at IS NULL",
+        values: [validateAuthId(userId), validateExpiry(revokedAt)],
+      });
+      return result.rowCount;
     } catch (error) {
       mapUniqueOrPersistence(error);
     }

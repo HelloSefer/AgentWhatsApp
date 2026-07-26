@@ -44,6 +44,7 @@ export interface AuthSessionRepository {
   createSession(input: Readonly<{ sessionId: string; userId: string; sessionTokenHash: string; expiresAt: Date }>, options?: RepositoryOptions): Promise<AuthSession>;
   findSessionByTokenHash(sessionTokenHash: string, options?: RepositoryOptions): Promise<AuthSession | null>;
   revokeSession(sessionId: string, revokedAt: Date, options?: RepositoryOptions): Promise<AuthSession>;
+  revokeActiveSessionsForUser(userId: string, revokedAt: Date, options?: RepositoryOptions): Promise<number>;
 }
 
 export interface EmailVerificationTokenRepository {
@@ -51,6 +52,7 @@ export interface EmailVerificationTokenRepository {
   findEmailVerificationTokenByHash(tokenHash: string, options?: RepositoryOptions): Promise<EmailVerificationToken | null>;
   markEmailVerificationTokenUsed(tokenId: string, usedAt: Date, options?: RepositoryOptions): Promise<EmailVerificationToken>;
   revokeEmailVerificationToken(tokenId: string, revokedAt: Date, options?: RepositoryOptions): Promise<EmailVerificationToken>;
+  revokeActiveEmailVerificationTokensForUser(userId: string, revokedAt: Date, options?: RepositoryOptions): Promise<number>;
 }
 
 export interface PasswordResetTokenRepository {
@@ -58,6 +60,7 @@ export interface PasswordResetTokenRepository {
   findPasswordResetTokenByHash(tokenHash: string, options?: RepositoryOptions): Promise<PasswordResetToken | null>;
   markPasswordResetTokenUsed(tokenId: string, usedAt: Date, options?: RepositoryOptions): Promise<PasswordResetToken>;
   revokePasswordResetToken(tokenId: string, revokedAt: Date, options?: RepositoryOptions): Promise<PasswordResetToken>;
+  revokeActivePasswordResetTokensForUser(userId: string, revokedAt: Date, options?: RepositoryOptions): Promise<number>;
 }
 
 export interface SellerMembershipRepository {

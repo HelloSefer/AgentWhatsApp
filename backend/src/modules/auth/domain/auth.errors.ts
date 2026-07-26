@@ -31,6 +31,20 @@ export class AuthInvalidCredentialsError extends AuthDomainError {
   }
 }
 
+export class AuthInvalidTokenError extends AuthDomainError {
+  constructor() {
+    super("Auth token is invalid or expired.");
+    this.name = "AuthInvalidTokenError";
+  }
+}
+
+export class AuthEmailDeliveryError extends AuthDomainError {
+  constructor(cause?: unknown) {
+    super("Auth email delivery failed.", cause);
+    this.name = "AuthEmailDeliveryError";
+  }
+}
+
 export class AuthNotFoundError extends AuthDomainError {
   constructor() {
     super("Auth record was not found.");

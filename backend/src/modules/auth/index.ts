@@ -1,3 +1,12 @@
+export { AccountRecoveryService } from "./application/account-recovery.service";
+export type {
+  AccountRecoveryConfirmResult,
+  AccountRecoveryRequestResult,
+  ConfirmEmailVerificationInput,
+  ConfirmPasswordResetInput,
+  RequestEmailVerificationInput,
+  RequestPasswordResetInput,
+} from "./application/account-recovery.types";
 export type {
   AuthRepositories,
   AuthSessionRepository,
@@ -9,6 +18,7 @@ export type {
   RepositoryOptions,
   SellerMembershipRepository,
 } from "./contracts/auth.repository";
+export type { AuthEmailSender, AuthEmailVerificationMessage, AuthPasswordResetMessage } from "./contracts/auth-email.sender";
 export type {
   AuthRole,
   AuthSession,
@@ -32,7 +42,7 @@ export {
   validateProviderSubject,
   validateSellerMembershipSellerId,
 } from "./domain/auth.validation";
-export { AuthAlreadyExistsError, AuthInvalidCredentialsError, AuthNotFoundError, AuthPersistenceError, AuthValidationError } from "./domain/auth.errors";
+export { AuthAlreadyExistsError, AuthEmailDeliveryError, AuthInvalidCredentialsError, AuthInvalidTokenError, AuthNotFoundError, AuthPersistenceError, AuthValidationError } from "./domain/auth.errors";
 export { PostgreSqlAuthRepository, postgreSqlAuthRepository } from "./infrastructure/postgresql/postgresql-auth.repository";
 export { PasswordAuthService } from "./application/password-auth.service";
 export type { PasswordAuthUserResult, PasswordLoginInput, PasswordSignupInput } from "./application/password-auth.types";

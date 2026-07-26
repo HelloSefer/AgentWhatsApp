@@ -13,7 +13,7 @@ import type { PasswordAuthUserResult, PasswordLoginInput, PasswordSignupInput } 
 const MIN_PASSWORD_LENGTH = 12;
 const MAX_PASSWORD_LENGTH = 256;
 
-function validatePassword(value: unknown): string {
+export function validatePassword(value: unknown): string {
   if (typeof value !== "string") throw new AuthValidationError();
   if (
     value.length < MIN_PASSWORD_LENGTH ||
