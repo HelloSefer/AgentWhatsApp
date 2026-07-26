@@ -27,7 +27,8 @@
     "test:phase-8g-runtime-cutover": "npm run build && node dist/composition/queue/testing/phase-8g-runtime-cutover-test.command.js",
     "test:phase-9a-auth-foundation": "npm run build && node dist/modules/auth/testing/phase-9a-auth-foundation-test.command.js",
     "test:phase-9b-password-auth": "npm run build && node dist/modules/auth/testing/phase-9b-password-auth-test.command.js",
-    "test:phase-9c-account-recovery": "npm run build && node dist/modules/auth/testing/phase-9c-account-recovery-test.command.js"
+    "test:phase-9c-account-recovery": "npm run build && node dist/modules/auth/testing/phase-9c-account-recovery-test.command.js",
+    "test:phase-9d-auth-sessions-http": "npm run build && node dist/modules/auth/testing/phase-9d-auth-sessions-http-test.command.js"
   },
   "keywords": [],
   "author": "",

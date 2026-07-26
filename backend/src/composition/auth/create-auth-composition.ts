@@ -1,4 +1,4 @@
-import { AccountRecoveryService, PasswordAuthService, PostgreSqlAuthRepository, type AuthEmailSender } from "../../modules/auth";
+import { AccountRecoveryService, PasswordAuthService, PostgreSqlAuthRepository, SessionAuthService, type AuthEmailSender } from "../../modules/auth";
 import type { AuthComposition } from "./auth-composition.types";
 
 const noopAuthEmailSender: AuthEmailSender = Object.freeze({
@@ -12,9 +12,11 @@ const noopAuthEmailSender: AuthEmailSender = Object.freeze({
  */
 export function createAuthComposition(emailSender: AuthEmailSender = noopAuthEmailSender): AuthComposition {
   const authRepositories = new PostgreSqlAuthRepository();
+  const passwordAuthService = new PasswordAuthService(authRepositories);
   return Object.freeze({
     authRepositories,
-    passwordAuthService: new PasswordAuthService(authRepositories),
+    passwordAuthService,
     accountRecoveryService: new AccountRecoveryService(authRepositories, emailSender),
+    sessionAuthService: new SessionAuthService(authRepositories, passwordAuthService),
   });
 }

@@ -289,6 +289,24 @@ export class PostgreSqlAuthRepository implements AuthRepositories {
     }
   }
 
+  async touchSession(sessionId: string, seenAt: Date, options?: RepositoryOptions): Promise<AuthSession> {
+    try {
+      const result = await executor(options).execute<SessionRow>({
+        text: `UPDATE auth_sessions SET last_seen_at = $2 WHERE session_id = $1 AND (last_seen_at IS NULL OR last_seen_at < $2::timestamptz - INTERVAL '5 minutes') RETURNING ${sessionColumns}`,
+        values: [validateAuthId(sessionId), validateExpiry(seenAt)],
+      });
+      if (result.rows[0]) return mapSession(result.rows[0]);
+      const existing = await executor(options).execute<SessionRow>({
+        text: `SELECT ${sessionColumns} FROM auth_sessions WHERE session_id = $1 LIMIT 1`,
+        values: [validateAuthId(sessionId)],
+      });
+      if (!existing.rows[0]) throw new AuthNotFoundError();
+      return mapSession(existing.rows[0]);
+    } catch (error) {
+      mapUniqueOrPersistence(error);
+    }
+  }
+
   async revokeSession(sessionId: string, revokedAt: Date, options?: RepositoryOptions): Promise<AuthSession> {
     try {
       const result = await executor(options).execute<SessionRow>({ text: `UPDATE auth_sessions SET revoked_at = $2 WHERE session_id = $1 RETURNING ${sessionColumns}`, values: [validateAuthId(sessionId), validateExpiry(revokedAt)] });

@@ -43,6 +43,7 @@ export interface ExternalIdentityRepository {
 export interface AuthSessionRepository {
   createSession(input: Readonly<{ sessionId: string; userId: string; sessionTokenHash: string; expiresAt: Date }>, options?: RepositoryOptions): Promise<AuthSession>;
   findSessionByTokenHash(sessionTokenHash: string, options?: RepositoryOptions): Promise<AuthSession | null>;
+  touchSession(sessionId: string, seenAt: Date, options?: RepositoryOptions): Promise<AuthSession>;
   revokeSession(sessionId: string, revokedAt: Date, options?: RepositoryOptions): Promise<AuthSession>;
   revokeActiveSessionsForUser(userId: string, revokedAt: Date, options?: RepositoryOptions): Promise<number>;
 }

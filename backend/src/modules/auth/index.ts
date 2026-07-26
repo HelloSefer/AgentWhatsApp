@@ -46,3 +46,5 @@ export { AuthAlreadyExistsError, AuthEmailDeliveryError, AuthInvalidCredentialsE
 export { PostgreSqlAuthRepository, postgreSqlAuthRepository } from "./infrastructure/postgresql/postgresql-auth.repository";
 export { PasswordAuthService } from "./application/password-auth.service";
 export type { PasswordAuthUserResult, PasswordLoginInput, PasswordSignupInput } from "./application/password-auth.types";
+export { AUTH_SESSION_TTL_MS, SessionAuthService } from "./application/session-auth.service";
+export type { AuthenticatedMembership, AuthenticatedPrincipal, CurrentUserResult, SanitizedAuthUser, SessionIssueResult } from "./application/session-auth.types";
