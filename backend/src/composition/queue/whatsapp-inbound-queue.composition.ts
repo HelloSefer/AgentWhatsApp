@@ -5,12 +5,16 @@ import {
   shutdownQueueInfrastructure,
 } from "../../infrastructure/queue";
 import { whatsappInboundQueueDefinition } from "../../modules/whatsapp/cloud/inbound-queue/whatsapp-inbound-queue.definition";
+import { whatsappInboundDlqDefinition } from "../../modules/whatsapp/cloud/inbound-queue/whatsapp-inbound-dlq.definition";
 import { WhatsAppInboundProducerService } from "../../modules/whatsapp/cloud/inbound-queue/whatsapp-inbound-producer.service";
 import { createWhatsAppInboundWorker } from "../../modules/whatsapp/cloud/inbound-queue/whatsapp-inbound-worker.service";
+import { WHATSAPP_INBOUND_RETRY_ATTEMPTS } from "../../modules/whatsapp/cloud/inbound-queue/whatsapp-inbound-queue.definition";
 import { whatsappOutboundQueueDefinition } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-queue.definition";
+import { whatsappOutboundDlqDefinition } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-dlq.definition";
 import { WhatsAppOutboundProducerService } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-producer.service";
 import { createWhatsAppOutboundWorker } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-worker.service";
 import { ValkeyConversationOrderingAdapter } from "../../modules/agent/conversation-ordering";
+import { WhatsAppDlqPublisher } from "../../modules/whatsapp/cloud/queue-reliability/whatsapp-dlq.publisher";
 
 let connectionManager: QueueConnectionManager | undefined;
 let registry: QueueRegistry | undefined;
@@ -19,6 +23,8 @@ let worker: ReturnType<typeof createWhatsAppInboundWorker> | undefined;
 let outboundProducer: WhatsAppOutboundProducerService | undefined;
 let outboundWorker: ReturnType<typeof createWhatsAppOutboundWorker> | undefined;
 let orderingCoordinator: ValkeyConversationOrderingAdapter | undefined;
+let inboundDlqPublisher: WhatsAppDlqPublisher | undefined;
+let outboundDlqPublisher: WhatsAppDlqPublisher | undefined;
 let started = false;
 
 export function getWhatsAppInboundProducer(): WhatsAppInboundProducerService | undefined {
@@ -48,8 +54,16 @@ export async function startWhatsAppInboundQueue(): Promise<void> {
   connectionManager = new QueueConnectionManager();
   registry = new QueueRegistry(connectionManager);
   registry.register(whatsappInboundQueueDefinition);
+  if (env.whatsappQueueRetriesDlqEnabled === true) {
+    registry.register(whatsappInboundDlqDefinition);
+    inboundDlqPublisher = new WhatsAppDlqPublisher(registry, whatsappInboundDlqDefinition);
+  }
   if (env.whatsappOutboundQueueEnabled === true) {
     registry.register(whatsappOutboundQueueDefinition);
+    if (env.whatsappQueueRetriesDlqEnabled === true) {
+      registry.register(whatsappOutboundDlqDefinition);
+      outboundDlqPublisher = new WhatsAppDlqPublisher(registry, whatsappOutboundDlqDefinition);
+    }
   }
   orderingCoordinator =
     env.whatsappConversationOrderingEnabled === true
@@ -60,11 +74,13 @@ export async function startWhatsAppInboundQueue(): Promise<void> {
     ? new WhatsAppOutboundProducerService(registry)
     : undefined;
   outboundWorker = env.whatsappOutboundQueueEnabled === true
-    ? createWhatsAppOutboundWorker(connectionManager, { concurrency: 4 })
+    ? createWhatsAppOutboundWorker(connectionManager, { concurrency: 4, dlqPublisher: outboundDlqPublisher })
     : undefined;
   worker = createWhatsAppInboundWorker(connectionManager, orderingCoordinator, {
     concurrency: env.whatsappConversationOrderingEnabled === true ? 8 : undefined,
     groupDispatcher: outboundProducer,
+    dlqPublisher: inboundDlqPublisher,
+    maxAttempts: WHATSAPP_INBOUND_RETRY_ATTEMPTS,
   });
   if (outboundWorker) {
     await outboundWorker.start();
@@ -94,6 +110,8 @@ export async function shutdownWhatsAppInboundQueue(): Promise<void> {
   registry = undefined;
   producer = undefined;
   outboundProducer = undefined;
+  inboundDlqPublisher = undefined;
+  outboundDlqPublisher = undefined;
   orderingCoordinator = undefined;
   started = false;
 }

@@ -1959,9 +1959,15 @@ export async function sendOrderReceiptDocumentForOrder(input: {
 
 export async function dispatchPreparedOutboundGroupDirectly(
   group: WhatsAppOutboundResponseGroup,
+  options: Readonly<{
+    startCommandIndex?: number;
+    onCommandSuccess?: (nextCommandIndex: number) => Promise<void>;
+  }> = {},
 ): Promise<{ accepted: true; duplicate: false; commandResults: WhatsAppOutboundCommandResult[] }> {
   const commandResults: WhatsAppOutboundCommandResult[] = [];
-  for (const [index, command] of group.commands.entries()) {
+  const startCommandIndex = Math.max(0, Math.min(group.commands.length, options.startCommandIndex || 0));
+  for (let index = startCommandIndex; index < group.commands.length; index += 1) {
+    const command = group.commands[index];
     if (command.type === "agent_reply") {
       const result = await cloudReplyDispatchService.dispatchAgentReply({
         to: command.to,
@@ -1983,6 +1989,7 @@ export async function dispatchPreparedOutboundGroupDirectly(
         error: result.error,
       });
       if (!result.ok) break;
+      await options.onCommandSuccess?.(index + 1);
       continue;
     }
     if (command.type === "confirmed_order_receipt") {
@@ -2012,6 +2019,7 @@ export async function dispatchPreparedOutboundGroupDirectly(
         error: result.errorMessage,
       });
       if (!result.success) break;
+      await options.onCommandSuccess?.(index + 1);
       continue;
     }
     if (command.type === "runtime_receipt_document") {
@@ -2049,6 +2057,7 @@ export async function dispatchPreparedOutboundGroupDirectly(
         });
         await fs.unlink(command.filePath).catch(() => undefined);
         if (!result.success) break;
+        await options.onCommandSuccess?.(index + 1);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Document send failed";
         await recordOrderRuntimeReceiptDispatch({

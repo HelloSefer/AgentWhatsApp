@@ -1,4 +1,4 @@
-import { DelayedError } from "bullmq";
+import { DelayedError, UnrecoverableError } from "bullmq";
 import type { Job } from "bullmq";
 import type { QueueConnectionManager, QueueDefinition, QueueJobProcessor } from "../../../../infrastructure/queue";
 import { createManagedQueueWorker, type ManagedQueueWorker } from "../../../../infrastructure/queue";
@@ -11,6 +11,13 @@ import {
 import { whatsappInboundQueueDefinition } from "./whatsapp-inbound-queue.definition";
 import type { WhatsAppInboundJobData, WhatsAppInboundJobResult } from "./whatsapp-inbound-job.types";
 import { WhatsAppInboundJobValidationError } from "./whatsapp-inbound.errors";
+import {
+  buildInboundDlqEnvelope,
+  classifyInboundFailure,
+  handleInboundFailure,
+} from "./whatsapp-inbound-reliability";
+import { WhatsAppQueueReliabilityError } from "../queue-reliability/whatsapp-queue-reliability.types";
+import type { WhatsAppDlqPublisher } from "../queue-reliability/whatsapp-dlq.publisher";
 import { processNormalizedCloudMessage, buildCloudAgentIdentity, type CloudPreparedResponseGroupDispatcher } from "../whatsapp-cloud.service";
 import type { WhatsAppCloudIncomingMessage } from "../whatsapp-cloud.types";
 
@@ -114,13 +121,38 @@ async function deferAheadOfTurnJob(job: Job<WhatsAppInboundJobData, WhatsAppInbo
 
 function createInboundProcessor(
   orderingCoordinator?: ConversationOrderingCoordinator,
-  options: Readonly<{ groupDispatcher?: CloudPreparedResponseGroupDispatcher }> = {},
+  options: Readonly<{
+    groupDispatcher?: CloudPreparedResponseGroupDispatcher;
+    dlqPublisher?: WhatsAppDlqPublisher;
+    maxAttempts?: number;
+  }> = {},
 ): QueueJobProcessor<WhatsAppInboundJobData, WhatsAppInboundJobResult> {
   return async (job): Promise<WhatsAppInboundJobResult> => {
-    const data = validateInboundJobData(job.data);
+    let data: WhatsAppInboundJobData;
+    try {
+      data = validateInboundJobData(job.data);
+    } catch (error) {
+      if (options.dlqPublisher) {
+        const decision = classifyInboundFailure(error);
+        try {
+          await options.dlqPublisher.publish(buildInboundDlqEnvelope(job, decision));
+        } catch (publishError) {
+          throw new WhatsAppQueueReliabilityError("dlq_publish_failed", publishError);
+        }
+        throw new UnrecoverableError(`whatsapp_inbound_terminal:${decision.category}`);
+      }
+      throw error;
+    }
 
     if (data.schemaVersion !== 2 || !orderingCoordinator) {
-      return processValidatedJob(data, options);
+      try {
+        return await processValidatedJob(data, options);
+      } catch (error) {
+        if (options.dlqPublisher) {
+          return handleInboundFailure(job, error, options.dlqPublisher);
+        }
+        throw error;
+      }
     }
 
     const claimResult = await orderingCoordinator.tryClaimTurn(
@@ -150,6 +182,25 @@ function createInboundProcessor(
       }
       return result;
     } catch (error) {
+      if (options.dlqPublisher) {
+        const decision = classifyInboundFailure(error);
+        const attemptsMade = job.attemptsMade + 1;
+        const maxAttempts = options.maxAttempts || job.opts.attempts || 1;
+        const terminal = decision.classification === "permanent" || attemptsMade >= maxAttempts;
+        if (terminal) {
+          try {
+            await options.dlqPublisher.publish(buildInboundDlqEnvelope(job, decision));
+          } catch (publishError) {
+            await orderingCoordinator.releaseTurn(claimResult.claim);
+            throw new WhatsAppQueueReliabilityError("dlq_publish_failed", publishError);
+          }
+          const completeResult = await orderingCoordinator.completeTurn(claimResult.claim);
+          if (completeResult.status === "lostLease") {
+            throw new WhatsAppQueueReliabilityError("terminal_turn_finalize_failed");
+          }
+          throw new UnrecoverableError(`whatsapp_inbound_terminal:${decision.category}`);
+        }
+      }
       await orderingCoordinator.releaseTurn(claimResult.claim);
       throw error;
     } finally {
@@ -164,6 +215,8 @@ export function createWhatsAppInboundWorker(
   options: Readonly<{
     concurrency?: number;
     groupDispatcher?: CloudPreparedResponseGroupDispatcher;
+    dlqPublisher?: WhatsAppDlqPublisher;
+    maxAttempts?: number;
   }> = {},
   queueDefinition: QueueDefinition<"whatsapp-inbound.process", WhatsAppInboundJobData, WhatsAppInboundJobResult> = whatsappInboundQueueDefinition,
 ): ManagedQueueWorker {
@@ -171,6 +224,8 @@ export function createWhatsAppInboundWorker(
     queueDefinition,
     createInboundProcessor(orderingCoordinator, {
       groupDispatcher: options.groupDispatcher,
+      dlqPublisher: options.dlqPublisher,
+      maxAttempts: options.maxAttempts,
     }),
     connectionManager,
     options,

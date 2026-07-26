@@ -521,7 +521,7 @@ async function runScopeAndSecurityChecks(): Promise<void> {
   add("72. No synthetic webhook reconstruction returns", !/synthetic|reconstructWebhook/i.test(workerSource));
   add("73. processNormalizedCloudMessage remains authoritative", /processNormalizedCloudMessage/.test(workerSource));
   add("74. No outbound queue is added", !/outbound/i.test(inboundSource));
-  add("75. No DLQ\/retry classification is added", !/dlq|dead.?letter|retry classification/i.test(inboundSource));
+  add("75. DLQ/retry classification remains WhatsApp-owned Phase 8E behavior", /whatsapp-inbound-reliability/.test(inboundSource) && /completeTurn\(claimResult\.claim\)/.test(inboundSource));
   add("76. No Outbox or migration is added", !/outbox|migration/i.test(inboundSource) && !await pathExists("src/infrastructure/database/migrations/0005"));
   add("77. No Auth, Dashboard, Shipping, or Campaign work is added", !/auth|dashboard|shipping|campaign/i.test(inboundSource));
   add("78. No live WhatsApp send occurs", !/graph\.facebook\.com|sendMessage|postCloudMessage/.test(orderingSource + inboundSource));

@@ -649,7 +649,7 @@ async function runWorkerAndLifecycleChecks(): Promise<void> {
     const productionFiles = files.filter((f) => f.endsWith(".ts") && !f.includes("/testing/"));
     return (await Promise.all(productionFiles.map((f) => readFile(path.resolve(process.cwd(), f), "utf8")))).join("\n");
   })();
-  add("No DLQ workflow is added", !/dlq|dead.?letter/i.test(allInboundSource));
+  add("DLQ workflow remains Phase 8E-gated", /whatsappQueueRetriesDlqEnabled === true/.test(await readFile(path.resolve(process.cwd(), "src/composition/queue/whatsapp-inbound-queue.composition.ts"), "utf8")));
 
   if (process.env.VALKEY_URL?.trim()) {
     const manager = new QueueConnectionManager();

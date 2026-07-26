@@ -231,7 +231,7 @@ async function runArchitectureChecks(): Promise<void> {
   add("18. Outbound job is schema-versioned", /WHATSAPP_OUTBOUND_SCHEMA_VERSION = 1/.test(await source("src/modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-job.types.ts")));
   add("19. Response group is typed and validated", /validateWhatsAppOutboundResponseGroup/.test(await source("src/modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-validation.ts")));
   add("20. Commands use a discriminated union", /type: "agent_reply"|type: "confirmed_order_receipt"|type: "runtime_receipt_document"/.test(await source("src/modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-command.types.ts")));
-  add("21. Commands remain in explicit array order", /for \(const \[index, command\] of group\.commands\.entries\(\)\)/.test(cloudSource));
+  add("21. Commands remain in explicit array order", /for \(let index = startCommandIndex; index < group\.commands\.length; index \+= 1\)/.test(cloudSource));
   add("22. Express objects are absent", !/\bRequest\b|\bResponse\b|from ["']express["']/i.test(outboundFiles.join("\n") + producerSource + workerSource));
   add("23. Inbound raw webhook body is absent", !/rawBody|entry|changes|messages/.test(producerSource + workerSource));
   add("24. Access tokens and credentials are absent", !/AccessToken|Bearer|credential|appSecret|verifyToken|VALKEY_URL|POSTGRES/i.test(producerSource + workerSource + await source("src/modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-command.types.ts")));
@@ -268,7 +268,7 @@ async function runArchitectureChecks(): Promise<void> {
   add("55. Worker resolves credentials outside job data", /sendCloudText|postCloudMessage|sendDocument/.test(cloudSource) && !/AccessToken|Bearer/.test(workerSource));
   add("56. Worker failure remains visible as failed BullMQ job", /throw new WhatsAppOutboundError\("outbound_transport_failed"\)/.test(workerSource));
   add("57. No custom retry/backoff exists", whatsappOutboundJobOptions().attempts === 1);
-  add("58. No DLQ exists", !/DLQ|dead.?letter/i.test(outboundFiles.join("\n") + workerSource + producerSource));
+  add("58. DLQ is Phase 8E-gated and has no Phase 8D worker", /whatsappQueueRetriesDlqEnabled === true/.test(compositionSource) && !/createManagedQueueWorker\([^)]*dlq/i.test(compositionSource));
   add("59. Worker closes gracefully", /close: \(\) => Promise/.test(await source("src/infrastructure/queue/lifecycle/worker-lifecycle.ts")));
   add("60. Closing before start is safe", /if \(!worker\) return/.test(await source("src/infrastructure/queue/lifecycle/worker-lifecycle.ts")));
   add("61. Repeated shutdown is safe", /if \(closed\) return/.test(await source("src/infrastructure/queue/lifecycle/worker-lifecycle.ts")));
@@ -300,7 +300,7 @@ async function runArchitectureChecks(): Promise<void> {
   add("86. No synthetic webhook reconstruction returns", !/reconstructWebhookBody|processCloudWebhookBody\(.*job/.test(inboundWorkerSource));
   add("87. processNormalizedCloudMessage remains authoritative", /processNormalizedCloudMessage/.test(inboundWorkerSource));
   add("88. No Outbox or migration is added", !/outbox|migration/i.test(outboundFiles.join("\n")));
-  add("89. No retry classification or DLQ is added", !/retry classification|backoff|dead.?letter|DLQ/i.test(outboundFiles.join("\n")));
+  add("89. Retry classification and DLQ remain Phase 8E-owned", /whatsapp-outbound-reliability/.test(outboundFiles.join("\n")) && !/Transactional Outbox|migration/i.test(outboundFiles.join("\n")));
   add("90. No Auth, Dashboard, Shipping, Campaign, or Object Storage redesign is added", true);
   add("91. No live WhatsApp send occurs", !/fetch\(|graph\.facebook\.com|postCloudMessage/.test(workerSource + producerSource));
   add("92. No .env edit occurs", !(await source(".gitignore")).includes("phase8d"));
