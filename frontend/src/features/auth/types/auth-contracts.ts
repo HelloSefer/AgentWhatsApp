@@ -35,10 +35,28 @@ export type LoginInput = Readonly<{
   password: string;
 }>;
 
+export type EmailVerificationRequestInput = Readonly<{
+  email: string;
+}>;
+
+export type EmailVerificationConfirmInput = Readonly<{
+  token: string;
+}>;
+
+export type PasswordForgotInput = Readonly<{
+  email: string;
+}>;
+
+export type PasswordResetInput = Readonly<{
+  token: string;
+  newPassword: string;
+}>;
+
 export type SafeAuthErrorCode =
   | "invalid_request"
   | "invalid_credentials"
   | "email_exists"
+  | "invalid_token"
   | "rate_limited"
   | "unauthenticated"
   | "service_unavailable";

@@ -3,7 +3,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { httpAuthService } from "../services/auth-service";
-import type { AuthSession, LoginInput, SignupInput } from "../types/auth-contracts";
+import type {
+  AuthSession,
+  EmailVerificationConfirmInput,
+  EmailVerificationRequestInput,
+  LoginInput,
+  PasswordForgotInput,
+  PasswordResetInput,
+  SignupInput,
+} from "../types/auth-contracts";
 
 export const authQueryKeys = {
   session: ["auth", "session"] as const,
@@ -63,5 +71,29 @@ export function useLogoutMutation() {
       queryClient.removeQueries({ queryKey: authQueryKeys.session });
       router.replace("/");
     },
+  });
+}
+
+export function useRequestEmailVerificationMutation() {
+  return useMutation({
+    mutationFn: (input: EmailVerificationRequestInput) => httpAuthService.requestEmailVerification(input),
+  });
+}
+
+export function useConfirmEmailVerificationMutation() {
+  return useMutation({
+    mutationFn: (input: EmailVerificationConfirmInput) => httpAuthService.confirmEmailVerification(input),
+  });
+}
+
+export function useRequestPasswordResetMutation() {
+  return useMutation({
+    mutationFn: (input: PasswordForgotInput) => httpAuthService.requestPasswordReset(input),
+  });
+}
+
+export function useResetPasswordMutation() {
+  return useMutation({
+    mutationFn: (input: PasswordResetInput) => httpAuthService.resetPassword(input),
   });
 }

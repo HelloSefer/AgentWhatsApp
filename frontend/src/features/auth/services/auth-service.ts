@@ -1,7 +1,11 @@
 import type {
   AuthSession,
   BackendAuthSession,
+  EmailVerificationConfirmInput,
+  EmailVerificationRequestInput,
   LoginInput,
+  PasswordForgotInput,
+  PasswordResetInput,
   SafeAuthError,
   SafeAuthErrorCode,
   SignupInput,
@@ -40,6 +44,10 @@ export type AuthService = Readonly<{
   login(input: LoginInput): Promise<AuthSession>;
   logout(): Promise<void>;
   currentUser(): Promise<AuthSession | null>;
+  requestEmailVerification(input: EmailVerificationRequestInput): Promise<void>;
+  confirmEmailVerification(input: EmailVerificationConfirmInput): Promise<void>;
+  requestPasswordReset(input: PasswordForgotInput): Promise<void>;
+  resetPassword(input: PasswordResetInput): Promise<void>;
 }>;
 
 function sessionFromBackend(value: BackendAuthSession): AuthSession {
@@ -63,10 +71,20 @@ function retryAfterSeconds(response: Response): number | undefined {
   return Math.max(0, Math.ceil((dateMs - Date.now()) / 1000));
 }
 
-function authErrorForStatus(response: Response): SafeAuthError {
+type AuthErrorContext = "default" | "token";
+
+function authErrorForStatus(response: Response, context: AuthErrorContext = "default"): SafeAuthError {
   const retryAfter = retryAfterSeconds(response);
 
   if (response.status === 400) {
+    if (context === "token") {
+      return {
+        code: "invalid_token",
+        message: "This link is invalid, expired, or has already been used.",
+        status: response.status,
+      };
+    }
+
     return { code: "invalid_request", message: "Please check your details and try again.", status: response.status };
   }
 
@@ -99,6 +117,7 @@ function authErrorForStatus(response: Response): SafeAuthError {
 async function requestJson<TResponse>(
   path: string,
   init: RequestInit,
+  context?: AuthErrorContext,
 ): Promise<TResponse> {
   let response: Response;
 
@@ -121,10 +140,14 @@ async function requestJson<TResponse>(
   }
 
   if (!response.ok) {
-    throw new AuthServiceError(authErrorForStatus(response));
+    throw new AuthServiceError(authErrorForStatus(response, context));
   }
 
   return response.json() as Promise<TResponse>;
+}
+
+async function requestVoid(path: string, init: RequestInit, context?: AuthErrorContext): Promise<void> {
+  await requestJson<unknown>(path, init, context);
 }
 
 export const httpAuthService: AuthService = {
@@ -190,5 +213,41 @@ export const httpAuthService: AuthService = {
     }
 
     return sessionFromBackend((await response.json()) as BackendAuthSession);
+  },
+
+  async requestEmailVerification(input) {
+    await requestVoid("/api/auth/email-verification/request", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  async confirmEmailVerification(input) {
+    await requestVoid(
+      "/api/auth/email-verification/confirm",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+      "token",
+    );
+  },
+
+  async requestPasswordReset(input) {
+    await requestVoid("/api/auth/password/forgot", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  async resetPassword(input) {
+    await requestVoid(
+      "/api/auth/password/reset",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+      "token",
+    );
   },
 };

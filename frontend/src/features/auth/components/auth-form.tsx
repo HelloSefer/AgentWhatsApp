@@ -2,17 +2,19 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useId, useState } from "react";
 import { useForm, type UseFormRegisterReturn } from "react-hook-form";
 import { z } from "zod";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AuthServiceError } from "../services/auth-service";
 import { useLoginMutation, useSignupMutation } from "../hooks/use-auth-session";
+import { authErrorMessage } from "../utils/auth-error-message";
 import { safeAuthRedirect } from "../utils/safe-redirect";
 import type { AuthScreenMode } from "../config/auth-screen-content";
+import { EmailVerificationRequestForm } from "./email-verification-request-form";
 
 const emailSchema = z.string().trim().email("Enter a valid email address.");
 const passwordSchema = z
@@ -48,16 +50,6 @@ type SignupValues = z.infer<typeof signupSchema>;
 type AuthFormProps = Readonly<{
   mode: AuthScreenMode;
 }>;
-
-function authErrorMessage(error: unknown): string {
-  if (!(error instanceof AuthServiceError)) {
-    return "Authentication is temporarily unavailable. Please try again shortly.";
-  }
-
-  if (error.code === "invalid_credentials") return "The email or password you entered is incorrect.";
-  if (error.code === "email_exists") return "An account already exists for this email.";
-  return error.message;
-}
 
 function FieldError({ id, message }: Readonly<{ id: string; message?: string }>) {
   if (!message) return null;
@@ -123,7 +115,7 @@ export function AuthForm({ mode }: AuthFormProps) {
     return <LoginForm formId={formId} redirectTo={redirectTo} setSuccessMessage={setSuccessMessage} successMessage={successMessage} routerReplace={(href) => router.replace(href)} />;
   }
 
-  return <SignupForm formId={formId} redirectTo={redirectTo} setSuccessMessage={setSuccessMessage} successMessage={successMessage} routerReplace={(href) => router.replace(href)} />;
+  return <SignupForm formId={formId} setSuccessMessage={setSuccessMessage} successMessage={successMessage} />;
 }
 
 function LoginForm({
@@ -209,24 +201,24 @@ function LoginForm({
         {isBusy ? <Loader2 aria-hidden="true" className="animate-spin" /> : null}
         {isBusy ? "Signing in..." : "Log in"}
       </Button>
+      <Link className={buttonVariants({ variant: "link", className: "h-auto w-full px-0" })} href="/forgot-password">
+        Forgot password?
+      </Link>
     </form>
   );
 }
 
 function SignupForm({
   formId,
-  redirectTo,
-  routerReplace,
   setSuccessMessage,
   successMessage,
 }: Readonly<{
   formId: string;
-  redirectTo: string;
-  routerReplace: (href: string) => void;
   setSuccessMessage: (message: string | null) => void;
   successMessage: string | null;
 }>) {
   const signup = useSignupMutation();
+  const [createdEmail, setCreatedEmail] = useState<string | null>(null);
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
@@ -249,8 +241,8 @@ function SignupForm({
         email: values.email,
         password: values.password,
       });
-      setSuccessMessage("Account created. Taking you to your workspace.");
-      routerReplace(redirectTo);
+      setCreatedEmail(values.email);
+      setSuccessMessage("Account created. Please verify your email. You can request a verification email below if email delivery is configured.");
     } catch (error) {
       setError("root", { message: authErrorMessage(error) });
     }
@@ -264,10 +256,14 @@ function SignupForm({
         </p>
       ) : null}
       {successMessage ? (
-        <p className="rounded-lg border border-marketing-primary/25 bg-marketing-subtle px-3 py-2.5 text-sm leading-5 text-foreground" role="status">
-          {successMessage}
-        </p>
+        <div className="rounded-lg border border-marketing-primary/25 bg-marketing-subtle px-3 py-2.5 text-sm leading-5 text-foreground" role="status">
+          <p>{successMessage}</p>
+          <Link className={buttonVariants({ variant: "link", className: "mt-2 h-auto px-0 text-marketing-primary" })} href="/dashboard">
+            Continue to dashboard
+          </Link>
+        </div>
       ) : null}
+      {createdEmail ? <EmailVerificationRequestForm defaultEmail={createdEmail} /> : null}
       {[
         ["displayName", "Display name", "text", "name"],
         ["email", "Email", "email", "email"],
