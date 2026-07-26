@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { csrfOriginProtection } from "./modules/auth/http/csrf-origin.middleware";
+import { trustedFrontendCorsOptions } from "./modules/auth/http/cors-options";
 import healthRoutes from "./routes/health.routes";
 import legalRoutes from "./routes/legal.routes";
 import aiRoutes from "./modules/ai/ai.routes";
@@ -17,7 +19,7 @@ import authRoutes from "./modules/auth/auth.routes";
 const app = express();
 
 app.use(helmet());
-app.use(cors());
+app.use(cors(trustedFrontendCorsOptions));
 app.use(
   express.json({
     verify: (req, _res, buf) => {
@@ -25,6 +27,7 @@ app.use(
     },
   }),
 );
+app.use(csrfOriginProtection);
 
 app.use("/", healthRoutes);
 app.use("/", legalRoutes);

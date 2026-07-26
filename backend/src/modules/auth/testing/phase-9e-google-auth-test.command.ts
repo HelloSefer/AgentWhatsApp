@@ -10,8 +10,10 @@ import { hashOpaqueToken } from "../../../infrastructure/security/opaque-token";
 import {
   AuthAlreadyExistsError,
   AuthInvalidTokenError,
+  AuthRateLimiter,
   AuthorizationService,
   GoogleAuthService,
+  InMemoryAuthRateLimitStore,
   PasswordAuthService,
   PostgreSqlAuthRepository,
   SessionAuthService,
@@ -219,6 +221,7 @@ function createTestAuthApp(repositories: AuthRepositories, provider: FakeGoogleI
     sessionAuthService,
     googleAuthService,
     authorizationService: new AuthorizationService(repositories),
+    authRateLimiter: new AuthRateLimiter(new InMemoryAuthRateLimitStore()),
   }));
   return localApp;
 }
@@ -334,6 +337,7 @@ async function main(): Promise<void> {
       sessionAuthService: unavailableSession,
       googleAuthService: new GoogleAuthService(repository, unavailableSession, unavailableProvider, { enabled: false, postLoginPath: "/reseller/dashboard" }),
       authorizationService: new AuthorizationService(repository),
+      authRateLimiter: new AuthRateLimiter(new InMemoryAuthRateLimitStore()),
     }));
     const { server: unavailableServer, baseUrl: unavailableBaseUrl } = await startServer(unavailableApp);
     try {

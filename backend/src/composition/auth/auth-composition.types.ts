@@ -1,4 +1,4 @@
-import type { AccountRecoveryService, AuthorizationService, AuthRepositories, GoogleAuthService, PasswordAuthService, SessionAuthService } from "../../modules/auth";
+import type { AccountRecoveryService, AuthRateLimiter, AuthorizationService, AuthRepositories, GoogleAuthService, PasswordAuthService, SessionAuthService } from "../../modules/auth";
 
 export type AuthComposition = Readonly<{
   authRepositories: AuthRepositories;
@@ -7,4 +7,5 @@ export type AuthComposition = Readonly<{
   sessionAuthService: SessionAuthService;
   googleAuthService: GoogleAuthService;
   authorizationService: AuthorizationService;
+  authRateLimiter: AuthRateLimiter;
 }>;

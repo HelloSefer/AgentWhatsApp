@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import type { AccountRecoveryService } from "../application/account-recovery.service";
+import type { AuthRateLimiter } from "../application/auth-rate-limiter";
 import type { GoogleAuthService } from "../application/google-auth.service";
 import type { SessionAuthService } from "../application/session-auth.service";
 import { clearAuthCookie, readAuthCookie, setAuthCookie } from "./auth-cookie";
@@ -16,6 +17,7 @@ export class AuthController {
     private readonly sessionAuthService: SessionAuthService,
     private readonly accountRecoveryService: AccountRecoveryService,
     private readonly googleAuthService: GoogleAuthService,
+    private readonly authRateLimiter: AuthRateLimiter,
   ) {}
 
   signup = async (req: Request, res: Response): Promise<Response | void> => {
@@ -68,6 +70,7 @@ export class AuthController {
         email: stringField(req.body?.email),
         password: stringField(req.body?.password),
       });
+      await this.authRateLimiter.clear({ action: "login", ip: req.ip, identifier: stringField(req.body?.email) });
       setAuthCookie(res, result.session.rawToken);
       return res.status(200).json({
         user: result.user,

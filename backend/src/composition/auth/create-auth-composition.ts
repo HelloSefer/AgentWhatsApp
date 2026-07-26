@@ -1,5 +1,5 @@
 import { env } from "../../config/env";
-import { AccountRecoveryService, AuthorizationService, GoogleAuthService, GoogleOAuthIdentityProvider, PasswordAuthService, PostgreSqlAuthRepository, SessionAuthService, type AuthEmailSender } from "../../modules/auth";
+import { AccountRecoveryService, AuthRateLimiter, AuthorizationService, GoogleAuthService, GoogleOAuthIdentityProvider, InMemoryAuthRateLimitStore, PasswordAuthService, PostgreSqlAuthRepository, SessionAuthService, ValkeyAuthRateLimitStore, type AuthEmailSender } from "../../modules/auth";
 import type { AuthComposition } from "./auth-composition.types";
 
 const noopAuthEmailSender: AuthEmailSender = Object.freeze({
@@ -16,6 +16,9 @@ export function createAuthComposition(emailSender: AuthEmailSender = noopAuthEma
   const passwordAuthService = new PasswordAuthService(authRepositories);
   const sessionAuthService = new SessionAuthService(authRepositories, passwordAuthService);
   const googleProvider = new GoogleOAuthIdentityProvider(env.googleClientId, env.googleClientSecret);
+  const authRateLimiter = new AuthRateLimiter(
+    env.nodeEnv === "production" ? new ValkeyAuthRateLimitStore() : new InMemoryAuthRateLimitStore(),
+  );
   return Object.freeze({
     authRepositories,
     passwordAuthService,
@@ -30,5 +33,6 @@ export function createAuthComposition(emailSender: AuthEmailSender = noopAuthEma
       postLoginPath: env.googleAuthPostLoginPath,
     }),
     authorizationService: new AuthorizationService(authRepositories),
+    authRateLimiter,
   });
 }
