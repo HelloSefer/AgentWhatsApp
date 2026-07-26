@@ -17,6 +17,11 @@ import { WhatsAppTransactionalOutboxPublisher, WhatsAppTransactionalOutboxReposi
 import { ValkeyConversationOrderingAdapter } from "../../modules/agent/conversation-ordering";
 import { WhatsAppDlqPublisher } from "../../modules/whatsapp/cloud/queue-reliability/whatsapp-dlq.publisher";
 import { isWhatsAppTransactionalOutboxEffective } from "../runtime-write/runtime-write-composition.runtime";
+import {
+  buildWhatsAppPhase8RuntimeReadiness,
+  getWhatsAppPhase8EffectiveFlags,
+  type WhatsAppPhase8RuntimeReadiness,
+} from "./whatsapp-phase8-runtime-readiness";
 
 let connectionManager: QueueConnectionManager | undefined;
 let registry: QueueRegistry | undefined;
@@ -29,6 +34,8 @@ let orderingCoordinator: ValkeyConversationOrderingAdapter | undefined;
 let inboundDlqPublisher: WhatsAppDlqPublisher | undefined;
 let outboundDlqPublisher: WhatsAppDlqPublisher | undefined;
 let started = false;
+let starting: Promise<void> | undefined;
+const lifecycleEvents: string[] = [];
 
 export function getWhatsAppInboundProducer(): WhatsAppInboundProducerService | undefined {
   return producer;
@@ -54,73 +61,118 @@ export function getWhatsAppTransactionalOutboxPublisher(): WhatsAppTransactional
   return outboxPublisher;
 }
 
+export function getWhatsAppRuntimeLifecycleEvents(): readonly string[] {
+  return [...lifecycleEvents];
+}
+
+export function clearWhatsAppRuntimeLifecycleEventsForTesting(): void {
+  lifecycleEvents.length = 0;
+}
+
 export async function startWhatsAppInboundQueue(): Promise<void> {
   if (env.whatsappInboundQueueEnabled !== true) return;
   if (started) return;
+  if (starting) return starting;
 
-  connectionManager = new QueueConnectionManager();
-  registry = new QueueRegistry(connectionManager);
-  registry.register(whatsappInboundQueueDefinition);
-  if (env.whatsappQueueRetriesDlqEnabled === true) {
-    registry.register(whatsappInboundDlqDefinition);
-    inboundDlqPublisher = new WhatsAppDlqPublisher(registry, whatsappInboundDlqDefinition);
-  }
-  if (env.whatsappOutboundQueueEnabled === true) {
-    registry.register(whatsappOutboundQueueDefinition);
-    if (env.whatsappQueueRetriesDlqEnabled === true) {
-      registry.register(whatsappOutboundDlqDefinition);
-      outboundDlqPublisher = new WhatsAppDlqPublisher(registry, whatsappOutboundDlqDefinition);
+  starting = (async () => {
+    const effectiveFlags = getWhatsAppPhase8EffectiveFlags();
+    const readiness = await buildWhatsAppPhase8RuntimeReadiness();
+    const startupReady =
+      readiness.dependencyIssues.length === 0 &&
+      readiness.checks.valkey.ok &&
+      readiness.checks.inboundQueue.ok &&
+      readiness.checks.cloudRouting.ok &&
+      (!effectiveFlags.outboundQueue || readiness.checks.outboundQueue.ok) &&
+      (!effectiveFlags.transactionalOutbox || (
+        readiness.checks.postgres.ok &&
+        readiness.checks.migration0005.ok &&
+        readiness.checks.transactionalOutbox.ok
+      ));
+    if (!startupReady) {
+      throw new WhatsAppPhase8RuntimeStartupError(readiness);
     }
-  }
-  orderingCoordinator =
-    env.whatsappConversationOrderingEnabled === true
-      ? new ValkeyConversationOrderingAdapter()
+    connectionManager = new QueueConnectionManager();
+    registry = new QueueRegistry(connectionManager);
+    registry.register(whatsappInboundQueueDefinition);
+    if (env.whatsappQueueRetriesDlqEnabled === true && effectiveFlags.retriesDlq) {
+      registry.register(whatsappInboundDlqDefinition);
+      inboundDlqPublisher = new WhatsAppDlqPublisher(registry, whatsappInboundDlqDefinition);
+    }
+    if (env.whatsappOutboundQueueEnabled === true) {
+      if (effectiveFlags.outboundQueue) {
+        registry.register(whatsappOutboundQueueDefinition);
+        if (env.whatsappQueueRetriesDlqEnabled === true && effectiveFlags.retriesDlq) {
+          registry.register(whatsappOutboundDlqDefinition);
+          outboundDlqPublisher = new WhatsAppDlqPublisher(registry, whatsappOutboundDlqDefinition);
+        }
+      }
+    }
+    orderingCoordinator =
+      env.whatsappConversationOrderingEnabled === true
+        ? new ValkeyConversationOrderingAdapter()
+        : undefined;
+    producer = new WhatsAppInboundProducerService(registry, orderingCoordinator);
+    outboundProducer = env.whatsappOutboundQueueEnabled === true && effectiveFlags.outboundQueue
+      ? new WhatsAppOutboundProducerService(registry)
       : undefined;
-  producer = new WhatsAppInboundProducerService(registry, orderingCoordinator);
-  outboundProducer = env.whatsappOutboundQueueEnabled === true
-    ? new WhatsAppOutboundProducerService(registry)
-    : undefined;
-  outboundWorker = env.whatsappOutboundQueueEnabled === true
-    ? createWhatsAppOutboundWorker(connectionManager, { concurrency: 4, dlqPublisher: outboundDlqPublisher })
-    : undefined;
-  worker = createWhatsAppInboundWorker(connectionManager, orderingCoordinator, {
-    concurrency: env.whatsappConversationOrderingEnabled === true ? 8 : undefined,
-    groupDispatcher: outboundProducer,
-    dlqPublisher: inboundDlqPublisher,
-    maxAttempts: WHATSAPP_INBOUND_RETRY_ATTEMPTS,
+    outboundWorker = env.whatsappOutboundQueueEnabled === true && effectiveFlags.outboundQueue
+      ? createWhatsAppOutboundWorker(connectionManager, { concurrency: 4, dlqPublisher: outboundDlqPublisher })
+      : undefined;
+    worker = createWhatsAppInboundWorker(connectionManager, orderingCoordinator, {
+      concurrency: effectiveFlags.conversationOrdering ? 8 : undefined,
+      groupDispatcher: outboundProducer,
+      dlqPublisher: inboundDlqPublisher,
+      maxAttempts: WHATSAPP_INBOUND_RETRY_ATTEMPTS,
+    });
+
+    try {
+      if (outboundWorker) {
+        await outboundWorker.start();
+        lifecycleEvents.push("start:outbound-worker");
+      }
+      if (isWhatsAppTransactionalOutboxEffective() && outboundProducer) {
+        outboxPublisher = new WhatsAppTransactionalOutboxPublisher(
+          new WhatsAppTransactionalOutboxRepository(),
+          outboundProducer,
+        );
+        outboxPublisher.start();
+        lifecycleEvents.push("start:transactional-outbox-publisher");
+      }
+      await worker.start();
+      lifecycleEvents.push("start:inbound-worker");
+      started = true;
+    } catch (error) {
+      await shutdownWhatsAppInboundQueue();
+      throw error;
+    }
+  })().finally(() => {
+    starting = undefined;
   });
-  if (outboundWorker) {
-    await outboundWorker.start();
-  }
-  if (isWhatsAppTransactionalOutboxEffective() && outboundProducer) {
-    outboxPublisher = new WhatsAppTransactionalOutboxPublisher(
-      new WhatsAppTransactionalOutboxRepository(),
-      outboundProducer,
-    );
-    outboxPublisher.start();
-  }
-  await worker.start();
-  started = true;
+  return starting;
 }
 
 export async function shutdownWhatsAppInboundQueue(): Promise<void> {
   if (worker) {
     await worker.close();
+    lifecycleEvents.push("stop:inbound-worker");
     worker = undefined;
   }
 
   if (outboxPublisher) {
     await outboxPublisher.stop();
+    lifecycleEvents.push("stop:transactional-outbox-publisher");
     outboxPublisher = undefined;
   }
 
   if (outboundWorker) {
     await outboundWorker.close();
+    lifecycleEvents.push("stop:outbound-worker");
     outboundWorker = undefined;
   }
 
   if (connectionManager) {
     await connectionManager.closeInitializedResources();
+    lifecycleEvents.push("stop:queue-resources");
     connectionManager = undefined;
   }
 
@@ -137,4 +189,11 @@ export async function shutdownWhatsAppInboundQueue(): Promise<void> {
 
 export function isWhatsAppInboundQueueStarted(): boolean {
   return started;
+}
+
+export class WhatsAppPhase8RuntimeStartupError extends Error {
+  constructor(readonly readiness: WhatsAppPhase8RuntimeReadiness) {
+    super("whatsapp_phase8_runtime_not_ready");
+    this.name = "WhatsAppPhase8RuntimeStartupError";
+  }
 }
