@@ -24,6 +24,13 @@ export class AuthAlreadyExistsError extends AuthDomainError {
   }
 }
 
+export class AuthInvalidCredentialsError extends AuthDomainError {
+  constructor() {
+    super("Email or password is invalid.");
+    this.name = "AuthInvalidCredentialsError";
+  }
+}
+
 export class AuthNotFoundError extends AuthDomainError {
   constructor() {
     super("Auth record was not found.");

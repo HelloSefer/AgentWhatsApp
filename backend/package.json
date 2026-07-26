@@ -25,7 +25,8 @@
     "test:phase-8e-retries-dlq": "npm run build && node dist/modules/whatsapp/cloud/queue-reliability/testing/phase-8e-test.command.js",
     "test:phase-8f-transactional-outbox": "npm run build && node dist/modules/whatsapp/cloud/transactional-outbox/testing/phase-8f-test.command.js",
     "test:phase-8g-runtime-cutover": "npm run build && node dist/composition/queue/testing/phase-8g-runtime-cutover-test.command.js",
-    "test:phase-9a-auth-foundation": "npm run build && node dist/modules/auth/testing/phase-9a-auth-foundation-test.command.js"
+    "test:phase-9a-auth-foundation": "npm run build && node dist/modules/auth/testing/phase-9a-auth-foundation-test.command.js",
+    "test:phase-9b-password-auth": "npm run build && node dist/modules/auth/testing/phase-9b-password-auth-test.command.js"
   },
   "keywords": [],
   "author": "",

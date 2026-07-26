@@ -1,4 +1,4 @@
-import { PostgreSqlAuthRepository } from "../../modules/auth";
+import { PasswordAuthService, PostgreSqlAuthRepository } from "../../modules/auth";
 import type { AuthComposition } from "./auth-composition.types";
 
 /**
@@ -6,7 +6,9 @@ import type { AuthComposition } from "./auth-composition.types";
  * Auth HTTP, OAuth, cookies, and authorization middleware are intentionally absent.
  */
 export function createAuthComposition(): AuthComposition {
+  const authRepositories = new PostgreSqlAuthRepository();
   return Object.freeze({
-    authRepositories: new PostgreSqlAuthRepository(),
+    authRepositories,
+    passwordAuthService: new PasswordAuthService(authRepositories),
   });
 }

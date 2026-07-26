@@ -32,5 +32,7 @@ export {
   validateProviderSubject,
   validateSellerMembershipSellerId,
 } from "./domain/auth.validation";
-export { AuthAlreadyExistsError, AuthNotFoundError, AuthPersistenceError, AuthValidationError } from "./domain/auth.errors";
+export { AuthAlreadyExistsError, AuthInvalidCredentialsError, AuthNotFoundError, AuthPersistenceError, AuthValidationError } from "./domain/auth.errors";
 export { PostgreSqlAuthRepository, postgreSqlAuthRepository } from "./infrastructure/postgresql/postgresql-auth.repository";
+export { PasswordAuthService } from "./application/password-auth.service";
+export type { PasswordAuthUserResult, PasswordLoginInput, PasswordSignupInput } from "./application/password-auth.types";
