@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useForm, type UseFormRegisterReturn } from "react-hook-form";
 import { z } from "zod";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLoginMutation, useSignupMutation } from "../hooks/use-auth-session";
 import { authErrorMessage } from "../utils/auth-error-message";
-import { safeAuthRedirect } from "../utils/safe-redirect";
+import { safeAuthRedirectFromRawSearch } from "../utils/safe-redirect";
 import type { AuthScreenMode } from "../config/auth-screen-content";
 import { EmailVerificationRequestForm } from "./email-verification-request-form";
 
@@ -109,7 +109,10 @@ export function AuthForm({ mode }: AuthFormProps) {
   const searchParams = useSearchParams();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const formId = useId();
-  const redirectTo = safeAuthRedirect(searchParams.get("redirectTo") ?? searchParams.get("next"));
+  const redirectTo = useMemo(() => {
+    searchParams.toString();
+    return safeAuthRedirectFromRawSearch(typeof window === "undefined" ? "" : window.location.search);
+  }, [searchParams]);
 
   if (mode === "login") {
     return <LoginForm formId={formId} redirectTo={redirectTo} setSuccessMessage={setSuccessMessage} successMessage={successMessage} routerReplace={(href) => router.replace(href)} />;

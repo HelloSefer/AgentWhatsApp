@@ -2,7 +2,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { httpAuthService } from "../services/auth-service";
+import { authErrorMessage } from "../utils/auth-error-message";
 import type {
   AuthSession,
   EmailVerificationConfirmInput,
@@ -17,12 +19,20 @@ export const authQueryKeys = {
   session: ["auth", "session"] as const,
 };
 
+function clearPrivateAuthState(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.setQueryData(authQueryKeys.session, null);
+  queryClient.removeQueries({
+    predicate: (query) => query.queryKey[0] === "auth" && query.queryKey !== authQueryKeys.session,
+  });
+}
+
 export function useAuthSession() {
   const sessionQuery = useQuery({
     queryKey: authQueryKeys.session,
     queryFn: () => httpAuthService.currentUser(),
     retry: false,
     staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   return {
@@ -65,11 +75,17 @@ export function useLogoutMutation() {
 
   return useMutation({
     mutationFn: () => httpAuthService.logout(),
-    onSettled: async () => {
+    onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: authQueryKeys.session });
-      queryClient.setQueryData(authQueryKeys.session, null);
+      clearPrivateAuthState(queryClient);
+    },
+    onSuccess: () => {
       queryClient.removeQueries({ queryKey: authQueryKeys.session });
-      router.replace("/");
+      router.replace("/login");
+    },
+    onError: (error) => {
+      clearPrivateAuthState(queryClient);
+      toast.error(authErrorMessage(error));
     },
   });
 }

@@ -4,7 +4,7 @@ import { SignOutButton } from "./sign-out-button";
 import { useAuthSession } from "../hooks/use-auth-session";
 
 export function DashboardEntry() {
-  const { isAuthenticated, isLoading, memberships, needsOnboarding, user } = useAuthSession();
+  const { memberships, needsOnboarding, user } = useAuthSession();
   const userName = user?.emailNormalized || "there";
   const initial = userName.charAt(0).toUpperCase();
 
@@ -20,20 +20,16 @@ export function DashboardEntry() {
             Your full sales workspace will be built in the next phase.
           </p>
         </div>
-        {isAuthenticated ? <SignOutButton /> : null}
+        <SignOutButton />
       </div>
-      <div className="mt-8 flex items-center gap-4 rounded-xl border border-marketing-border bg-marketing-canvas p-4" aria-busy={isLoading}>
+      <div className="mt-8 flex items-center gap-4 rounded-xl border border-marketing-border bg-marketing-canvas p-4">
         <span aria-hidden="true" className="flex size-12 shrink-0 items-center justify-center rounded-full bg-marketing-subtle text-base font-semibold text-marketing-primary">
-          {isLoading ? "" : initial}
+          {initial}
         </span>
         <div className="min-w-0">
-          <p className="truncate font-semibold text-foreground">
-            {isLoading ? "Checking your session..." : isAuthenticated ? userName : "Not signed in"}
-          </p>
+          <p className="truncate font-semibold text-foreground">{userName}</p>
           <p className="truncate text-sm text-muted-foreground">
-            {isAuthenticated
-              ? `${memberships.length} active membership${memberships.length === 1 ? "" : "s"}${needsOnboarding ? " · onboarding needed" : ""}`
-              : "Log in to load your workspace session."}
+            {`${memberships.length} active membership${memberships.length === 1 ? "" : "s"}${needsOnboarding ? " · onboarding needed" : ""}`}
           </p>
         </div>
       </div>
