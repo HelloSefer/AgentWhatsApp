@@ -1,9 +1,11 @@
 import type { Request, Response } from "express";
 import type { AccountRecoveryService } from "../application/account-recovery.service";
+import type { GoogleAuthService } from "../application/google-auth.service";
 import type { SessionAuthService } from "../application/session-auth.service";
 import { clearAuthCookie, readAuthCookie, setAuthCookie } from "./auth-cookie";
 import { sendAuthError } from "./auth-http.errors";
 import type { AuthenticatedRequest } from "./auth-request.types";
+import { clearGoogleOAuthCookies, readGoogleOAuthCookies, setGoogleOAuthCookies } from "./google-oauth-cookies";
 
 function stringField(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
@@ -13,6 +15,7 @@ export class AuthController {
   constructor(
     private readonly sessionAuthService: SessionAuthService,
     private readonly accountRecoveryService: AccountRecoveryService,
+    private readonly googleAuthService: GoogleAuthService,
   ) {}
 
   signup = async (req: Request, res: Response): Promise<Response | void> => {
@@ -28,6 +31,33 @@ export class AuthController {
         needsOnboarding: result.needsOnboarding,
       });
     } catch (error) {
+      return sendAuthError(res, error);
+    }
+  };
+
+  googleStart = async (_req: Request, res: Response): Promise<Response | void> => {
+    try {
+      const result = this.googleAuthService.start();
+      setGoogleOAuthCookies(res, result);
+      return res.redirect(302, result.authorizationUrl);
+    } catch (error) {
+      clearGoogleOAuthCookies(res);
+      return sendAuthError(res, error);
+    }
+  };
+
+  googleCallback = async (req: Request, res: Response): Promise<Response | void> => {
+    try {
+      const result = await this.googleAuthService.callback({
+        code: stringField(req.query.code),
+        state: stringField(req.query.state),
+        ...readGoogleOAuthCookies(req),
+      });
+      setAuthCookie(res, result.session.rawToken);
+      clearGoogleOAuthCookies(res);
+      return res.redirect(302, result.redirectUrl);
+    } catch (error) {
+      clearGoogleOAuthCookies(res);
       return sendAuthError(res, error);
     }
   };

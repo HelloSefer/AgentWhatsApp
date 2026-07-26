@@ -33,12 +33,12 @@ export class SessionAuthService {
 
   async signup(input: PasswordSignupInput): Promise<SessionIssueResult> {
     const result = await this.passwordAuthService.signup(input);
-    return this.issueSession(result.user);
+    return this.issueSessionForUser(result.user);
   }
 
   async login(input: PasswordLoginInput): Promise<SessionIssueResult> {
     const result = await this.passwordAuthService.login(input);
-    return this.issueSession(result.user);
+    return this.issueSessionForUser(result.user);
   }
 
   async resolve(rawToken: unknown): Promise<AuthenticatedPrincipal | null> {
@@ -84,7 +84,7 @@ export class SessionAuthService {
     return this.repositories.revokeActiveSessionsForUser(userId, new Date());
   }
 
-  private async issueSession(user: AuthUser): Promise<SessionIssueResult> {
+  async issueSessionForUser(user: AuthUser): Promise<SessionIssueResult> {
     if (user.status !== "active") throw new AuthInvalidCredentialsError();
     const rawToken = generateOpaqueToken();
     const tokenHash = hashOpaqueToken(rawToken);

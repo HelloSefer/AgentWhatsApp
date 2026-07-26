@@ -19,6 +19,7 @@ export type {
   SellerMembershipRepository,
 } from "./contracts/auth.repository";
 export type { AuthEmailSender, AuthEmailVerificationMessage, AuthPasswordResetMessage } from "./contracts/auth-email.sender";
+export type { GoogleIdentityProvider, VerifiedGoogleIdentity } from "./contracts/google-identity.provider";
 export type {
   AuthRole,
   AuthSession,
@@ -45,6 +46,9 @@ export {
 export { AuthAlreadyExistsError, AuthEmailDeliveryError, AuthInvalidCredentialsError, AuthInvalidTokenError, AuthNotFoundError, AuthPersistenceError, AuthValidationError } from "./domain/auth.errors";
 export { PostgreSqlAuthRepository, postgreSqlAuthRepository } from "./infrastructure/postgresql/postgresql-auth.repository";
 export { PasswordAuthService } from "./application/password-auth.service";
+export { GoogleAuthService, GoogleAuthUnavailableError, createPkceChallenge } from "./application/google-auth.service";
+export type { GoogleAuthCallbackInput, GoogleAuthCallbackResult, GoogleAuthConfiguration, GoogleAuthStartResult } from "./application/google-auth.types";
+export { GoogleOAuthIdentityProvider } from "./infrastructure/google/google-oauth-identity.provider";
 export type { PasswordAuthUserResult, PasswordLoginInput, PasswordSignupInput } from "./application/password-auth.types";
 export { AUTH_SESSION_TTL_MS, SessionAuthService } from "./application/session-auth.service";
 export type { AuthenticatedMembership, AuthenticatedPrincipal, CurrentUserResult, SanitizedAuthUser, SessionIssueResult } from "./application/session-auth.types";

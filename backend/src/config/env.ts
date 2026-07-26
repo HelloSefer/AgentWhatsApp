@@ -81,6 +81,11 @@ export const env = {
     process.env.FIRST_ENTRY_LIVE_SMOKE_TEST_RECIPIENT || "212600000000",
   firstEntryLiveSmokeSellerId:
     process.env.FIRST_ENTRY_LIVE_SMOKE_SELLER_ID || "seller_demo_sandals",
+  googleClientId: process.env.GOOGLE_CLIENT_ID || "",
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+  googleCallbackUrl: process.env.GOOGLE_CALLBACK_URL || "",
+  frontendBaseUrl: (process.env.FRONTEND_BASE_URL || "").trim().replace(/\/+$/, ""),
+  googleAuthPostLoginPath: process.env.GOOGLE_AUTH_POST_LOGIN_PATH || "/reseller/dashboard",
   orderReceiptPdfEnabled: process.env.ORDER_RECEIPT_PDF_ENABLED === "true",
   orderReceiptStoreName:
     process.env.ORDER_RECEIPT_STORE_NAME || "AN9A STORE",

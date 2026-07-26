@@ -6,9 +6,11 @@ import { authenticateRequest } from "./http/auth.middleware";
 
 export function createAuthRoutes(composition: AuthComposition = createAuthComposition()): Router {
   const router = Router();
-  const controller = new AuthController(composition.sessionAuthService, composition.accountRecoveryService);
+  const controller = new AuthController(composition.sessionAuthService, composition.accountRecoveryService, composition.googleAuthService);
   const authenticate = authenticateRequest(composition.sessionAuthService);
 
+  router.get("/google/start", controller.googleStart);
+  router.get("/google/callback", controller.googleCallback);
   router.post("/signup", controller.signup);
   router.post("/login", controller.login);
   router.post("/logout", controller.logout);
