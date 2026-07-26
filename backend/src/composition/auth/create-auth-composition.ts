@@ -1,5 +1,5 @@
 import { env } from "../../config/env";
-import { AccountRecoveryService, GoogleAuthService, GoogleOAuthIdentityProvider, PasswordAuthService, PostgreSqlAuthRepository, SessionAuthService, type AuthEmailSender } from "../../modules/auth";
+import { AccountRecoveryService, AuthorizationService, GoogleAuthService, GoogleOAuthIdentityProvider, PasswordAuthService, PostgreSqlAuthRepository, SessionAuthService, type AuthEmailSender } from "../../modules/auth";
 import type { AuthComposition } from "./auth-composition.types";
 
 const noopAuthEmailSender: AuthEmailSender = Object.freeze({
@@ -29,5 +29,6 @@ export function createAuthComposition(emailSender: AuthEmailSender = noopAuthEma
       frontendBaseUrl: env.frontendBaseUrl,
       postLoginPath: env.googleAuthPostLoginPath,
     }),
+    authorizationService: new AuthorizationService(authRepositories),
   });
 }

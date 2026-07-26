@@ -10,6 +10,7 @@ import { hashOpaqueToken } from "../../../infrastructure/security/opaque-token";
 import {
   AuthAlreadyExistsError,
   AuthInvalidTokenError,
+  AuthorizationService,
   GoogleAuthService,
   PasswordAuthService,
   PostgreSqlAuthRepository,
@@ -217,6 +218,7 @@ function createTestAuthApp(repositories: AuthRepositories, provider: FakeGoogleI
     accountRecoveryService: createAuthComposition().accountRecoveryService,
     sessionAuthService,
     googleAuthService,
+    authorizationService: new AuthorizationService(repositories),
   }));
   return localApp;
 }
@@ -331,6 +333,7 @@ async function main(): Promise<void> {
       accountRecoveryService: createAuthComposition().accountRecoveryService,
       sessionAuthService: unavailableSession,
       googleAuthService: new GoogleAuthService(repository, unavailableSession, unavailableProvider, { enabled: false, postLoginPath: "/reseller/dashboard" }),
+      authorizationService: new AuthorizationService(repository),
     }));
     const { server: unavailableServer, baseUrl: unavailableBaseUrl } = await startServer(unavailableApp);
     try {

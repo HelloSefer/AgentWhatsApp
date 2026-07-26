@@ -478,7 +478,7 @@ export class PostgreSqlAuthRepository implements AuthRepositories {
     const nextStatus = validateAuthStatus(status);
     try {
       const result = await executor(options).execute<MembershipRow>({
-        text: `UPDATE seller_memberships SET status = $3, disabled_at = CASE WHEN $3 = 'disabled' THEN $4 ELSE NULL END, updated_at = NOW() WHERE seller_id = $1 AND user_id = $2 RETURNING ${membershipColumns}`,
+        text: `UPDATE seller_memberships SET status = $3, disabled_at = CASE WHEN $3 = 'disabled' THEN $4::timestamptz ELSE NULL END, updated_at = NOW() WHERE seller_id = $1 AND user_id = $2 RETURNING ${membershipColumns}`,
         values: [validateSellerMembershipSellerId(sellerId), validateAuthId(userId), nextStatus, nextStatus === "disabled" ? validateExpiry(disabledAt ?? new Date()) : null],
       });
       if (!result.rows[0]) throw new AuthNotFoundError();

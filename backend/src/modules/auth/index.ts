@@ -46,9 +46,14 @@ export {
 export { AuthAlreadyExistsError, AuthEmailDeliveryError, AuthInvalidCredentialsError, AuthInvalidTokenError, AuthNotFoundError, AuthPersistenceError, AuthValidationError } from "./domain/auth.errors";
 export { PostgreSqlAuthRepository, postgreSqlAuthRepository } from "./infrastructure/postgresql/postgresql-auth.repository";
 export { PasswordAuthService } from "./application/password-auth.service";
+export { AuthorizationService } from "./application/authorization.service";
+export type { AuthorizationInput, AuthorizedTenantContext } from "./application/authorization.types";
+export { AuthorizationError, AuthorizationForbiddenError, AuthorizationInsufficientPermissionError, AuthorizationInvalidSellerTargetError, AuthorizationNoActiveMembershipError, AuthorizationTenantSelectionRequiredError, AuthorizationUnauthenticatedError } from "./application/authorization.errors";
 export { GoogleAuthService, GoogleAuthUnavailableError, createPkceChallenge } from "./application/google-auth.service";
 export type { GoogleAuthCallbackInput, GoogleAuthCallbackResult, GoogleAuthConfiguration, GoogleAuthStartResult } from "./application/google-auth.types";
 export { GoogleOAuthIdentityProvider } from "./infrastructure/google/google-oauth-identity.provider";
 export type { PasswordAuthUserResult, PasswordLoginInput, PasswordSignupInput } from "./application/password-auth.types";
 export { AUTH_SESSION_TTL_MS, SessionAuthService } from "./application/session-auth.service";
 export type { AuthenticatedMembership, AuthenticatedPrincipal, CurrentUserResult, SanitizedAuthUser, SessionIssueResult } from "./application/session-auth.types";
+export { AUTH_PERMISSIONS, ROLE_PERMISSIONS, isAuthPermission, roleHasPermission } from "./domain/authorization.policy";
+export type { AuthPermission } from "./domain/authorization.policy";
