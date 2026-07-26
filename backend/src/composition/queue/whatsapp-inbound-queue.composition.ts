@@ -13,8 +13,10 @@ import { whatsappOutboundQueueDefinition } from "../../modules/whatsapp/cloud/ou
 import { whatsappOutboundDlqDefinition } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-dlq.definition";
 import { WhatsAppOutboundProducerService } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-producer.service";
 import { createWhatsAppOutboundWorker } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-worker.service";
+import { WhatsAppTransactionalOutboxPublisher, WhatsAppTransactionalOutboxRepository } from "../../modules/whatsapp/cloud/transactional-outbox";
 import { ValkeyConversationOrderingAdapter } from "../../modules/agent/conversation-ordering";
 import { WhatsAppDlqPublisher } from "../../modules/whatsapp/cloud/queue-reliability/whatsapp-dlq.publisher";
+import { isWhatsAppTransactionalOutboxEffective } from "../runtime-write/runtime-write-composition.runtime";
 
 let connectionManager: QueueConnectionManager | undefined;
 let registry: QueueRegistry | undefined;
@@ -22,6 +24,7 @@ let producer: WhatsAppInboundProducerService | undefined;
 let worker: ReturnType<typeof createWhatsAppInboundWorker> | undefined;
 let outboundProducer: WhatsAppOutboundProducerService | undefined;
 let outboundWorker: ReturnType<typeof createWhatsAppOutboundWorker> | undefined;
+let outboxPublisher: WhatsAppTransactionalOutboxPublisher | undefined;
 let orderingCoordinator: ValkeyConversationOrderingAdapter | undefined;
 let inboundDlqPublisher: WhatsAppDlqPublisher | undefined;
 let outboundDlqPublisher: WhatsAppDlqPublisher | undefined;
@@ -45,6 +48,10 @@ export function getWhatsAppConversationOrderingCoordinator(): ValkeyConversation
 
 export function getWhatsAppOutboundProducer(): WhatsAppOutboundProducerService | undefined {
   return outboundProducer;
+}
+
+export function getWhatsAppTransactionalOutboxPublisher(): WhatsAppTransactionalOutboxPublisher | undefined {
+  return outboxPublisher;
 }
 
 export async function startWhatsAppInboundQueue(): Promise<void> {
@@ -85,6 +92,13 @@ export async function startWhatsAppInboundQueue(): Promise<void> {
   if (outboundWorker) {
     await outboundWorker.start();
   }
+  if (isWhatsAppTransactionalOutboxEffective() && outboundProducer) {
+    outboxPublisher = new WhatsAppTransactionalOutboxPublisher(
+      new WhatsAppTransactionalOutboxRepository(),
+      outboundProducer,
+    );
+    outboxPublisher.start();
+  }
   await worker.start();
   started = true;
 }
@@ -93,6 +107,11 @@ export async function shutdownWhatsAppInboundQueue(): Promise<void> {
   if (worker) {
     await worker.close();
     worker = undefined;
+  }
+
+  if (outboxPublisher) {
+    await outboxPublisher.stop();
+    outboxPublisher = undefined;
   }
 
   if (outboundWorker) {

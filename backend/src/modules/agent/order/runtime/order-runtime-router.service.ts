@@ -106,7 +106,7 @@ function initialSelectableItemOption(
   return getRequiredItemCollectionFields(fields).find((field) => field.options?.length);
 }
 
-function asTurnResult(input: RuntimeReply & { stage: OrderRuntimeStage; warnings?: readonly string[]; failureCode?: string; confirmedSnapshotId?: string; receiptReady?: boolean; publicOrderCode?: string; receiptArtifact?: OrderRuntimeTurnResult["receiptArtifact"] }): OrderRuntimeTurnResult {
+function asTurnResult(input: RuntimeReply & { stage: OrderRuntimeStage; warnings?: readonly string[]; failureCode?: string; confirmedSnapshotId?: string; receiptReady?: boolean; durableReceiptOutboxCommitted?: boolean; publicOrderCode?: string; receiptArtifact?: OrderRuntimeTurnResult["receiptArtifact"] }): OrderRuntimeTurnResult {
   return {
     handled: true,
     reply: input.text,
@@ -119,6 +119,7 @@ function asTurnResult(input: RuntimeReply & { stage: OrderRuntimeStage; warnings
     ...(input.failureCode ? { failureCode: input.failureCode } : {}),
     ...(input.confirmedSnapshotId ? { confirmedSnapshotId: input.confirmedSnapshotId } : {}),
     ...(input.receiptReady !== undefined ? { receiptReady: input.receiptReady } : {}),
+    ...(input.durableReceiptOutboxCommitted !== undefined ? { durableReceiptOutboxCommitted: input.durableReceiptOutboxCommitted } : {}),
     ...(input.publicOrderCode ? { publicOrderCode: input.publicOrderCode } : {}),
     ...(input.receiptArtifact ? { receiptArtifact: input.receiptArtifact } : {}),
   };
@@ -531,6 +532,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
         snapshotId: publicOrderCode,
         confirmedAt: confirmationAttempt.confirmedAt,
       };
+      let durableReceiptOutboxCommitted = false;
       const receipt: ConfirmedOrderReceiptPreparationResult = !env.persistenceRuntimeOrderWritesEnabled
         ? await prepareConfirmedOrderReceipt(receiptInput)
         : await (async () => {
@@ -542,6 +544,13 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
             sellerId: input.sellerId,
             snapshot: snapshotPreparation.snapshot,
             confirmationIdempotencyKey: publicOrderCode,
+            durableReceiptOutbox: input.phoneNumberId
+              ? {
+                conversationKey: input.conversationKey,
+                customerPhone: input.customerPhone,
+                phoneNumberId: input.phoneNumberId,
+              }
+              : undefined,
           });
           if (writeResult.status === "failed") {
             runtime.cart = cartBeforeDelivery;
@@ -554,6 +563,9 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
               warnings: [...snapshotPreparation.warnings, `runtime_order_write_${writeResult.category}`],
             };
           }
+          durableReceiptOutboxCommitted =
+            writeResult.status === "persisted" &&
+            writeResult.durableReceiptOutboxCommitted === true;
           return prepareConfirmedOrderReceiptDocument(snapshotPreparation);
         })();
       if (!receipt.success || !receipt.snapshot || !receipt.receiptDocument || !receipt.buffer) return asTurnResult({ ...recoveryReply(), stage: runtime.runtimeStage, warnings: receipt.warnings, failureCode: receipt.failureCode });
@@ -574,6 +586,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
         confirmedSnapshotId: receipt.snapshot.id,
         publicOrderCode,
         receiptReady: true,
+        durableReceiptOutboxCommitted,
         receiptArtifact: {
           snapshotId: receipt.snapshot.id,
           publicOrderCode,

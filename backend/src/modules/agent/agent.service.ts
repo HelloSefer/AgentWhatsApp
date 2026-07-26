@@ -1650,6 +1650,7 @@ async function generateAgentResultInternal(
         customerPhone: normalized.identity.customerPhone,
         conversationKey: normalized.identity.conversationKey,
         productId: activeOptions.productId,
+        phoneNumberId: normalized.identity.phoneNumberId,
         message: userMessage,
         actionId: activeOptions.transportInput?.actionId,
         normalizedText:
@@ -1710,6 +1711,8 @@ async function generateAgentResultInternal(
               stage: runtimeResult.stage || "RECOVERY_REQUIRED",
               confirmedSnapshotId: runtimeResult.confirmedSnapshotId,
               receiptReady: runtimeResult.receiptReady,
+              durableReceiptOutboxCommitted:
+                runtimeResult.durableReceiptOutboxCommitted,
             },
           },
         };

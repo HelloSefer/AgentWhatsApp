@@ -10,5 +10,5 @@ export type RuntimeOrderWriteFailureCategory =
 
 export type RuntimeConfirmedOrderWriteResult =
   | Readonly<{ status: "skipped"; reason: "disabled" }>
-  | Readonly<{ status: "persisted"; order: PersistedConfirmedOrder }>
+  | Readonly<{ status: "persisted"; order: PersistedConfirmedOrder; durableReceiptOutboxCommitted?: boolean }>
   | Readonly<{ status: "failed"; category: RuntimeOrderWriteFailureCategory }>;

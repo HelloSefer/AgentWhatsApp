@@ -121,6 +121,7 @@ export interface AgentResult {
       stage: import("./order/runtime/order-runtime.types").OrderRuntimeStage;
       confirmedSnapshotId?: string;
       receiptReady?: boolean;
+      durableReceiptOutboxCommitted?: boolean;
     };
     firstEntryLiveSmoke?: {
       handledBy: "first_entry_live_smoke" | "first_entry_click_preview_blocked";

@@ -1,6 +1,6 @@
 import type { TenantContext } from "../../../../../infrastructure/database";
 import type { ConfirmedOrderSnapshot } from "../../confirmed-order/confirmed-order-snapshot.types";
-import type { ConfirmedOrderRepository } from "../contracts/confirmed-order.repository";
+import type { ConfirmedOrderRepository, ConfirmedOrderTransactionalAppend } from "../contracts/confirmed-order.repository";
 import type { ConfirmedOrderList, PersistedConfirmedOrder } from "../domain/confirmed-order-persistence.types";
 import { ConfirmedOrderValidationError } from "../domain/order-persistence.errors";
 import { validateConfirmedOrderPersistenceInput } from "../domain/order-persistence.validation";
@@ -13,10 +13,10 @@ function orderId(value: unknown): string {
 export class ConfirmedOrderPersistenceService {
   constructor(private readonly repository: ConfirmedOrderRepository) {}
 
-  persistConfirmedOrder(tenant: TenantContext, input: Readonly<{ snapshot: ConfirmedOrderSnapshot; confirmationIdempotencyKey: unknown }>): Promise<PersistedConfirmedOrder> {
+  persistConfirmedOrder(tenant: TenantContext, input: Readonly<{ snapshot: ConfirmedOrderSnapshot; confirmationIdempotencyKey: unknown; transactionalAppend?: ConfirmedOrderTransactionalAppend }>): Promise<PersistedConfirmedOrder> {
     const validated = validateConfirmedOrderPersistenceInput(input);
     if (validated.snapshot.sellerId.trim() !== tenant.sellerId) throw new ConfirmedOrderValidationError();
-    return this.repository.persistConfirmedOrder(tenant, { snapshot: validated.snapshot, confirmationIdempotencyKey: validated.idempotencyKey });
+    return this.repository.persistConfirmedOrder(tenant, { snapshot: validated.snapshot, confirmationIdempotencyKey: validated.idempotencyKey, transactionalAppend: input.transactionalAppend });
   }
 
   getConfirmedOrder(tenant: TenantContext, id: unknown): Promise<PersistedConfirmedOrder | null> { return this.repository.findConfirmedOrder(tenant, orderId(id)); }

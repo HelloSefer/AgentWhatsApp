@@ -115,4 +115,6 @@ export const env = {
     process.env.WHATSAPP_CONVERSATION_ORDERING_ENABLED === "true",
   whatsappQueueRetriesDlqEnabled:
     process.env.WHATSAPP_QUEUE_RETRIES_DLQ_ENABLED === "true",
+  whatsappTransactionalOutboxEnabled:
+    process.env.WHATSAPP_TRANSACTIONAL_OUTBOX_ENABLED?.trim().toLowerCase() === "true",
 };

@@ -100,6 +100,7 @@ export type OrderRuntimeTurnInput = {
   customerPhone: string;
   conversationKey: string;
   productId?: string;
+  phoneNumberId?: string;
   message: string;
   actionId?: string;
   normalizedText?: string;
@@ -118,6 +119,7 @@ export type OrderRuntimeTurnResult = {
   failureCode?: string;
   confirmedSnapshotId?: string;
   receiptReady?: boolean;
+  durableReceiptOutboxCommitted?: boolean;
   publicOrderCode?: string;
   receiptArtifact?: OrderRuntimeReceiptArtifact;
 };

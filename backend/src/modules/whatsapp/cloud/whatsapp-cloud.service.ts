@@ -3769,7 +3769,13 @@ export async function processNormalizedCloudMessage(
           if (receiptConfig.enabled && receiptConfig.sendAfterConfirmation) {
             const responseGroupDispatcher =
               options.preparedResponseGroupDispatcher || options.outboundGroupDispatcher;
-            if (responseGroupDispatcher) {
+            if (result.meta?.orderRuntime?.durableReceiptOutboxCommitted === true) {
+              logJson({
+                event: "order_receipt.whatsapp.transactional_outbox_committed",
+                waId: maskPhone(message.waId),
+                orderId: confirmedOrder.id,
+              });
+            } else if (responseGroupDispatcher) {
               await responseGroupDispatcher.dispatchOutboundGroup(
                 buildOutboundResponseGroup({
                   sellerId: identity.sellerId,

@@ -22,7 +22,7 @@ async function load(executor: DatabaseQueryExecutor, tenant: TenantContext, orde
 
 export class PostgreSqlConfirmedOrderRepository implements ConfirmedOrderRepository {
   constructor(private readonly testingHooks?: Readonly<{ beforeSnapshotInsert?: () => void }>) {}
-  async persistConfirmedOrder(tenant: TenantContext, input: Readonly<{ snapshot: import("../../../confirmed-order/confirmed-order-snapshot.types").ConfirmedOrderSnapshot; confirmationIdempotencyKey: string }>): Promise<PersistedConfirmedOrder> {
+  async persistConfirmedOrder(tenant: TenantContext, input: Readonly<{ snapshot: import("../../../confirmed-order/confirmed-order-snapshot.types").ConfirmedOrderSnapshot; confirmationIdempotencyKey: string; transactionalAppend?: import("../../contracts/confirmed-order.repository").ConfirmedOrderTransactionalAppend }>): Promise<PersistedConfirmedOrder> {
     const validated = validateConfirmedOrderPersistenceInput(input);
     const hash = fingerprintConfirmedOrderSnapshot(validated.snapshot);
     try {
@@ -35,6 +35,7 @@ export class PostgreSqlConfirmedOrderRepository implements ConfirmedOrderReposit
         await transaction.execute({ text: "INSERT INTO confirmed_order_snapshots (seller_id, order_id, schema_version, snapshot_json, snapshot_hash, created_at) VALUES ($1,$2,$3,$4::jsonb,$5,$6)", values: [tenant.sellerId, validated.orderId, validated.snapshot.schemaVersion, JSON.stringify(validated.snapshot), hash, validated.snapshot.confirmedAt] });
         const result = await load(transaction, tenant, validated.orderId);
         if (!result) throw new OrderPersistenceError();
+        await input.transactionalAppend?.(transaction, { order: result, snapshot: validated.snapshot });
         return result;
       });
     } catch (error) {
