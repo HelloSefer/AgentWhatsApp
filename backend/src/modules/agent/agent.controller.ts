@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { env } from "../../config/env";
+import type { AuthorizedRequest } from "../auth/http/auth-request.types";
 import { generateAgentResult, resolveAgentIdentity } from "./agent.service";
 import { runFirstEntryAgentTest } from "./config/first-entry-agent-test.service";
 import { normalizeFirstEntryClick } from "./config/first-entry-click-normalizer.service";
@@ -32,20 +33,20 @@ import { evaluateInformationalAIBoundary } from "./info/informational-ai-answer-
 import { isContextualOrderUnderstandingEvaluationEnabled } from "./order-understanding/evaluation-access.policy";
 import {
   adminNotificationTypes,
-  deleteAdminNotification,
-  getAdminNotificationById,
+  deleteAdminNotificationForSeller,
+  getAdminNotificationByIdForSeller,
   isAdminNotificationType,
   listAdminNotifications,
-  markAllAdminNotificationsRead,
-  markAdminNotificationRead,
+  markAllAdminNotificationsReadForSeller,
+  markAdminNotificationReadForSeller,
 } from "./admin/admin-notification.service";
 import type { AdminNotificationType } from "./admin/admin-notification.service";
 import {
-  getConfirmedOrderById,
+  getConfirmedOrderByIdForSeller,
   isOrderStatus,
   listConfirmedOrders,
   normalizeOrderStatus,
-  updateConfirmedOrderStatus,
+  updateConfirmedOrderStatusForSeller,
   orderStatuses,
 } from "./order/confirmed-order-store.service";
 import { normalizeSellerConfig } from "./config/first-entry-config.service";
@@ -84,6 +85,10 @@ function isAIIntentRouterIntent(value: unknown): boolean {
 
 function getOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function getTrustedSellerId(req: Request): string {
+  return (req as AuthorizedRequest).tenant.sellerId;
 }
 
 function getOptionalBooleanQuery(
@@ -1250,6 +1255,7 @@ export async function evalAgentInformationalAI(_req: Request, res: Response) {
 
 export function listAgentOrders(req: Request, res: Response) {
   const status = getOptionalString(req.query.status);
+  const sellerId = getTrustedSellerId(req);
 
   if (status && !isOrderStatus(status)) {
     return res.status(400).json({
@@ -1260,6 +1266,7 @@ export function listAgentOrders(req: Request, res: Response) {
 
   return res.status(200).json({
     orders: listConfirmedOrders({
+      sellerId,
       status: status ? normalizeOrderStatus(status) : undefined,
       customerId: getOptionalString(req.query.customerId),
       phone: getOptionalString(req.query.phone),
@@ -1270,7 +1277,7 @@ export function listAgentOrders(req: Request, res: Response) {
 
 export function getAgentOrder(req: Request, res: Response) {
   const id = getOptionalString(req.params.id);
-  const order = id ? getConfirmedOrderById(id) : undefined;
+  const order = id ? getConfirmedOrderByIdForSeller(id, getTrustedSellerId(req)) : undefined;
 
   if (!order) {
     return res.status(404).json({
@@ -1286,6 +1293,7 @@ export function getAgentOrder(req: Request, res: Response) {
 export function listAgentAdminNotifications(req: Request, res: Response) {
   const isRead = getOptionalBooleanQuery(req.query.isRead);
   const type = getOptionalString(req.query.type);
+  const sellerId = getTrustedSellerId(req);
 
   if (isRead === "invalid") {
     return res.status(400).json({
@@ -1306,6 +1314,7 @@ export function listAgentAdminNotifications(req: Request, res: Response) {
 
   return res.status(200).json({
     notifications: listAdminNotifications({
+      sellerId,
       isRead,
       type: notificationType,
       customerId: getOptionalString(req.query.customerId),
@@ -1316,7 +1325,7 @@ export function listAgentAdminNotifications(req: Request, res: Response) {
 
 export function getAgentAdminNotification(req: Request, res: Response) {
   const id = getOptionalString(req.params.id);
-  const notification = id ? getAdminNotificationById(id) : undefined;
+  const notification = id ? getAdminNotificationByIdForSeller(id, getTrustedSellerId(req)) : undefined;
 
   if (!notification) {
     return res.status(404).json({
@@ -1331,7 +1340,7 @@ export function getAgentAdminNotification(req: Request, res: Response) {
 
 export function markAgentAdminNotificationRead(req: Request, res: Response) {
   const id = getOptionalString(req.params.id);
-  const notification = id ? markAdminNotificationRead(id) : undefined;
+  const notification = id ? markAdminNotificationReadForSeller(id, getTrustedSellerId(req)) : undefined;
 
   if (!notification) {
     return res.status(404).json({
@@ -1344,15 +1353,15 @@ export function markAgentAdminNotificationRead(req: Request, res: Response) {
   });
 }
 
-export function markAllAgentAdminNotificationsRead(_req: Request, res: Response) {
+export function markAllAgentAdminNotificationsRead(req: Request, res: Response) {
   return res.status(200).json({
-    updatedCount: markAllAdminNotificationsRead(),
+    updatedCount: markAllAdminNotificationsReadForSeller(getTrustedSellerId(req)),
   });
 }
 
 export function deleteAgentAdminNotification(req: Request, res: Response) {
   const id = getOptionalString(req.params.id);
-  const notification = id ? deleteAdminNotification(id) : undefined;
+  const notification = id ? deleteAdminNotificationForSeller(id, getTrustedSellerId(req)) : undefined;
 
   if (!notification) {
     return res.status(404).json({
@@ -1368,6 +1377,7 @@ export function deleteAgentAdminNotification(req: Request, res: Response) {
 export function updateAgentOrderStatus(req: Request, res: Response) {
   const id = getOptionalString(req.params.id);
   const status = getOptionalString(req.body?.status);
+  const sellerId = getTrustedSellerId(req);
 
   if (!status || !isOrderStatus(status)) {
     return res.status(400).json({
@@ -1377,7 +1387,7 @@ export function updateAgentOrderStatus(req: Request, res: Response) {
   }
 
   const order = id
-    ? updateConfirmedOrderStatus(id, normalizeOrderStatus(status))
+    ? updateConfirmedOrderStatusForSeller(id, sellerId, normalizeOrderStatus(status))
     : undefined;
 
   if (!order) {

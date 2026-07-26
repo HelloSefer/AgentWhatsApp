@@ -1,6 +1,11 @@
 import type { NextFunction, Request, Response } from "express";
 import type { AuthorizationService } from "../application/authorization.service";
-import { AuthorizationUnauthenticatedError } from "../application/authorization.errors";
+import {
+  AuthorizationForbiddenError,
+  AuthorizationInvalidSellerTargetError,
+  AuthorizationTenantSelectionRequiredError,
+  AuthorizationUnauthenticatedError,
+} from "../application/authorization.errors";
 import type { SessionAuthService } from "../application/session-auth.service";
 import type { AuthPermission } from "../domain/authorization.policy";
 import { readAuthCookie } from "./auth-cookie";
@@ -28,7 +33,19 @@ function sendAuthorizationFailure(res: Response, error: unknown): void {
     res.status(401).json({ message: "Authentication required." });
     return;
   }
-  res.status(403).json({ message: "Forbidden." });
+  if (error instanceof AuthorizationInvalidSellerTargetError) {
+    res.status(400).json({ message: "Invalid seller target." });
+    return;
+  }
+  if (error instanceof AuthorizationTenantSelectionRequiredError) {
+    res.status(409).json({ message: "Seller selection required." });
+    return;
+  }
+  if (error instanceof AuthorizationForbiddenError) {
+    res.status(403).json({ message: "Forbidden." });
+    return;
+  }
+  res.status(500).json({ message: "Authorization service unavailable." });
 }
 
 export function resolveAuthorizedTenantContext(

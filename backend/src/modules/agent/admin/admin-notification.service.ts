@@ -8,6 +8,7 @@ export type AdminNotificationType = (typeof adminNotificationTypes)[number];
 export interface AdminNotification {
   id: string;
   type: AdminNotificationType;
+  sellerId?: string;
   orderId: string;
   customerId: string;
   title: string;
@@ -17,6 +18,7 @@ export interface AdminNotification {
 }
 
 type ListAdminNotificationsFilters = {
+  sellerId?: string;
   isRead?: boolean;
   type?: AdminNotificationType;
   customerId?: string;
@@ -69,6 +71,7 @@ export function createNewConfirmedOrderNotification(
   const notification: AdminNotification = {
     id: randomUUID(),
     type: "NEW_CONFIRMED_ORDER",
+    sellerId: order.sellerId,
     orderId: order.id,
     customerId: order.customerId,
     title: "طلب جديد مؤكد",
@@ -99,6 +102,9 @@ export function listAdminNotifications(
       if (filters.type && notification.type !== filters.type) {
         return false;
       }
+      if (filters.sellerId && notification.sellerId !== filters.sellerId) {
+        return false;
+      }
 
       return (
         matchesOptionalFilter(notification.customerId, filters.customerId) &&
@@ -113,10 +119,32 @@ export function getAdminNotificationById(
   return listAdminNotifications().find((item) => item.id === notificationId);
 }
 
+export function getAdminNotificationByIdForSeller(
+  notificationId: string,
+  sellerId: string,
+): AdminNotification | undefined {
+  return listAdminNotifications({ sellerId }).find((item) => item.id === notificationId);
+}
+
 export function markAdminNotificationRead(
   notificationId: string,
 ): AdminNotification | undefined {
   const notification = getAdminNotificationById(notificationId);
+
+  if (!notification) {
+    return undefined;
+  }
+
+  notification.isRead = true;
+
+  return notification;
+}
+
+export function markAdminNotificationReadForSeller(
+  notificationId: string,
+  sellerId: string,
+): AdminNotification | undefined {
+  const notification = getAdminNotificationByIdForSeller(notificationId, sellerId);
 
   if (!notification) {
     return undefined;
@@ -140,10 +168,43 @@ export function markAllAdminNotificationsRead(): number {
   return updatedCount;
 }
 
+export function markAllAdminNotificationsReadForSeller(sellerId: string): number {
+  let updatedCount = 0;
+
+  for (const notification of listAdminNotifications({ sellerId })) {
+    if (!notification.isRead) {
+      notification.isRead = true;
+      updatedCount += 1;
+    }
+  }
+
+  return updatedCount;
+}
+
 export function deleteAdminNotification(
   notificationId: string,
 ): AdminNotification | undefined {
   const notification = getAdminNotificationById(notificationId);
+
+  if (!notification) {
+    return undefined;
+  }
+
+  notificationsByOrderId.delete(notification.orderId);
+  const orderIndex = notificationOrder.indexOf(notification.orderId);
+
+  if (orderIndex >= 0) {
+    notificationOrder.splice(orderIndex, 1);
+  }
+
+  return notification;
+}
+
+export function deleteAdminNotificationForSeller(
+  notificationId: string,
+  sellerId: string,
+): AdminNotification | undefined {
+  const notification = getAdminNotificationByIdForSeller(notificationId, sellerId);
 
   if (!notification) {
     return undefined;

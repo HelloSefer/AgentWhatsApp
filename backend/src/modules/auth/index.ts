@@ -57,3 +57,5 @@ export { AUTH_SESSION_TTL_MS, SessionAuthService } from "./application/session-a
 export type { AuthenticatedMembership, AuthenticatedPrincipal, CurrentUserResult, SanitizedAuthUser, SessionIssueResult } from "./application/session-auth.types";
 export { AUTH_PERMISSIONS, ROLE_PERMISSIONS, isAuthPermission, roleHasPermission } from "./domain/authorization.policy";
 export type { AuthPermission } from "./domain/authorization.policy";
+export { resolveRequestedSellerTarget } from "./http/seller-target.resolver";
+export { SELLER_ROUTE_PERMISSIONS } from "./http/seller-route-permissions";

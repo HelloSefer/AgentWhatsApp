@@ -131,6 +131,7 @@ type SaveConfirmedOrderInput = {
 };
 
 type ListConfirmedOrdersFilters = {
+  sellerId?: string;
   status?: OrderStatus;
   customerId?: string;
   phone?: string;
@@ -426,6 +427,9 @@ export function listConfirmedOrders(
     if (filters.status && order.status !== filters.status) {
       return false;
     }
+    if (filters.sellerId && order.sellerId !== filters.sellerId) {
+      return false;
+    }
 
     return (
       matchesOptionalFilter(order.customerId, filters.customerId) &&
@@ -439,11 +443,36 @@ export function getConfirmedOrderById(id: string): ConfirmedOrder | undefined {
   return confirmedOrdersById.get(id);
 }
 
+export function getConfirmedOrderByIdForSeller(
+  id: string,
+  sellerId: string,
+): ConfirmedOrder | undefined {
+  const order = getConfirmedOrderById(id);
+  return order?.sellerId === sellerId ? order : undefined;
+}
+
 export function updateConfirmedOrderStatus(
   id: string,
   status: OrderStatus,
 ): ConfirmedOrder | undefined {
   const order = getConfirmedOrderById(id);
+
+  if (!order) {
+    return undefined;
+  }
+
+  order.status = status;
+  order.updatedAt = new Date().toISOString();
+
+  return order;
+}
+
+export function updateConfirmedOrderStatusForSeller(
+  id: string,
+  sellerId: string,
+  status: OrderStatus,
+): ConfirmedOrder | undefined {
+  const order = getConfirmedOrderByIdForSeller(id, sellerId);
 
   if (!order) {
     return undefined;

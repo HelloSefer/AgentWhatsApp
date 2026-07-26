@@ -30,7 +30,8 @@
     "test:phase-9c-account-recovery": "npm run build && node dist/modules/auth/testing/phase-9c-account-recovery-test.command.js",
     "test:phase-9d-auth-sessions-http": "npm run build && node dist/modules/auth/testing/phase-9d-auth-sessions-http-test.command.js",
     "test:phase-9e-google-auth": "npm run build && node dist/modules/auth/testing/phase-9e-google-auth-test.command.js",
-    "test:phase-9f-authorization": "npm run build && node dist/modules/auth/testing/phase-9f-authorization-test.command.js"
+    "test:phase-9f-authorization": "npm run build && node dist/modules/auth/testing/phase-9f-authorization-test.command.js",
+    "test:phase-9g-http-authorization": "npm run build && node dist/modules/auth/testing/phase-9g-http-authorization-test.command.js"
   },
   "keywords": [],
   "author": "",

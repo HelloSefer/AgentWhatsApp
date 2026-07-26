@@ -181,7 +181,7 @@ async function main(): Promise<void> {
 
     const user = await repository.findUserByEmail(email);
     if (!user) throw new Error("Phase 9D user missing.");
-    await executeDatabaseQuery({ text: "UPDATE auth_sessions SET expires_at = NOW() - INTERVAL '1 second' WHERE session_token_hash = $1", values: [hashOpaqueToken(signupRawToken)] });
+    await executeDatabaseQuery({ text: "UPDATE auth_sessions SET created_at = NOW() - INTERVAL '2 seconds', expires_at = NOW() - INTERVAL '1 second' WHERE session_token_hash = $1", values: [hashOpaqueToken(signupRawToken)] });
     add("Expired session returns 401", (await request(baseUrl, "/api/auth/me", { cookie: cookieHeader(signupCookie) })).status === 401);
 
     await repository.setUserStatus(user.userId, "disabled");

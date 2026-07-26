@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import type { AuthorizedRequest } from "../../auth/http/auth-request.types";
 import { evaluateFirstEntryEligibility } from "./first-entry-eligibility.service";
 import { normalizeSellerConfig } from "./first-entry-config.service";
 import { renderIntentAwareFirstEntryPreview } from "./first-entry-intent-preview.service";
@@ -7,12 +8,12 @@ import { productContextService } from "./product-context.service";
 import { requiredFieldsService } from "./required-fields.service";
 import { sellerConfigService } from "./seller-config.service";
 
-function getSellerId(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+function getTrustedSellerId(req: Request): string {
+  return (req as AuthorizedRequest).tenant.sellerId;
 }
 
 export function getAgentConfig(req: Request, res: Response) {
-  const sellerId = getSellerId(req.params.sellerId);
+  const sellerId = getTrustedSellerId(req);
   const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
   const productResult =
     productContextService.getActiveProductContextWithMeta(sellerId);
@@ -37,7 +38,7 @@ export function getAgentConfig(req: Request, res: Response) {
 }
 
 export function getAgentRequiredFields(req: Request, res: Response) {
-  const sellerId = getSellerId(req.params.sellerId);
+  const sellerId = getTrustedSellerId(req);
   const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
   const productResult =
     productContextService.getActiveProductContextWithMeta(sellerId);
@@ -60,7 +61,7 @@ export function getAgentRequiredFields(req: Request, res: Response) {
 }
 
 export function getAgentFirstEntryPreview(req: Request, res: Response) {
-  const sellerId = getSellerId(req.params.sellerId);
+  const sellerId = getTrustedSellerId(req);
   const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
   const productResult =
     productContextService.getActiveProductContextWithMeta(sellerId);
@@ -93,7 +94,7 @@ export function getAgentFirstEntryEligibilityPreview(
   req: Request,
   res: Response,
 ) {
-  const sellerId = getSellerId(req.params.sellerId);
+  const sellerId = getTrustedSellerId(req);
   const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
   const productResult =
     productContextService.getActiveProductContextWithMeta(sellerId);
@@ -118,7 +119,7 @@ export function getAgentFirstEntryEligibilityPreview(
 }
 
 export function postAgentFirstEntryIntentPreview(req: Request, res: Response) {
-  const sellerId = getSellerId(req.params.sellerId);
+  const sellerId = getTrustedSellerId(req);
   const message = typeof req.body?.message === "string" ? req.body.message : "";
 
   if (!message.trim()) {

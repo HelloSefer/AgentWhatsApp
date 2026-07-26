@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import type { AuthorizedRequest } from "../auth/http/auth-request.types";
 import {
   getEffectiveConversationConfiguration,
   previewConversationConfiguration,
@@ -7,6 +8,10 @@ import {
 
 function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function trustedSellerId(req: Request): string {
+  return (req as AuthorizedRequest).tenant.sellerId;
 }
 
 export function validateConversationConfigController(req: Request, res: Response) {
@@ -36,8 +41,7 @@ export function previewConversationConfigController(req: Request, res: Response)
 }
 
 export function getEffectiveConversationConfigController(req: Request, res: Response) {
-  const sellerId = text(req.params.sellerId);
-  if (!sellerId) return res.status(400).json({ message: "sellerId is required" });
+  const sellerId = trustedSellerId(req);
   try {
     return res.status(200).json(getEffectiveConversationConfiguration({
       sellerId,
