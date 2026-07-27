@@ -1,5 +1,5 @@
-import { DashboardEntry } from "@/features/auth/components/dashboard-entry";
+import { DashboardWorkspaceEntry } from "@/features/dashboard/components/dashboard-workspace-entry";
 
 export default function DashboardPage() {
-  return <DashboardEntry />;
+  return <DashboardWorkspaceEntry />;
 }

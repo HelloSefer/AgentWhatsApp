@@ -10,7 +10,7 @@ type DashboardLayoutProps = Readonly<{
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   return (
     <main className="min-h-screen bg-marketing-canvas py-6 sm:py-10">
-      <Container className="mx-auto max-w-4xl">
+      <Container className="mx-auto max-w-6xl">
         <SiteLogo />
         <div className="mt-12 sm:mt-16">
           <DashboardAuthGuard>{children}</DashboardAuthGuard>
