@@ -1,3 +1,6 @@
+import { siteConfig } from "@/config/site";
+
+export type AuthAppearance = "dark" | "light";
 export type AuthScreenMode = "login" | "signup";
 
 export type AuthScreenContent = Readonly<{
@@ -13,11 +16,11 @@ export type AuthScreenContent = Readonly<{
 export const authScreenContent: Readonly<Record<AuthScreenMode, AuthScreenContent>> = {
   login: {
     eyebrow: "AgentWhatsApp account",
-    title: "Log in to your account",
-    description: "Continue to manage your WhatsApp conversations, orders, and sales workspace.",
-    googleActionLabel: "Sign in with Google",
-    alternatePrompt: "New to AgentWhatsApp?",
-    alternateLinkLabel: "Create an account",
+    title: "Welcome back",
+    description: "Sign in to your account to continue managing your conversations.",
+    googleActionLabel: "Continue with Google",
+    alternatePrompt: "Don’t have an account?",
+    alternateLinkLabel: "Create one",
     alternateHref: siteConfig.routes.signUp,
   },
   signup: {
@@ -30,4 +33,3 @@ export const authScreenContent: Readonly<Record<AuthScreenMode, AuthScreenConten
     alternateHref: siteConfig.routes.login,
   },
 };
-import { siteConfig } from "@/config/site";

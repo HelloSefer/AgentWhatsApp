@@ -54,6 +54,8 @@ export { AuthorizationError, AuthorizationForbiddenError, AuthorizationInsuffici
 export { GoogleAuthService, GoogleAuthUnavailableError, createPkceChallenge } from "./application/google-auth.service";
 export type { GoogleAuthCallbackInput, GoogleAuthCallbackResult, GoogleAuthConfiguration, GoogleAuthStartResult } from "./application/google-auth.types";
 export { GoogleOAuthIdentityProvider } from "./infrastructure/google/google-oauth-identity.provider";
+export { SmtpAuthEmailConfigurationError, SmtpAuthEmailSender } from "./infrastructure/smtp/smtp-auth-email.sender";
+export type { SmtpAuthEmailConfiguration } from "./infrastructure/smtp/smtp-auth-email.sender";
 export { ValkeyAuthRateLimitStore } from "./infrastructure/valkey/valkey-auth-rate-limit.store";
 export type { PasswordAuthUserResult, PasswordLoginInput, PasswordSignupInput } from "./application/password-auth.types";
 export { AUTH_SESSION_TTL_MS, SessionAuthService } from "./application/session-auth.service";

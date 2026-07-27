@@ -36,6 +36,10 @@ type TestCase = Readonly<{ name: string; passed: boolean }>;
 type HttpResponse = Readonly<{ status: number; body?: unknown; text: string; location?: string; setCookies: readonly string[] }>;
 
 const cases: TestCase[] = [];
+const testNoopAuthEmailSender = Object.freeze({
+  sendEmailVerification: async () => undefined,
+  sendPasswordReset: async () => undefined,
+});
 
 function add(name: string, passed: boolean): void {
   cases.push({ name, passed });
@@ -217,7 +221,7 @@ function createTestAuthApp(repositories: AuthRepositories, provider: FakeGoogleI
   localApp.use("/api/auth", createAuthRoutes({
     authRepositories: repositories,
     passwordAuthService,
-    accountRecoveryService: createAuthComposition().accountRecoveryService,
+    accountRecoveryService: createAuthComposition(testNoopAuthEmailSender).accountRecoveryService,
     sessionAuthService,
     googleAuthService,
     authorizationService: new AuthorizationService(repositories),
@@ -333,7 +337,7 @@ async function main(): Promise<void> {
     unavailableApp.use("/api/auth", createAuthRoutes({
       authRepositories: repository,
       passwordAuthService: new PasswordAuthService(repository),
-      accountRecoveryService: createAuthComposition().accountRecoveryService,
+      accountRecoveryService: createAuthComposition(testNoopAuthEmailSender).accountRecoveryService,
       sessionAuthService: unavailableSession,
       googleAuthService: new GoogleAuthService(repository, unavailableSession, unavailableProvider, { enabled: false, postLoginPath: "/reseller/dashboard" }),
       authorizationService: new AuthorizationService(repository),

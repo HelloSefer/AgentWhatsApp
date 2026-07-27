@@ -38,6 +38,10 @@ type HttpResponse = Readonly<{ status: number; body?: unknown; text: string; hea
 const cases: TestCase[] = [];
 const trustedOrigin = new URL(process.env.FRONTEND_BASE_URL).origin;
 const untrustedOrigin = "https://evil.phase9h.example";
+const testNoopAuthEmailSender = Object.freeze({
+  sendEmailVerification: async () => undefined,
+  sendPasswordReset: async () => undefined,
+});
 
 function add(name: string, passed: boolean): void {
   cases.push({ name, passed });
@@ -164,7 +168,7 @@ function createProbeApp(repository: PostgreSqlAuthRepository, limiter = new Auth
   const composition = {
     authRepositories: repository,
     passwordAuthService,
-    accountRecoveryService: createAuthComposition().accountRecoveryService,
+    accountRecoveryService: createAuthComposition(testNoopAuthEmailSender).accountRecoveryService,
     sessionAuthService,
     googleAuthService: new GoogleAuthService(repository, sessionAuthService, provider, {
       enabled: true,

@@ -32,7 +32,8 @@
     "test:phase-9e-google-auth": "npm run build && node dist/modules/auth/testing/phase-9e-google-auth-test.command.js",
     "test:phase-9f-authorization": "npm run build && node dist/modules/auth/testing/phase-9f-authorization-test.command.js",
     "test:phase-9g-http-authorization": "npm run build && node dist/modules/auth/testing/phase-9g-http-authorization-test.command.js",
-    "test:phase-9h-auth-security-closure": "npm run build && node dist/modules/auth/testing/phase-9h-auth-security-closure-test.command.js"
+    "test:phase-9h-auth-security-closure": "npm run build && node dist/modules/auth/testing/phase-9h-auth-security-closure-test.command.js",
+    "test:phase-9i-email-delivery": "npm run build && node dist/modules/auth/testing/phase-9i-email-delivery-test.command.js"
   },
   "keywords": [],
   "author": "",
@@ -42,10 +43,10 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "google-auth-library": "^10.9.1",
     "google-auth-library": "^10.5.0",
     "helmet": "^8.2.0",
     "ioredis": "^5.11.1",
+    "nodemailer": "^9.0.3",
     "pg": "^8.22.0",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",
@@ -56,6 +57,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^6.0.3"

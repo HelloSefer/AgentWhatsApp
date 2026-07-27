@@ -1,5 +1,5 @@
 import { env } from "../../config/env";
-import { AccountRecoveryService, AuthRateLimiter, AuthorizationService, GoogleAuthService, GoogleOAuthIdentityProvider, InMemoryAuthRateLimitStore, PasswordAuthService, PostgreSqlAuthRepository, SessionAuthService, ValkeyAuthRateLimitStore, type AuthEmailSender } from "../../modules/auth";
+import { AccountRecoveryService, AuthRateLimiter, AuthorizationService, GoogleAuthService, GoogleOAuthIdentityProvider, InMemoryAuthRateLimitStore, PasswordAuthService, PostgreSqlAuthRepository, SessionAuthService, SmtpAuthEmailSender, ValkeyAuthRateLimitStore, type AuthEmailSender } from "../../modules/auth";
 import type { AuthComposition } from "./auth-composition.types";
 
 const noopAuthEmailSender: AuthEmailSender = Object.freeze({
@@ -7,11 +7,35 @@ const noopAuthEmailSender: AuthEmailSender = Object.freeze({
   sendPasswordReset: async () => undefined,
 });
 
+function createConfiguredAuthEmailSender(): AuthEmailSender {
+  if (
+    !env.authEmailSmtpHost &&
+    !env.authEmailSmtpPort &&
+    !env.authEmailSmtpUser &&
+    !env.authEmailSmtpPassword &&
+    !env.authEmailFromName &&
+    !env.authEmailFromAddress
+  ) {
+    return noopAuthEmailSender;
+  }
+
+  return new SmtpAuthEmailSender({
+    host: env.authEmailSmtpHost,
+    port: env.authEmailSmtpPort,
+    secure: env.authEmailSmtpSecure,
+    user: env.authEmailSmtpUser,
+    password: env.authEmailSmtpPassword,
+    fromName: env.authEmailFromName,
+    fromAddress: env.authEmailFromAddress,
+    frontendBaseUrl: env.frontendBaseUrl,
+  });
+}
+
 /**
- * Builds auth persistence dependencies without opening database connections.
+ * Builds auth persistence dependencies without opening database or SMTP connections.
  * Auth HTTP, OAuth, cookies, and authorization middleware are intentionally absent.
  */
-export function createAuthComposition(emailSender: AuthEmailSender = noopAuthEmailSender): AuthComposition {
+export function createAuthComposition(emailSender: AuthEmailSender = createConfiguredAuthEmailSender()): AuthComposition {
   const authRepositories = new PostgreSqlAuthRepository();
   const passwordAuthService = new PasswordAuthService(authRepositories);
   const sessionAuthService = new SessionAuthService(authRepositories, passwordAuthService);
