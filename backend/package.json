@@ -36,7 +36,8 @@
     "test:phase-9i-email-delivery": "npm run build && node dist/modules/auth/testing/phase-9i-email-delivery-test.command.js",
     "test:phase-10a-workspace-profile": "npm run build && node dist/modules/seller-workspace-profile/testing/phase-10a-workspace-profile-test.command.js",
     "test:phase-10b-workspace-creation": "npm run build && node dist/modules/seller-workspace-onboarding/testing/phase-10b-workspace-creation-test.command.js",
-    "test:phase-10c-logo-storage": "npm run build && node dist/modules/seller-logo/testing/phase-10c-logo-storage-test.command.js"
+    "test:phase-10c-logo-storage": "npm run build && node dist/modules/seller-logo/testing/phase-10c-logo-storage-test.command.js",
+    "test:phase-10d-onboarding-http": "npm run build && node dist/modules/onboarding/testing/phase-10d-onboarding-http-test.command.js"
   },
   "keywords": [],
   "author": "",

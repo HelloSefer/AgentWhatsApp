@@ -6,7 +6,9 @@ export type AuthRateLimitAction =
   | "login"
   | "email_verification_request"
   | "password_forgot_request"
-  | "google_start";
+  | "google_start"
+  | "onboarding_workspace_create"
+  | "onboarding_logo_mutation";
 
 export type AuthRateLimitDecision = Readonly<{
   allowed: boolean;
@@ -31,6 +33,8 @@ const POLICY: Readonly<Record<AuthRateLimitAction, Readonly<{ limit: number; win
   email_verification_request: { limit: 5, windowSeconds: 15 * 60 },
   password_forgot_request: { limit: 5, windowSeconds: 15 * 60 },
   google_start: { limit: 20, windowSeconds: 10 * 60 },
+  onboarding_workspace_create: { limit: 5, windowSeconds: 15 * 60 },
+  onboarding_logo_mutation: { limit: 5, windowSeconds: 15 * 60 },
 });
 
 function sha256(value: string): string {

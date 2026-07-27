@@ -15,6 +15,7 @@ import orderReceiptRoutes from "./modules/order-receipt/order-receipt.routes";
 import conversationConfigRoutes from "./modules/conversation-engine/conversation-config.routes";
 import databaseHealthRoutes from "./infrastructure/database/health/database-health.routes";
 import authRoutes from "./modules/auth/auth.routes";
+import onboardingRoutes from "./modules/onboarding/onboarding.routes";
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.use("/api/agent/session", conversationSessionRoutes);
 app.use("/api/whatsapp/cloud", whatsappCloudRoutes);
 app.use("/api/database", databaseHealthRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/onboarding", onboardingRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({
