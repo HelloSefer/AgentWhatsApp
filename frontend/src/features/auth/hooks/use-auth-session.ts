@@ -31,9 +31,11 @@ export function useAuthSession() {
     queryKey: authQueryKeys.session,
     queryFn: () => httpAuthService.currentUser(),
     retry: false,
-    staleTime: 60_000,
+    staleTime: 0,
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
   });
+  const isSessionResolving = sessionQuery.isLoading || (sessionQuery.data === null && sessionQuery.isFetching);
 
   return {
     session: sessionQuery.data ?? null,
@@ -41,8 +43,8 @@ export function useAuthSession() {
     memberships: sessionQuery.data?.memberships ?? [],
     needsOnboarding: sessionQuery.data?.needsOnboarding ?? false,
     isAuthenticated: Boolean(sessionQuery.data?.user),
-    isLoading: sessionQuery.isLoading,
-    isUnauthenticated: !sessionQuery.isLoading && sessionQuery.data === null,
+    isLoading: isSessionResolving,
+    isUnauthenticated: !isSessionResolving && sessionQuery.data === null,
     error: sessionQuery.error,
   };
 }

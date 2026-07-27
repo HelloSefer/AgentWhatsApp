@@ -1,7 +1,6 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { authQueryKeys } from "@/features/auth/hooks/use-auth-session";
 import { httpOnboardingService } from "../services/onboarding-service";
 import type { CreateWorkspaceInput } from "../types/onboarding-contracts";
 
@@ -21,16 +20,8 @@ export function useOnboardingStatus(enabled: boolean) {
 }
 
 export function useCreateWorkspaceMutation() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: (input: CreateWorkspaceInput) => httpOnboardingService.createWorkspace(input),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: onboardingQueryKeys.status }),
-        queryClient.invalidateQueries({ queryKey: authQueryKeys.session }),
-      ]);
-    },
   });
 }
 
