@@ -33,7 +33,8 @@
     "test:phase-9f-authorization": "npm run build && node dist/modules/auth/testing/phase-9f-authorization-test.command.js",
     "test:phase-9g-http-authorization": "npm run build && node dist/modules/auth/testing/phase-9g-http-authorization-test.command.js",
     "test:phase-9h-auth-security-closure": "npm run build && node dist/modules/auth/testing/phase-9h-auth-security-closure-test.command.js",
-    "test:phase-9i-email-delivery": "npm run build && node dist/modules/auth/testing/phase-9i-email-delivery-test.command.js"
+    "test:phase-9i-email-delivery": "npm run build && node dist/modules/auth/testing/phase-9i-email-delivery-test.command.js",
+    "test:phase-10a-workspace-profile": "npm run build && node dist/modules/seller-workspace-profile/testing/phase-10a-workspace-profile-test.command.js"
   },
   "keywords": [],
   "author": "",
