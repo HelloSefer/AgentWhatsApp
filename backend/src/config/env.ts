@@ -129,4 +129,9 @@ export const env = {
     process.env.WHATSAPP_QUEUE_RETRIES_DLQ_ENABLED === "true",
   whatsappTransactionalOutboxEnabled:
     process.env.WHATSAPP_TRANSACTIONAL_OUTBOX_ENABLED?.trim().toLowerCase() === "true",
+  sellerLogoStorageProvider: (process.env.SELLER_LOGO_STORAGE_PROVIDER || "local").trim().toLowerCase(),
+  r2Endpoint: (process.env.R2_ENDPOINT || "").trim(),
+  r2AccessKeyId: (process.env.R2_ACCESS_KEY_ID || "").trim(),
+  r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
+  r2BucketName: (process.env.R2_BUCKET_NAME || "").trim(),
 };
