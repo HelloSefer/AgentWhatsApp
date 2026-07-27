@@ -15,7 +15,9 @@ export const siteConfig = {
     "Turn WhatsApp customer conversations into structured and confirmed e-commerce orders.",
   routes: {
     home: "/",
+    dashboard: "/dashboard",
     login: "/login",
+    onboarding: "/onboarding",
     signUp: "/signup",
   },
   actions: {

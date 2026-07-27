@@ -1,24 +1,46 @@
 import { siteConfig } from "@/config/site";
+import type { AuthSession } from "../types/auth-contracts";
 
-const DEFAULT_AUTH_REDIRECT = "/dashboard";
-const ALLOWED_AUTH_REDIRECT_PREFIXES = ["/dashboard"] as const;
+const DEFAULT_AUTH_REDIRECT = siteConfig.routes.dashboard;
+const ONBOARDING_REDIRECT = siteConfig.routes.onboarding;
+const ALLOWED_AUTH_REDIRECT_PREFIXES = [siteConfig.routes.dashboard, siteConfig.routes.onboarding] as const;
+const AUTH_LOOP_PATHS = new Set<string>([
+  siteConfig.routes.login,
+  siteConfig.routes.signUp,
+]);
 
-function isAllowedDashboardPath(value: string): boolean {
+function pathnameFromInternalPath(value: string): string | null {
+  try {
+    return new URL(value, "https://agentwhatsapp.local").pathname;
+  } catch {
+    return null;
+  }
+}
+
+function isAllowedInternalPath(value: string): boolean {
   return ALLOWED_AUTH_REDIRECT_PREFIXES.some((path) => value === path || value.startsWith(`${path}/`) || value.startsWith(`${path}?`));
 }
 
 export function safeAuthRedirect(value: string | null | undefined): string {
   if (!value) return DEFAULT_AUTH_REDIRECT;
   try {
-    if (value !== decodeURI(value)) return DEFAULT_AUTH_REDIRECT;
+    const decoded = decodeURIComponent(value);
+    if (decoded !== value && decoded !== decodeURIComponent(decoded)) return DEFAULT_AUTH_REDIRECT;
   } catch {
     return DEFAULT_AUTH_REDIRECT;
   }
+  if (/%/u.test(value)) return DEFAULT_AUTH_REDIRECT;
   if (/[\u0000-\u001F\u007F\\]/u.test(value)) return DEFAULT_AUTH_REDIRECT;
-  if (!value.startsWith("/") || value.startsWith("//")) return DEFAULT_AUTH_REDIRECT;
-  if (!isAllowedDashboardPath(value)) return DEFAULT_AUTH_REDIRECT;
-  if (value === siteConfig.routes.login || value === siteConfig.routes.signUp) return DEFAULT_AUTH_REDIRECT;
-  return value;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return DEFAULT_AUTH_REDIRECT;
+  if (/^\/?\s*javascript:/iu.test(trimmed)) return DEFAULT_AUTH_REDIRECT;
+  if (!isAllowedInternalPath(trimmed)) return DEFAULT_AUTH_REDIRECT;
+  const pathname = pathnameFromInternalPath(trimmed);
+  if (!pathname || AUTH_LOOP_PATHS.has(pathname)) return DEFAULT_AUTH_REDIRECT;
+  if (pathname === siteConfig.routes.onboarding) return ONBOARDING_REDIRECT;
+  if (pathname === siteConfig.routes.dashboard) return DEFAULT_AUTH_REDIRECT;
+  if (pathname.startsWith(`${siteConfig.routes.dashboard}/`)) return trimmed;
+  return trimmed;
 }
 
 export function safeAuthRedirectFromRawSearch(search: string): string {
@@ -35,4 +57,12 @@ export function safeAuthRedirectFromRawSearch(search: string): string {
   } catch {
     return DEFAULT_AUTH_REDIRECT;
   }
+}
+
+export function postAuthRedirectForSession(session: AuthSession, requestedRedirect: string): string {
+  if (session.needsOnboarding) return ONBOARDING_REDIRECT;
+  const safeRedirect = safeAuthRedirect(requestedRedirect);
+  return pathnameFromInternalPath(safeRedirect) === siteConfig.routes.onboarding
+    ? DEFAULT_AUTH_REDIRECT
+    : safeRedirect;
 }

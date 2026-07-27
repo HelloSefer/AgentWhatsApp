@@ -122,8 +122,8 @@ export function OnboardingWorkspaceForm() {
   async function finishAndRedirect() {
     await Promise.all([
       statusQuery.refetch(),
-      queryClient.invalidateQueries({ queryKey: authQueryKeys.session }),
-      queryClient.invalidateQueries({ queryKey: onboardingQueryKeys.status }),
+      queryClient.refetchQueries({ queryKey: authQueryKeys.session }),
+      queryClient.refetchQueries({ queryKey: onboardingQueryKeys.status }),
     ]);
     router.replace("/dashboard");
   }

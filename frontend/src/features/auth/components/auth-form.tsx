@@ -11,9 +11,9 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { useLoginMutation, useSignupMutation } from "../hooks/use-auth-session";
+import { useAuthSession, useLoginMutation, useSignupMutation } from "../hooks/use-auth-session";
 import { authErrorMessage } from "../utils/auth-error-message";
-import { safeAuthRedirectFromRawSearch } from "../utils/safe-redirect";
+import { postAuthRedirectForSession, safeAuthRedirectFromRawSearch } from "../utils/safe-redirect";
 import type { AuthAppearance, AuthScreenMode } from "../config/auth-screen-content";
 import { EmailVerificationRequestForm } from "./email-verification-request-form";
 
@@ -153,10 +153,16 @@ export function AuthForm({ appearance = "light", mode }: AuthFormProps) {
   const searchParams = useSearchParams();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const formId = useId();
+  const auth = useAuthSession();
   const redirectTo = useMemo(() => {
     searchParams.toString();
     return safeAuthRedirectFromRawSearch(typeof window === "undefined" ? "" : window.location.search);
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!auth.session) return;
+    router.replace(postAuthRedirectForSession(auth.session, redirectTo));
+  }, [auth.session, redirectTo, router]);
 
   if (mode === "login") {
     return (
@@ -171,7 +177,7 @@ export function AuthForm({ appearance = "light", mode }: AuthFormProps) {
     );
   }
 
-  return <SignupForm formId={formId} setSuccessMessage={setSuccessMessage} successMessage={successMessage} />;
+  return <SignupForm formId={formId} routerReplace={(href) => router.replace(href)} setSuccessMessage={setSuccessMessage} successMessage={successMessage} />;
 }
 
 function LoginForm({
@@ -228,7 +234,7 @@ function LoginForm({
     if (isBusy) return;
     setSuccessMessage(null);
     try {
-      await login.mutateAsync(values);
+      const session = await login.mutateAsync(values);
       try {
         if (rememberMe) {
           window.localStorage.setItem(rememberedEmailStorageKey, values.email);
@@ -239,7 +245,7 @@ function LoginForm({
         // A successful login must never depend on optional local storage.
       }
       setSuccessMessage("Signed in. Taking you to your workspace.");
-      routerReplace(redirectTo);
+      routerReplace(postAuthRedirectForSession(session, redirectTo));
     } catch (error) {
       setError("root", { message: authErrorMessage(error) });
     }
@@ -384,10 +390,12 @@ function LoginForm({
 
 function SignupForm({
   formId,
+  routerReplace,
   setSuccessMessage,
   successMessage,
 }: Readonly<{
   formId: string;
+  routerReplace: (href: string) => void;
   setSuccessMessage: (message: string | null) => void;
   successMessage: string | null;
 }>) {
@@ -410,11 +418,15 @@ function SignupForm({
     if (isBusy) return;
     setSuccessMessage(null);
     try {
-      await signup.mutateAsync({
+      const session = await signup.mutateAsync({
         displayName: values.displayName,
         email: values.email,
         password: values.password,
       });
+      if (session.needsOnboarding) {
+        routerReplace("/onboarding");
+        return;
+      }
       setCreatedEmail(values.email);
       setSuccessMessage("Account created. Please verify your email. You can request a verification email below if email delivery is configured.");
     } catch (error) {
