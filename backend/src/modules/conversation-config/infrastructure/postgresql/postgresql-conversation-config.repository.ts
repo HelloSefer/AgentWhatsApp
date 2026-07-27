@@ -1,10 +1,11 @@
 import {
   DatabaseQueryError,
   executeDatabaseQuery,
+  type DatabaseQueryExecutor,
   type TenantContext,
 } from "../../../../infrastructure/database";
 import { CONVERSATION_CONFIG_SCHEMA_VERSION, type ConversationConfigurationOverride } from "../../../conversation-engine";
-import type { ConversationConfigRepository } from "../../contracts/conversation-config.repository";
+import type { ConversationConfigRepository, ConversationConfigRepositoryOptions } from "../../contracts/conversation-config.repository";
 import {
   ConversationConfigCorruptedError,
   ConversationConfigPersistenceError,
@@ -36,10 +37,14 @@ function serialize(config: ConversationConfigurationOverride): string {
   return JSON.stringify(config);
 }
 
+function executor(options?: ConversationConfigRepositoryOptions): DatabaseQueryExecutor {
+  return options?.executor ?? { execute: executeDatabaseQuery };
+}
+
 export class PostgreSqlConversationConfigRepository implements ConversationConfigRepository {
-  async getSellerOverride(tenant: TenantContext): Promise<PersistedConversationConfig | null> {
+  async getSellerOverride(tenant: TenantContext, options?: ConversationConfigRepositoryOptions): Promise<PersistedConversationConfig | null> {
     try {
-      const result = await executeDatabaseQuery<ConversationConfigRow>({
+      const result = await executor(options).execute<ConversationConfigRow>({
         text: `SELECT ${CONFIG_COLUMNS} FROM seller_conversation_configs WHERE seller_id = $1 LIMIT 1`,
         values: [tenant.sellerId],
       });
@@ -50,9 +55,9 @@ export class PostgreSqlConversationConfigRepository implements ConversationConfi
     }
   }
 
-  async saveSellerOverride(tenant: TenantContext, config: ConversationConfigurationOverride): Promise<PersistedConversationConfig> {
+  async saveSellerOverride(tenant: TenantContext, config: ConversationConfigurationOverride, options?: ConversationConfigRepositoryOptions): Promise<PersistedConversationConfig> {
     try {
-      const result = await executeDatabaseQuery<ConversationConfigRow>({
+      const result = await executor(options).execute<ConversationConfigRow>({
         text: `INSERT INTO seller_conversation_configs (seller_id, schema_version, config_json) VALUES ($1, $2, $3::jsonb) ON CONFLICT (seller_id) DO UPDATE SET schema_version = EXCLUDED.schema_version, config_json = EXCLUDED.config_json, updated_at = NOW() RETURNING ${CONFIG_COLUMNS}`,
         values: [tenant.sellerId, CONVERSATION_CONFIG_SCHEMA_VERSION, serialize(config)],
       });
@@ -63,9 +68,9 @@ export class PostgreSqlConversationConfigRepository implements ConversationConfi
     }
   }
 
-  async clearSellerOverride(tenant: TenantContext): Promise<void> {
+  async clearSellerOverride(tenant: TenantContext, options?: ConversationConfigRepositoryOptions): Promise<void> {
     try {
-      await executeDatabaseQuery({
+      await executor(options).execute({
         text: "DELETE FROM seller_conversation_configs WHERE seller_id = $1",
         values: [tenant.sellerId],
       });
@@ -74,9 +79,9 @@ export class PostgreSqlConversationConfigRepository implements ConversationConfi
     }
   }
 
-  async getProductOverride(tenant: TenantContext, productId: string): Promise<PersistedConversationConfig | null> {
+  async getProductOverride(tenant: TenantContext, productId: string, options?: ConversationConfigRepositoryOptions): Promise<PersistedConversationConfig | null> {
     try {
-      const result = await executeDatabaseQuery<ConversationConfigRow>({
+      const result = await executor(options).execute<ConversationConfigRow>({
         text: `SELECT ${CONFIG_COLUMNS} FROM product_conversation_config_overrides WHERE seller_id = $1 AND product_id = $2 LIMIT 1`,
         values: [tenant.sellerId, productId],
       });
@@ -87,9 +92,9 @@ export class PostgreSqlConversationConfigRepository implements ConversationConfi
     }
   }
 
-  async saveProductOverride(tenant: TenantContext, productId: string, config: ConversationConfigurationOverride): Promise<PersistedConversationConfig> {
+  async saveProductOverride(tenant: TenantContext, productId: string, config: ConversationConfigurationOverride, options?: ConversationConfigRepositoryOptions): Promise<PersistedConversationConfig> {
     try {
-      const result = await executeDatabaseQuery<ConversationConfigRow>({
+      const result = await executor(options).execute<ConversationConfigRow>({
         text: `INSERT INTO product_conversation_config_overrides (seller_id, product_id, schema_version, config_json) VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (seller_id, product_id) DO UPDATE SET schema_version = EXCLUDED.schema_version, config_json = EXCLUDED.config_json, updated_at = NOW() RETURNING ${CONFIG_COLUMNS}`,
         values: [tenant.sellerId, productId, CONVERSATION_CONFIG_SCHEMA_VERSION, serialize(config)],
       });
@@ -100,9 +105,9 @@ export class PostgreSqlConversationConfigRepository implements ConversationConfi
     }
   }
 
-  async clearProductOverride(tenant: TenantContext, productId: string): Promise<void> {
+  async clearProductOverride(tenant: TenantContext, productId: string, options?: ConversationConfigRepositoryOptions): Promise<void> {
     try {
-      await executeDatabaseQuery({
+      await executor(options).execute({
         text: "DELETE FROM product_conversation_config_overrides WHERE seller_id = $1 AND product_id = $2",
         values: [tenant.sellerId, productId],
       });

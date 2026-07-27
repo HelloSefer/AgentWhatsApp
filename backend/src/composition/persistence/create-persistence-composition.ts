@@ -7,8 +7,10 @@ import {
   ConversationConfigService,
   PostgreSqlConversationConfigRepository,
 } from "../../modules/conversation-config";
+import { PostgreSqlAuthRepository } from "../../modules/auth";
 import { PostgreSqlSellerRepository, SellerService } from "../../modules/seller";
 import { PostgreSqlSellerWorkspaceProfileRepository } from "../../modules/seller-workspace-profile";
+import { SellerWorkspaceOnboardingService } from "../../modules/seller-workspace-onboarding";
 import type { PersistenceComposition } from "./persistence-composition.types";
 
 /**
@@ -21,6 +23,7 @@ export function createPersistenceComposition(): PersistenceComposition {
   const conversationConfigRepository = new PostgreSqlConversationConfigRepository();
   const confirmedOrderRepository = new PostgreSqlConfirmedOrderRepository();
   const sellerWorkspaceProfileRepository = new PostgreSqlSellerWorkspaceProfileRepository();
+  const authRepository = new PostgreSqlAuthRepository();
 
   return Object.freeze({
     sellerService: new SellerService(sellerRepository),
@@ -28,5 +31,11 @@ export function createPersistenceComposition(): PersistenceComposition {
     conversationConfigService: new ConversationConfigService(conversationConfigRepository),
     confirmedOrderPersistenceService: new ConfirmedOrderPersistenceService(confirmedOrderRepository),
     sellerWorkspaceProfileRepository,
+    sellerWorkspaceOnboardingService: new SellerWorkspaceOnboardingService({
+      authRepository,
+      sellerRepository,
+      profileRepository: sellerWorkspaceProfileRepository,
+      conversationConfigRepository,
+    }),
   });
 }

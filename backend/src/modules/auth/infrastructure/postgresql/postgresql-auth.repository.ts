@@ -176,6 +176,18 @@ export class PostgreSqlAuthRepository implements AuthRepositories {
     }
   }
 
+  async lockUserForOnboarding(userId: string, options?: RepositoryOptions): Promise<AuthUser | null> {
+    try {
+      const result = await executor(options).execute<UserRow>({
+        text: `SELECT ${userColumns} FROM auth_users WHERE user_id = $1 LIMIT 1 FOR UPDATE`,
+        values: [validateAuthId(userId)],
+      });
+      return result.rows[0] ? mapUser(result.rows[0]) : null;
+    } catch (error) {
+      mapUniqueOrPersistence(error);
+    }
+  }
+
   async findUserById(userId: string, options?: RepositoryOptions): Promise<AuthUser | null> {
     try {
       const result = await executor(options).execute<UserRow>({ text: `SELECT ${userColumns} FROM auth_users WHERE user_id = $1 LIMIT 1`, values: [validateAuthId(userId)] });

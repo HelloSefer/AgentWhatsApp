@@ -23,6 +23,7 @@ export type CreateUserInput = Readonly<{
 
 export interface AuthUserRepository {
   createUser(input: CreateUserInput, options?: RepositoryOptions): Promise<AuthUser>;
+  lockUserForOnboarding(userId: string, options?: RepositoryOptions): Promise<AuthUser | null>;
   findUserById(userId: string, options?: RepositoryOptions): Promise<AuthUser | null>;
   findUserByEmail(emailNormalized: string, options?: RepositoryOptions): Promise<AuthUser | null>;
   setUserStatus(userId: string, status: AuthStatus, options?: RepositoryOptions): Promise<AuthUser>;

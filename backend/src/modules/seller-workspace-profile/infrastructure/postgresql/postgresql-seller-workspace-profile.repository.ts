@@ -2,11 +2,13 @@ import { randomBytes } from "node:crypto";
 import {
   DatabaseQueryError,
   executeDatabaseQuery,
+  type DatabaseQueryExecutor,
   type TenantContext,
 } from "../../../../infrastructure/database";
 import type {
   CreateSellerWorkspaceProfileInput,
   SellerWorkspaceProfileRepository,
+  SellerWorkspaceProfileRepositoryOptions,
 } from "../../contracts/seller-workspace-profile.repository";
 import {
   SellerWorkspaceProfileAlreadyExistsError,
@@ -43,6 +45,10 @@ function randomSlugSuffix(): string {
   return randomBytes(4).toString("hex");
 }
 
+function executor(options?: SellerWorkspaceProfileRepositoryOptions): DatabaseQueryExecutor {
+  return options?.executor ?? { execute: executeDatabaseQuery };
+}
+
 function mapCreateError(error: unknown): never {
   const code = databaseCode(error);
   if (code === "23503") throw new SellerWorkspaceProfileSellerNotFoundError();
@@ -57,7 +63,7 @@ function mapPersistenceError(error: unknown): never {
 }
 
 export class PostgreSqlSellerWorkspaceProfileRepository implements SellerWorkspaceProfileRepository {
-  async createProfile(input: CreateSellerWorkspaceProfileInput): Promise<SellerWorkspaceProfile> {
+  async createProfile(input: CreateSellerWorkspaceProfileInput, options?: SellerWorkspaceProfileRepositoryOptions): Promise<SellerWorkspaceProfile> {
     const sellerId = validateWorkspaceSellerId(input.sellerId);
     const displayName = normalizeWorkspaceDisplayName(input.displayName);
     const intendedPhone = normalizeIntendedWhatsappPhoneE164(input.intendedWhatsappPhoneE164);
@@ -68,7 +74,7 @@ export class PostgreSqlSellerWorkspaceProfileRepository implements SellerWorkspa
     for (let attempt = 0; attempt < MAX_SLUG_INSERT_ATTEMPTS; attempt += 1) {
       const slug = buildSlugCandidate(slugBase, attempt === 0 ? undefined : randomSlugSuffix());
       try {
-        const result = await executeDatabaseQuery<SellerWorkspaceProfileRow>({
+        const result = await executor(options).execute<SellerWorkspaceProfileRow>({
           text: `
             INSERT INTO seller_workspace_profiles (
               seller_id,
@@ -89,7 +95,7 @@ export class PostgreSqlSellerWorkspaceProfileRepository implements SellerWorkspa
         return mapSellerWorkspaceProfile(row);
       } catch (error) {
         if (databaseCode(error) === "23505") {
-          const exists = await this.findByTenantContext({ sellerId });
+          const exists = await this.findByTenantContext({ sellerId }, options);
           if (exists) throw new SellerWorkspaceProfileAlreadyExistsError();
           continue;
         }
@@ -100,9 +106,9 @@ export class PostgreSqlSellerWorkspaceProfileRepository implements SellerWorkspa
     throw new SellerWorkspaceProfilePersistenceError();
   }
 
-  async findByTenantContext(tenant: TenantContext): Promise<SellerWorkspaceProfile | null> {
+  async findByTenantContext(tenant: TenantContext, options?: SellerWorkspaceProfileRepositoryOptions): Promise<SellerWorkspaceProfile | null> {
     try {
-      const result = await executeDatabaseQuery<SellerWorkspaceProfileRow>({
+      const result = await executor(options).execute<SellerWorkspaceProfileRow>({
         text: `SELECT ${PROFILE_COLUMNS} FROM seller_workspace_profiles WHERE seller_id = $1 LIMIT 1`,
         values: [tenant.sellerId],
       });
@@ -112,10 +118,10 @@ export class PostgreSqlSellerWorkspaceProfileRepository implements SellerWorkspa
     }
   }
 
-  async updateDisplayName(tenant: TenantContext, displayName: string): Promise<SellerWorkspaceProfile | null> {
+  async updateDisplayName(tenant: TenantContext, displayName: string, options?: SellerWorkspaceProfileRepositoryOptions): Promise<SellerWorkspaceProfile | null> {
     const normalizedName = normalizeWorkspaceDisplayName(displayName);
     try {
-      const result = await executeDatabaseQuery<SellerWorkspaceProfileRow>({
+      const result = await executor(options).execute<SellerWorkspaceProfileRow>({
         text: `UPDATE seller_workspace_profiles SET display_name = $2, updated_at = NOW() WHERE seller_id = $1 RETURNING ${PROFILE_COLUMNS}`,
         values: [tenant.sellerId, normalizedName],
       });
@@ -125,10 +131,10 @@ export class PostgreSqlSellerWorkspaceProfileRepository implements SellerWorkspa
     }
   }
 
-  async updateIntendedPhone(tenant: TenantContext, intendedWhatsappPhoneE164?: string | null): Promise<SellerWorkspaceProfile | null> {
+  async updateIntendedPhone(tenant: TenantContext, intendedWhatsappPhoneE164?: string | null, options?: SellerWorkspaceProfileRepositoryOptions): Promise<SellerWorkspaceProfile | null> {
     const normalizedPhone = normalizeIntendedWhatsappPhoneE164(intendedWhatsappPhoneE164);
     try {
-      const result = await executeDatabaseQuery<SellerWorkspaceProfileRow>({
+      const result = await executor(options).execute<SellerWorkspaceProfileRow>({
         text: `UPDATE seller_workspace_profiles SET intended_whatsapp_phone_e164 = $2, updated_at = NOW() WHERE seller_id = $1 RETURNING ${PROFILE_COLUMNS}`,
         values: [tenant.sellerId, normalizedPhone ?? null],
       });
@@ -138,11 +144,11 @@ export class PostgreSqlSellerWorkspaceProfileRepository implements SellerWorkspa
     }
   }
 
-  async updateLogoMetadata(tenant: TenantContext, logo: SellerWorkspaceLogoMetadata): Promise<SellerWorkspaceProfile | null> {
+  async updateLogoMetadata(tenant: TenantContext, logo: SellerWorkspaceLogoMetadata, options?: SellerWorkspaceProfileRepositoryOptions): Promise<SellerWorkspaceProfile | null> {
     const normalizedLogo = normalizeLogoMetadata(logo);
     if (!normalizedLogo) throw new SellerWorkspaceProfilePersistenceError();
     try {
-      const result = await executeDatabaseQuery<SellerWorkspaceProfileRow>({
+      const result = await executor(options).execute<SellerWorkspaceProfileRow>({
         text: `UPDATE seller_workspace_profiles SET logo_object_key = $2, logo_mime_type = $3, updated_at = NOW() WHERE seller_id = $1 RETURNING ${PROFILE_COLUMNS}`,
         values: [tenant.sellerId, normalizedLogo.objectKey, normalizedLogo.mimeType],
       });
@@ -152,9 +158,9 @@ export class PostgreSqlSellerWorkspaceProfileRepository implements SellerWorkspa
     }
   }
 
-  async clearLogoMetadata(tenant: TenantContext): Promise<SellerWorkspaceProfile | null> {
+  async clearLogoMetadata(tenant: TenantContext, options?: SellerWorkspaceProfileRepositoryOptions): Promise<SellerWorkspaceProfile | null> {
     try {
-      const result = await executeDatabaseQuery<SellerWorkspaceProfileRow>({
+      const result = await executor(options).execute<SellerWorkspaceProfileRow>({
         text: `UPDATE seller_workspace_profiles SET logo_object_key = NULL, logo_mime_type = NULL, updated_at = NOW() WHERE seller_id = $1 RETURNING ${PROFILE_COLUMNS}`,
         values: [tenant.sellerId],
       });
@@ -164,9 +170,9 @@ export class PostgreSqlSellerWorkspaceProfileRepository implements SellerWorkspa
     }
   }
 
-  async onboardingProfileExists(tenant: TenantContext): Promise<boolean> {
+  async onboardingProfileExists(tenant: TenantContext, options?: SellerWorkspaceProfileRepositoryOptions): Promise<boolean> {
     try {
-      const result = await executeDatabaseQuery<ExistsRow>({
+      const result = await executor(options).execute<ExistsRow>({
         text: "SELECT EXISTS(SELECT 1 FROM seller_workspace_profiles WHERE seller_id = $1) AS exists",
         values: [tenant.sellerId],
       });

@@ -1,9 +1,10 @@
 import {
   DatabaseQueryError,
   executeDatabaseQuery,
+  type DatabaseQueryExecutor,
   type TenantContext,
 } from "../../../../infrastructure/database";
-import type { SellerRepository, CreateSellerInput } from "../../contracts/seller.repository";
+import type { SellerRepository, CreateSellerInput, SellerRepositoryOptions } from "../../contracts/seller.repository";
 import type { Seller } from "../../domain/seller";
 import { SellerAlreadyExistsError, SellerPersistenceError } from "../../domain/seller.errors";
 
@@ -38,10 +39,14 @@ function mapSeller(row: SellerRow): Seller {
   };
 }
 
+function executor(options?: SellerRepositoryOptions): DatabaseQueryExecutor {
+  return options?.executor ?? { execute: executeDatabaseQuery };
+}
+
 export class PostgreSqlSellerRepository implements SellerRepository {
-  async create(input: CreateSellerInput): Promise<Seller> {
+  async create(input: CreateSellerInput, options?: SellerRepositoryOptions): Promise<Seller> {
     try {
-      const result = await executeDatabaseQuery<SellerRow>({
+      const result = await executor(options).execute<SellerRow>({
         text: `
           INSERT INTO sellers (seller_id)
           VALUES ($1)
@@ -59,9 +64,9 @@ export class PostgreSqlSellerRepository implements SellerRepository {
     }
   }
 
-  async findByTenantContext(tenant: TenantContext): Promise<Seller | null> {
+  async findByTenantContext(tenant: TenantContext, options?: SellerRepositoryOptions): Promise<Seller | null> {
     try {
-      const result = await executeDatabaseQuery<SellerRow>({
+      const result = await executor(options).execute<SellerRow>({
         text: `
           SELECT seller_id, created_at, updated_at
           FROM sellers
@@ -78,9 +83,9 @@ export class PostgreSqlSellerRepository implements SellerRepository {
     }
   }
 
-  async existsByTenantContext(tenant: TenantContext): Promise<boolean> {
+  async existsByTenantContext(tenant: TenantContext, options?: SellerRepositoryOptions): Promise<boolean> {
     try {
-      const result = await executeDatabaseQuery<ExistsRow>({
+      const result = await executor(options).execute<ExistsRow>({
         text: "SELECT EXISTS(SELECT 1 FROM sellers WHERE seller_id = $1) AS exists",
         values: [tenant.sellerId],
       });
