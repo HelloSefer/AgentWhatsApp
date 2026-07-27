@@ -9,6 +9,7 @@ import {
 } from "../../modules/conversation-config";
 import { PostgreSqlAuthRepository } from "../../modules/auth";
 import { PostgreSqlSellerRepository, SellerService } from "../../modules/seller";
+import { LocalSellerLogoStorageAdapter, SellerLogoService } from "../../modules/seller-logo";
 import { PostgreSqlSellerWorkspaceProfileRepository } from "../../modules/seller-workspace-profile";
 import { SellerWorkspaceOnboardingService } from "../../modules/seller-workspace-onboarding";
 import type { PersistenceComposition } from "./persistence-composition.types";
@@ -24,6 +25,7 @@ export function createPersistenceComposition(): PersistenceComposition {
   const confirmedOrderRepository = new PostgreSqlConfirmedOrderRepository();
   const sellerWorkspaceProfileRepository = new PostgreSqlSellerWorkspaceProfileRepository();
   const authRepository = new PostgreSqlAuthRepository();
+  const sellerLogoStorage = new LocalSellerLogoStorageAdapter();
 
   return Object.freeze({
     sellerService: new SellerService(sellerRepository),
@@ -31,6 +33,10 @@ export function createPersistenceComposition(): PersistenceComposition {
     conversationConfigService: new ConversationConfigService(conversationConfigRepository),
     confirmedOrderPersistenceService: new ConfirmedOrderPersistenceService(confirmedOrderRepository),
     sellerWorkspaceProfileRepository,
+    sellerLogoService: new SellerLogoService({
+      storage: sellerLogoStorage,
+      profileRepository: sellerWorkspaceProfileRepository,
+    }),
     sellerWorkspaceOnboardingService: new SellerWorkspaceOnboardingService({
       authRepository,
       sellerRepository,
