@@ -6,8 +6,8 @@ import { validateMetaEmbeddedSignupConfiguration } from "../application/meta-emb
 import { validateWhatsAppConnectionCredentialEncryptionConfiguration } from "../application/whatsapp-connection-credential-encryption.config";
 import { WhatsAppConnectionCredentialEncryptionService } from "../application/whatsapp-connection-credential-encryption.service";
 import { WhatsAppConnectionCredentialService } from "../application/whatsapp-connection-credential.service";
-import type { WhatsAppConnectionRepository, WhatsAppConnectionRepositoryOptions, VerifiedWhatsAppConnectionMetadataInput } from "../contracts/whatsapp-connection.repository";
-import type { PersistWhatsAppConnectionCredentialInput, WhatsAppConnectionCredentialStorage } from "../domain/whatsapp-connection-credentials.types";
+import type { WhatsAppConnectionFinalizationProgressInput, WhatsAppConnectionRepository, WhatsAppConnectionRepositoryOptions, VerifiedWhatsAppConnectionMetadataInput } from "../contracts/whatsapp-connection.repository";
+import type { PersistWhatsAppConnectionCredentialInput, PersistWhatsAppConnectionRegistrationPinInput, WhatsAppConnectionCredentialStorage, WhatsAppConnectionRegistrationPinStorage } from "../domain/whatsapp-connection-credentials.types";
 import {
   WhatsAppConnectionCompletionConflictError,
   WhatsAppConnectionCompletionValidationError,
@@ -18,7 +18,7 @@ import {
   WhatsAppConnectionPersistenceError,
 } from "../domain/whatsapp-connection.errors";
 import type { ActiveWhatsAppConnectionResolution, WhatsAppConnection, WhatsAppConnectionStatus } from "../domain/whatsapp-connection.types";
-import type { MetaCodeExchangeResult, MetaEmbeddedSignupTransport, MetaPhoneNumberResult, MetaTokenInspectionResult, MetaWabaResult } from "../infrastructure/meta/meta-embedded-signup.transport";
+import type { MetaCodeExchangeResult, MetaEmbeddedSignupTransport, MetaPhoneNumberResult, MetaPhoneRegistrationStatusResult, MetaTokenInspectionResult, MetaWabaResult, MetaWabaSubscriptionStatusResult } from "../infrastructure/meta/meta-embedded-signup.transport";
 import { WhatsAppConnectionController } from "../http/whatsapp-connection.controller";
 
 type TestCase = Readonly<{ name: string; passed: boolean }>;
@@ -167,6 +167,29 @@ class FakeRepository implements WhatsAppConnectionRepository {
     return this.credentials.find((entry) => entry.sellerId === tenant.sellerId && entry.connectionId === connectionId) ?? null;
   }
 
+  async persistRegistrationPinCredential(_tenant: TenantContext, _connectionId: string, _credential: PersistWhatsAppConnectionRegistrationPinInput): Promise<WhatsAppConnectionRegistrationPinStorage | null> {
+    return null;
+  }
+
+  async findRegistrationPinStorage(): Promise<WhatsAppConnectionRegistrationPinStorage | null> {
+    return null;
+  }
+
+  async persistFinalizationProgress(tenant: TenantContext, connectionId: string, input: WhatsAppConnectionFinalizationProgressInput): Promise<WhatsAppConnection | null> {
+    const current = await this.findByConnectionId(tenant, connectionId);
+    if (!current) return null;
+    const updated = {
+      ...current,
+      phoneRegistrationCompletedAt: input.phoneRegistrationCompletedAt ?? current.phoneRegistrationCompletedAt,
+      wabaSubscriptionCompletedAt: input.wabaSubscriptionCompletedAt ?? current.wabaSubscriptionCompletedAt,
+      finalizationLastErrorCode: input.clearFinalizationLastError ? undefined : input.finalizationLastErrorCode ?? current.finalizationLastErrorCode,
+      finalizationLastErrorAt: input.clearFinalizationLastError ? undefined : input.finalizationLastErrorCode ? new Date() : current.finalizationLastErrorAt,
+      updatedAt: new Date(),
+    };
+    this.replace(updated);
+    return updated;
+  }
+
   private replace(updated: WhatsAppConnection): void {
     this.connections = this.connections.map((entry) => entry.connectionId === updated.connectionId ? updated : entry);
   }
@@ -206,6 +229,18 @@ class FakeMetaTransport implements MetaEmbeddedSignupTransport {
     this.phoneCalls += 1;
     if (this.phoneError) throw this.phoneError;
     return this.phone;
+  }
+
+  async registerPhoneNumber(): Promise<void> {}
+
+  async readPhoneNumberRegistrationStatus(): Promise<MetaPhoneRegistrationStatusResult> {
+    return { id: this.phone.id, registered: true };
+  }
+
+  async subscribeWabaToWebhooks(): Promise<void> {}
+
+  async readWabaWebhookSubscriptionStatus(): Promise<MetaWabaSubscriptionStatusResult> {
+    return { wabaId: this.waba.id, subscribed: true };
   }
 }
 

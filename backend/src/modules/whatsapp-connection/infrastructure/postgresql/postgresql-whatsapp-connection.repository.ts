@@ -8,10 +8,16 @@ import {
 import type {
   CreateWhatsAppConnectionCandidateInput,
   VerifiedWhatsAppConnectionMetadataInput,
+  WhatsAppConnectionFinalizationProgressInput,
   WhatsAppConnectionRepository,
   WhatsAppConnectionRepositoryOptions,
 } from "../../contracts/whatsapp-connection.repository";
-import type { PersistWhatsAppConnectionCredentialInput, WhatsAppConnectionCredentialStorage } from "../../domain/whatsapp-connection-credentials.types";
+import type {
+  PersistWhatsAppConnectionCredentialInput,
+  PersistWhatsAppConnectionRegistrationPinInput,
+  WhatsAppConnectionCredentialStorage,
+  WhatsAppConnectionRegistrationPinStorage,
+} from "../../domain/whatsapp-connection-credentials.types";
 import {
   WhatsAppConnectionActiveAlreadyExistsError,
   WhatsAppConnectionPersistenceError,
@@ -33,8 +39,9 @@ import {
 } from "../../domain/whatsapp-connection.validation";
 import { mapWhatsAppConnection, type WhatsAppConnectionRow } from "./whatsapp-connection-row.mapper";
 
-const CONNECTION_COLUMNS = "connection_id, seller_id, provider, status, meta_business_id, waba_id, phone_number_id, display_phone_number, verified_name, connected_at, last_verified_at, disconnected_at, created_at, updated_at";
+const CONNECTION_COLUMNS = "connection_id, seller_id, provider, status, meta_business_id, waba_id, phone_number_id, display_phone_number, verified_name, connected_at, last_verified_at, phone_registration_completed_at, waba_subscription_completed_at, finalization_last_error_code, finalization_last_error_at, disconnected_at, created_at, updated_at";
 const CREDENTIAL_COLUMNS = "connection_id, seller_id, encrypted_access_token, token_key_version, token_fingerprint, token_expires_at";
+const REGISTRATION_PIN_COLUMNS = "connection_id, seller_id, encrypted_registration_pin, registration_pin_key_version, registration_pin_fingerprint";
 
 type WhatsAppConnectionCredentialRow = Readonly<{
   connection_id: string;
@@ -43,6 +50,14 @@ type WhatsAppConnectionCredentialRow = Readonly<{
   token_key_version: string;
   token_fingerprint: string;
   token_expires_at: Date | string | null;
+}>;
+
+type WhatsAppConnectionRegistrationPinRow = Readonly<{
+  connection_id: string;
+  seller_id: string;
+  encrypted_registration_pin: string;
+  registration_pin_key_version: string;
+  registration_pin_fingerprint: string;
 }>;
 
 function executor(options?: WhatsAppConnectionRepositoryOptions): DatabaseQueryExecutor {
@@ -108,6 +123,23 @@ function mapCredentialStorage(row: WhatsAppConnectionCredentialRow): WhatsAppCon
     tokenFingerprint: row.token_fingerprint,
     tokenExpiresAt,
   };
+}
+
+function mapRegistrationPinStorage(row: WhatsAppConnectionRegistrationPinRow): WhatsAppConnectionRegistrationPinStorage {
+  return {
+    connectionId: row.connection_id,
+    sellerId: row.seller_id,
+    encryptedRegistrationPin: normalizeCredentialField(row.encrypted_registration_pin),
+    registrationPinKeyVersion: normalizeCredentialField(row.registration_pin_key_version),
+    registrationPinFingerprint: normalizeCredentialField(row.registration_pin_fingerprint),
+  };
+}
+
+function normalizeFinalizationErrorCode(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 64 || !/^[a-z0-9_]+$/u.test(trimmed)) throw new WhatsAppConnectionPersistenceError();
+  return trimmed;
 }
 
 export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectionRepository {
@@ -325,6 +357,92 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
       return result.rows[0] ? mapCredentialStorage(result.rows[0]) : null;
     } catch (error) {
       mapReadError(error);
+    }
+  }
+
+  async persistRegistrationPinCredential(tenant: TenantContext, connectionId: string, credential: PersistWhatsAppConnectionRegistrationPinInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionRegistrationPinStorage | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    const encryptedRegistrationPin = normalizeCredentialField(credential.encryptedRegistrationPin);
+    const registrationPinKeyVersion = normalizeCredentialField(credential.registrationPinKeyVersion);
+    const registrationPinFingerprint = normalizeCredentialField(credential.registrationPinFingerprint);
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRegistrationPinRow>({
+        text: `
+          UPDATE whatsapp_connections
+          SET
+            encrypted_registration_pin = $3,
+            registration_pin_key_version = $4,
+            registration_pin_fingerprint = $5,
+            updated_at = NOW()
+          WHERE seller_id = $1 AND connection_id = $2
+          RETURNING ${REGISTRATION_PIN_COLUMNS}
+        `,
+        values: [tenant.sellerId, normalizedConnectionId, encryptedRegistrationPin, registrationPinKeyVersion, registrationPinFingerprint],
+      });
+      return result.rows[0] ? mapRegistrationPinStorage(result.rows[0]) : null;
+    } catch (error) {
+      mapWriteError(error);
+    }
+  }
+
+  async findRegistrationPinStorage(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionRegistrationPinStorage | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRegistrationPinRow>({
+        text: `
+          SELECT ${REGISTRATION_PIN_COLUMNS}
+          FROM whatsapp_connections
+          WHERE seller_id = $1
+            AND connection_id = $2
+            AND encrypted_registration_pin IS NOT NULL
+            AND registration_pin_key_version IS NOT NULL
+            AND registration_pin_fingerprint IS NOT NULL
+          LIMIT 1
+        `,
+        values: [tenant.sellerId, normalizedConnectionId],
+      });
+      return result.rows[0] ? mapRegistrationPinStorage(result.rows[0]) : null;
+    } catch (error) {
+      mapReadError(error);
+    }
+  }
+
+  async persistFinalizationProgress(tenant: TenantContext, connectionId: string, input: WhatsAppConnectionFinalizationProgressInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    const errorCode = normalizeFinalizationErrorCode(input.finalizationLastErrorCode);
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `
+          UPDATE whatsapp_connections
+          SET
+            phone_registration_completed_at = COALESCE(phone_registration_completed_at, $3),
+            waba_subscription_completed_at = COALESCE(waba_subscription_completed_at, $4),
+            finalization_last_error_code = CASE
+              WHEN $5::boolean THEN NULL
+              WHEN $6::varchar IS NOT NULL THEN $6
+              ELSE finalization_last_error_code
+            END,
+            finalization_last_error_at = CASE
+              WHEN $5::boolean THEN NULL
+              WHEN $6::varchar IS NOT NULL THEN NOW()
+              ELSE finalization_last_error_at
+            END,
+            updated_at = NOW()
+          WHERE seller_id = $1 AND connection_id = $2
+          RETURNING ${CONNECTION_COLUMNS}
+        `,
+        values: [
+          tenant.sellerId,
+          normalizedConnectionId,
+          input.phoneRegistrationCompletedAt ?? null,
+          input.wabaSubscriptionCompletedAt ?? null,
+          input.clearFinalizationLastError === true,
+          errorCode,
+        ],
+      });
+      return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
+    } catch (error) {
+      mapWriteError(error);
     }
   }
 }

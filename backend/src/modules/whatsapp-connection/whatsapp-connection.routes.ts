@@ -5,6 +5,7 @@ import { requireAuthenticatedPrincipal, requirePermission } from "../auth/http/a
 import { rateLimitAuth } from "../auth/http/auth-rate-limit.middleware";
 import { getMetaEmbeddedSignupConfiguration } from "./application/meta-embedded-signup.config";
 import { EmbeddedSignupCompletionService } from "./application/embedded-signup-completion.service";
+import { WhatsAppConnectionFinalizationService } from "./application/whatsapp-connection-finalization.service";
 import { WhatsAppConnectionCredentialEncryptionService } from "./application/whatsapp-connection-credential-encryption.service";
 import { getWhatsAppConnectionCredentialEncryptionConfiguration } from "./application/whatsapp-connection-credential-encryption.config";
 import { WhatsAppConnectionCredentialService } from "./application/whatsapp-connection-credential.service";
@@ -49,6 +50,10 @@ export function createWhatsAppConnectionRoutes(
         inspectToken: async () => { throw new Error("Meta configuration unavailable."); },
         readWaba: async () => { throw new Error("Meta configuration unavailable."); },
         readPhoneNumber: async () => { throw new Error("Meta configuration unavailable."); },
+        registerPhoneNumber: async () => { throw new Error("Meta configuration unavailable."); },
+        readPhoneNumberRegistrationStatus: async () => { throw new Error("Meta configuration unavailable."); },
+        subscribeWabaToWebhooks: async () => { throw new Error("Meta configuration unavailable."); },
+        readWabaWebhookSubscriptionStatus: async () => { throw new Error("Meta configuration unavailable."); },
       };
   const completionService = new EmbeddedSignupCompletionService(
     postgreSqlWhatsAppConnectionRepository,
@@ -56,7 +61,12 @@ export function createWhatsAppConnectionRoutes(
     metaTransport,
     metaConfiguration,
   );
-  const controller = new WhatsAppConnectionController(completionService);
+  const finalizationService = new WhatsAppConnectionFinalizationService(
+    postgreSqlWhatsAppConnectionRepository,
+    credentialService,
+    metaTransport,
+  );
+  const controller = new WhatsAppConnectionController(completionService, finalizationService);
 
   router.post(
     "/embedded-signup/complete",
@@ -64,6 +74,14 @@ export function createWhatsAppConnectionRoutes(
     rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
     authorize,
     controller.completeEmbeddedSignup,
+  );
+
+  router.post(
+    "/:connectionId/finalize",
+    authenticate,
+    rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
+    authorize,
+    controller.finalizeConnection,
   );
 
   return router;

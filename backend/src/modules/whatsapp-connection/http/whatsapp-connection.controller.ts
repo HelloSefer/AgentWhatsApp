@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import type { AuthorizedRequest } from "../../auth/http/auth-request.types";
 import type { EmbeddedSignupCompletionService } from "../application/embedded-signup-completion.service";
+import type { WhatsAppConnectionFinalizationService } from "../application/whatsapp-connection-finalization.service";
 import { WhatsAppConnectionCompletionValidationError } from "../domain/whatsapp-connection.errors";
 import { sendWhatsappConnectionError } from "./whatsapp-connection-http.errors";
 
@@ -22,7 +23,10 @@ function strictCompletionBody(req: Request): Record<string, unknown> {
 }
 
 export class WhatsAppConnectionController {
-  constructor(private readonly completionService: EmbeddedSignupCompletionService) {}
+  constructor(
+    private readonly completionService: EmbeddedSignupCompletionService,
+    private readonly finalizationService?: WhatsAppConnectionFinalizationService,
+  ) {}
 
   completeEmbeddedSignup = async (req: Request, res: Response): Promise<Response> => {
     try {
@@ -33,6 +37,19 @@ export class WhatsAppConnectionController {
         wabaId: body.wabaId as string,
         phoneNumberId: body.phoneNumberId as string,
       });
+      return res.status(200).json(result);
+    } catch (error) {
+      return sendWhatsappConnectionError(res, error);
+    }
+  };
+
+  finalizeConnection = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      if (!this.finalizationService) throw new WhatsAppConnectionCompletionValidationError();
+      const authorized = req as AuthorizedRequest;
+      if (Object.keys(bodyRecord(req)).length !== 0) throw new WhatsAppConnectionCompletionValidationError();
+      const connectionId = typeof req.params.connectionId === "string" ? req.params.connectionId : "";
+      const result = await this.finalizationService.finalize(authorized.tenant, connectionId);
       return res.status(200).json(result);
     } catch (error) {
       return sendWhatsappConnectionError(res, error);

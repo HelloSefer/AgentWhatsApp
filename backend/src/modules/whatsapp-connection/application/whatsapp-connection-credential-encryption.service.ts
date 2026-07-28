@@ -70,13 +70,53 @@ export class WhatsAppConnectionCredentialEncryptionService {
   constructor(private readonly configuration: WhatsAppConnectionCredentialEncryptionConfiguration) {}
 
   encryptAccessToken(accessToken: string): { encryptedAccessToken: string; tokenKeyVersion: string; tokenFingerprint: string } {
-    if (typeof accessToken !== "string" || !accessToken) throw new WhatsAppConnectionCredentialEncryptionError();
+    const encrypted = this.encryptSecret(accessToken, "access-token");
+    return {
+      encryptedAccessToken: encrypted.encryptedSecret,
+      tokenKeyVersion: encrypted.keyVersion,
+      tokenFingerprint: this.fingerprintAccessToken(accessToken),
+    };
+  }
+
+  decryptAccessToken(encryptedAccessToken: string): string {
+    return this.decryptSecret(encryptedAccessToken);
+  }
+
+  fingerprintAccessToken(accessToken: string): string {
+    return this.fingerprintSecret(accessToken, "access-token");
+  }
+
+  encryptRegistrationPin(registrationPin: string): { encryptedRegistrationPin: string; registrationPinKeyVersion: string; registrationPinFingerprint: string } {
+    const encrypted = this.encryptSecret(registrationPin, "registration-pin");
+    return {
+      encryptedRegistrationPin: encrypted.encryptedSecret,
+      registrationPinKeyVersion: encrypted.keyVersion,
+      registrationPinFingerprint: this.fingerprintRegistrationPin(registrationPin),
+    };
+  }
+
+  decryptRegistrationPin(encryptedRegistrationPin: string): string {
+    return this.decryptSecret(encryptedRegistrationPin);
+  }
+
+  fingerprintRegistrationPin(registrationPin: string): string {
+    return this.fingerprintSecret(registrationPin, "registration-pin");
+  }
+
+  encryptedTokensMatch(left: string, right: string): boolean {
+    const leftBuffer = Buffer.from(left);
+    const rightBuffer = Buffer.from(right);
+    return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+  }
+
+  private encryptSecret(secret: string, purpose: "access-token" | "registration-pin"): { encryptedSecret: string; keyVersion: string } {
+    if (typeof secret !== "string" || !secret) throw new WhatsAppConnectionCredentialEncryptionError();
     const key = this.configuration.keys.get(this.configuration.activeKeyVersion);
     if (!key || key.length !== 32) throw new WhatsAppConnectionCredentialEncryptionError();
 
     const iv = randomBytes(IV_BYTES);
     const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
-    const ciphertext = Buffer.concat([cipher.update(accessToken, "utf8"), cipher.final()]);
+    const ciphertext = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
     const tag = cipher.getAuthTag();
     const envelope: WhatsAppConnectionEncryptedTokenEnvelope = {
       v: ENVELOPE_VERSION,
@@ -88,14 +128,13 @@ export class WhatsAppConnectionCredentialEncryptionService {
     };
 
     return {
-      encryptedAccessToken: JSON.stringify(envelope),
-      tokenKeyVersion: this.configuration.activeKeyVersion,
-      tokenFingerprint: this.fingerprintAccessToken(accessToken),
+      encryptedSecret: JSON.stringify(envelope),
+      keyVersion: this.configuration.activeKeyVersion,
     };
   }
 
-  decryptAccessToken(encryptedAccessToken: string): string {
-    const envelope = parseEnvelope(encryptedAccessToken);
+  private decryptSecret(encryptedSecret: string): string {
+    const envelope = parseEnvelope(encryptedSecret);
     const key = this.configuration.keys.get(envelope.keyVersion);
     if (!key || key.length !== 32) throw new WhatsAppConnectionCredentialEncryptionError();
 
@@ -115,16 +154,13 @@ export class WhatsAppConnectionCredentialEncryptionService {
     }
   }
 
-  fingerprintAccessToken(accessToken: string): string {
-    if (typeof accessToken !== "string" || !accessToken) throw new WhatsAppConnectionCredentialEncryptionError();
+  private fingerprintSecret(secret: string, purpose: "access-token" | "registration-pin"): string {
+    if (typeof secret !== "string" || !secret) throw new WhatsAppConnectionCredentialEncryptionError();
     const key = this.configuration.keys.get(this.configuration.activeKeyVersion);
     if (!key || key.length !== 32) throw new WhatsAppConnectionCredentialEncryptionError();
-    return `hmac-sha256:${createHmac("sha256", key).update(accessToken, "utf8").digest("hex")}`;
-  }
-
-  encryptedTokensMatch(left: string, right: string): boolean {
-    const leftBuffer = Buffer.from(left);
-    const rightBuffer = Buffer.from(right);
-    return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+    if (purpose === "access-token") {
+      return `hmac-sha256:${createHmac("sha256", key).update(secret, "utf8").digest("hex")}`;
+    }
+    return `hmac-sha256:${purpose}:${createHmac("sha256", key).update(purpose, "utf8").update("\0", "utf8").update(secret, "utf8").digest("hex")}`;
   }
 }

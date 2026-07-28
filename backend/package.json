@@ -42,7 +42,8 @@
     "test:phase-10e-backend-acceptance": "npm run build && node dist/modules/onboarding/testing/phase-10e-backend-acceptance-test.command.js",
     "test:phase-11a-whatsapp-connection": "npm run build && node dist/modules/whatsapp-connection/testing/phase-11a-whatsapp-connection-test.command.js",
     "test:phase-11b-whatsapp-connection-credentials": "npm run build && node dist/modules/whatsapp-connection/testing/phase-11b-whatsapp-connection-credentials-test.command.js",
-    "test:phase-11d-embedded-signup-completion": "node dist/modules/whatsapp-connection/testing/phase-11d-embedded-signup-completion-test.command.js"
+    "test:phase-11d-embedded-signup-completion": "node dist/modules/whatsapp-connection/testing/phase-11d-embedded-signup-completion-test.command.js",
+    "test:phase-11e1-finalization": "node dist/modules/whatsapp-connection/testing/phase-11e1-finalization-test.command.js"
   },
   "keywords": [],
   "author": "",

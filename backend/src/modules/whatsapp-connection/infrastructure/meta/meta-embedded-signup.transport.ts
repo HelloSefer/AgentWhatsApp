@@ -24,11 +24,25 @@ export type MetaPhoneNumberResult = Readonly<{
   verifiedName?: string | null;
 }>;
 
+export type MetaPhoneRegistrationStatusResult = Readonly<{
+  id: string;
+  registered: boolean;
+}>;
+
+export type MetaWabaSubscriptionStatusResult = Readonly<{
+  wabaId: string;
+  subscribed: boolean;
+}>;
+
 export interface MetaEmbeddedSignupTransport {
   exchangeCode(code: string): Promise<MetaCodeExchangeResult>;
   inspectToken(accessToken: string): Promise<MetaTokenInspectionResult>;
   readWaba(wabaId: string, accessToken: string): Promise<MetaWabaResult>;
   readPhoneNumber(phoneNumberId: string, accessToken: string): Promise<MetaPhoneNumberResult>;
+  registerPhoneNumber(phoneNumberId: string, registrationPin: string, accessToken: string): Promise<void>;
+  readPhoneNumberRegistrationStatus(phoneNumberId: string, accessToken: string): Promise<MetaPhoneRegistrationStatusResult>;
+  subscribeWabaToWebhooks(wabaId: string, accessToken: string): Promise<void>;
+  readWabaWebhookSubscriptionStatus(wabaId: string, accessToken: string): Promise<MetaWabaSubscriptionStatusResult>;
 }
 
 type GraphErrorCode = "configuration" | "auth" | "not_found" | "validation" | "unavailable";
@@ -122,6 +136,29 @@ export class FetchMetaEmbeddedSignupTransport implements MetaEmbeddedSignupTrans
     }
   }
 
+  private async post(path: string, params: URLSearchParams, accessToken: string): Promise<JsonRecord> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      params.set("access_token", accessToken);
+      const response = await this.fetchImpl(this.graphUrl(path, new URLSearchParams()), {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+        signal: controller.signal,
+      });
+      const body = await boundedJson(response);
+      if (!response.ok) throw new WhatsAppConnectionMetaTransportError(classifyStatus(response.status));
+      return body;
+    } catch (error) {
+      if (error instanceof WhatsAppConnectionMetaTransportError) throw error;
+      throw new WhatsAppConnectionMetaTransportError("unavailable");
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async exchangeCode(code: string): Promise<MetaCodeExchangeResult> {
     const body = await this.request("oauth/access_token", new URLSearchParams({
       client_id: this.configuration.appId,
@@ -171,5 +208,33 @@ export class FetchMetaEmbeddedSignupTransport implements MetaEmbeddedSignupTrans
       displayPhoneNumber: stringField(body.display_phone_number),
       verifiedName: stringField(body.verified_name),
     };
+  }
+
+  async registerPhoneNumber(phoneNumberId: string, registrationPin: string, accessToken: string): Promise<void> {
+    const body = await this.post(`${phoneNumberId}/register`, new URLSearchParams({
+      messaging_product: "whatsapp",
+      pin: registrationPin,
+    }), accessToken);
+    if (body.success !== true) throw new WhatsAppConnectionMetaTransportError("validation");
+  }
+
+  async readPhoneNumberRegistrationStatus(phoneNumberId: string, accessToken: string): Promise<MetaPhoneRegistrationStatusResult> {
+    const body = await this.request(phoneNumberId, new URLSearchParams({ fields: "id,code_verification_status" }), accessToken);
+    const id = stringField(body.id);
+    const status = stringField(body.code_verification_status);
+    if (!id || !status) throw new WhatsAppConnectionMetaTransportError("not_found");
+    return { id, registered: status.toUpperCase() === "VERIFIED" };
+  }
+
+  async subscribeWabaToWebhooks(wabaId: string, accessToken: string): Promise<void> {
+    const body = await this.post(`${wabaId}/subscribed_apps`, new URLSearchParams(), accessToken);
+    if (body.success !== true) throw new WhatsAppConnectionMetaTransportError("validation");
+  }
+
+  async readWabaWebhookSubscriptionStatus(wabaId: string, accessToken: string): Promise<MetaWabaSubscriptionStatusResult> {
+    const body = await this.request(`${wabaId}/subscribed_apps`, new URLSearchParams({ fields: "id" }), accessToken);
+    const data = Array.isArray(body.data) ? body.data : [];
+    const subscribed = data.some((entry) => isRecord(entry) && stringField(entry.id) === this.configuration.appId);
+    return { wabaId, subscribed };
   }
 }

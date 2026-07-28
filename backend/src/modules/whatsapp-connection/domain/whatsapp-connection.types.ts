@@ -25,6 +25,10 @@ export type WhatsAppConnection = Readonly<{
   verifiedName?: string;
   connectedAt?: Date;
   lastVerifiedAt?: Date;
+  phoneRegistrationCompletedAt?: Date;
+  wabaSubscriptionCompletedAt?: Date;
+  finalizationLastErrorCode?: string;
+  finalizationLastErrorAt?: Date;
   disconnectedAt?: Date;
   createdAt: Date;
   updatedAt: Date;

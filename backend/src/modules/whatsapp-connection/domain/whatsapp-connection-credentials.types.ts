@@ -16,11 +16,25 @@ export type WhatsAppConnectionCredentialStorage = Readonly<{
   tokenExpiresAt?: Date;
 }>;
 
+export type WhatsAppConnectionRegistrationPinStorage = Readonly<{
+  connectionId: string;
+  sellerId: string;
+  encryptedRegistrationPin: string;
+  registrationPinKeyVersion: string;
+  registrationPinFingerprint: string;
+}>;
+
 export type PersistWhatsAppConnectionCredentialInput = Readonly<{
   encryptedAccessToken: string;
   tokenKeyVersion: string;
   tokenFingerprint: string;
   tokenExpiresAt?: Date | null;
+}>;
+
+export type PersistWhatsAppConnectionRegistrationPinInput = Readonly<{
+  encryptedRegistrationPin: string;
+  registrationPinKeyVersion: string;
+  registrationPinFingerprint: string;
 }>;
 
 export type StoreWhatsAppConnectionAccessTokenInput = Readonly<{

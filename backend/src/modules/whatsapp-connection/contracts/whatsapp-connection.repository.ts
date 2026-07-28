@@ -1,5 +1,10 @@
 import type { DatabaseQueryExecutor, TenantContext } from "../../../infrastructure/database";
-import type { PersistWhatsAppConnectionCredentialInput, WhatsAppConnectionCredentialStorage } from "../domain/whatsapp-connection-credentials.types";
+import type {
+  PersistWhatsAppConnectionCredentialInput,
+  PersistWhatsAppConnectionRegistrationPinInput,
+  WhatsAppConnectionCredentialStorage,
+  WhatsAppConnectionRegistrationPinStorage,
+} from "../domain/whatsapp-connection-credentials.types";
 import type { ActiveWhatsAppConnectionResolution, WhatsAppConnection, WhatsAppConnectionStatus } from "../domain/whatsapp-connection.types";
 
 export type WhatsAppConnectionRepositoryOptions = Readonly<{
@@ -18,6 +23,13 @@ export type VerifiedWhatsAppConnectionMetadataInput = Readonly<{
   verifiedName?: string | null;
 }>;
 
+export type WhatsAppConnectionFinalizationProgressInput = Readonly<{
+  phoneRegistrationCompletedAt?: Date | null;
+  wabaSubscriptionCompletedAt?: Date | null;
+  finalizationLastErrorCode?: string | null;
+  clearFinalizationLastError?: boolean;
+}>;
+
 export interface WhatsAppConnectionRepository {
   createCandidate(tenant: TenantContext, input?: CreateWhatsAppConnectionCandidateInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection>;
   findByConnectionId(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
@@ -31,4 +43,7 @@ export interface WhatsAppConnectionRepository {
   persistVerifiedMetadata(tenant: TenantContext, connectionId: string, metadata: VerifiedWhatsAppConnectionMetadataInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
   persistAccessTokenCredential(tenant: TenantContext, connectionId: string, credential: PersistWhatsAppConnectionCredentialInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionCredentialStorage | null>;
   findCredentialStorage(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionCredentialStorage | null>;
+  persistRegistrationPinCredential(tenant: TenantContext, connectionId: string, credential: PersistWhatsAppConnectionRegistrationPinInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionRegistrationPinStorage | null>;
+  findRegistrationPinStorage(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionRegistrationPinStorage | null>;
+  persistFinalizationProgress(tenant: TenantContext, connectionId: string, input: WhatsAppConnectionFinalizationProgressInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
 }

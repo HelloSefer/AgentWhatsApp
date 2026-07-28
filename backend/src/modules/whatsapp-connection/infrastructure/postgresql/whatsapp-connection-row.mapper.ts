@@ -13,6 +13,10 @@ export type WhatsAppConnectionRow = Readonly<{
   verified_name: string | null;
   connected_at: Date | string | null;
   last_verified_at: Date | string | null;
+  phone_registration_completed_at: Date | string | null;
+  waba_subscription_completed_at: Date | string | null;
+  finalization_last_error_code: string | null;
+  finalization_last_error_at: Date | string | null;
   disconnected_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
@@ -48,6 +52,10 @@ export function mapWhatsAppConnection(row: WhatsAppConnectionRow): WhatsAppConne
     verifiedName: row.verified_name ?? undefined,
     connectedAt: date(row.connected_at),
     lastVerifiedAt: date(row.last_verified_at),
+    phoneRegistrationCompletedAt: date(row.phone_registration_completed_at),
+    wabaSubscriptionCompletedAt: date(row.waba_subscription_completed_at),
+    finalizationLastErrorCode: row.finalization_last_error_code ?? undefined,
+    finalizationLastErrorAt: date(row.finalization_last_error_at),
     disconnectedAt: date(row.disconnected_at),
     createdAt: requiredDate(row.created_at),
     updatedAt: requiredDate(row.updated_at),

@@ -12,6 +12,11 @@ import {
   WhatsAppConnectionCompletionValidationError,
   WhatsAppConnectionCompletionVerificationError,
   WhatsAppConnectionCredentialEncryptionError,
+  WhatsAppConnectionFinalizationAccessDeniedError,
+  WhatsAppConnectionFinalizationConflictError,
+  WhatsAppConnectionFinalizationRetryableError,
+  WhatsAppConnectionFinalizationValidationError,
+  WhatsAppConnectionFinalizationVerificationError,
   WhatsAppConnectionMetaConfigurationError,
   WhatsAppConnectionPersistenceError,
 } from "../domain/whatsapp-connection.errors";
@@ -28,6 +33,11 @@ export function sendWhatsappConnectionError(res: Response, error: unknown): Resp
   if (error instanceof WhatsAppConnectionCompletionAccessDeniedError) return res.status(403).json({ message: "WhatsApp connection could not be verified." });
   if (error instanceof WhatsAppConnectionCompletionConflictError) return res.status(409).json({ message: "WhatsApp connection could not be completed safely." });
   if (error instanceof WhatsAppConnectionCompletionVerificationError) return res.status(400).json({ message: "WhatsApp connection could not be verified." });
+  if (error instanceof WhatsAppConnectionFinalizationValidationError) return res.status(400).json({ message: "Invalid request." });
+  if (error instanceof WhatsAppConnectionFinalizationAccessDeniedError) return res.status(403).json({ message: "WhatsApp connection could not be finalized." });
+  if (error instanceof WhatsAppConnectionFinalizationConflictError) return res.status(409).json({ message: "WhatsApp connection could not be finalized safely." });
+  if (error instanceof WhatsAppConnectionFinalizationRetryableError) return res.status(503).json({ message: "WhatsApp connection finalization can be retried." });
+  if (error instanceof WhatsAppConnectionFinalizationVerificationError) return res.status(400).json({ message: "WhatsApp connection could not be finalized." });
   if (error instanceof WhatsAppConnectionMetaConfigurationError) return res.status(503).json({ message: "WhatsApp connection is not configured." });
   if (error instanceof WhatsAppConnectionCredentialEncryptionError || error instanceof WhatsAppConnectionPersistenceError) return res.status(500).json({ message: "WhatsApp connection service unavailable." });
   return res.status(500).json({ message: "WhatsApp connection service unavailable." });

@@ -161,7 +161,7 @@ export class EmbeddedSignupCompletionService {
         const verifying = await this.repository.updateLifecycleStatus(tenant, candidate.connectionId, "VERIFYING", { executor });
         if (!verifying) throw new WhatsAppConnectionPersistenceError();
 
-        const stored = await credentialService.storeAccessToken(tenant, candidate.connectionId, { accessToken, tokenExpiresAt });
+        const stored = await credentialService.storeAccessToken(tenant, candidate.connectionId, { accessToken, tokenExpiresAt }, { executor });
         if (!stored) throw new WhatsAppConnectionPersistenceError();
 
         return verifying;

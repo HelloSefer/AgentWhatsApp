@@ -87,3 +87,38 @@ export class WhatsAppConnectionCompletionVerificationError extends Error {
     this.name = "WhatsAppConnectionCompletionVerificationError";
   }
 }
+
+export class WhatsAppConnectionFinalizationValidationError extends Error {
+  constructor() {
+    super("WhatsApp connection finalization input is invalid.");
+    this.name = "WhatsAppConnectionFinalizationValidationError";
+  }
+}
+
+export class WhatsAppConnectionFinalizationConflictError extends Error {
+  constructor() {
+    super("WhatsApp connection finalization conflicts with existing state.");
+    this.name = "WhatsAppConnectionFinalizationConflictError";
+  }
+}
+
+export class WhatsAppConnectionFinalizationAccessDeniedError extends Error {
+  constructor() {
+    super("WhatsApp connection finalization is not authorized.");
+    this.name = "WhatsAppConnectionFinalizationAccessDeniedError";
+  }
+}
+
+export class WhatsAppConnectionFinalizationVerificationError extends Error {
+  constructor() {
+    super("WhatsApp connection finalization could not be verified.");
+    this.name = "WhatsAppConnectionFinalizationVerificationError";
+  }
+}
+
+export class WhatsAppConnectionFinalizationRetryableError extends Error {
+  constructor() {
+    super("WhatsApp connection finalization can be retried.");
+    this.name = "WhatsAppConnectionFinalizationRetryableError";
+  }
+}
