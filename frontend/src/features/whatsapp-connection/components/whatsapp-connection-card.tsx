@@ -188,6 +188,23 @@ export function WhatsappConnectionCard() {
     disconnectMutation.mutate(connection.connectionId);
   };
 
+  if (wizardMode) {
+    return (
+      <section aria-labelledby="whatsapp-guided-setup-heading" className="mx-auto w-full max-w-[1120px]">
+        <CustomerOwnedMetaAppWizard
+          initialConnection={wizardMode === "replace" ? safePendingConnection : connection}
+          mode={wizardMode}
+          onCancel={() => setWizardMode(null)}
+          onDone={async () => {
+            setWizardMode(null);
+            await refreshCurrent();
+          }}
+          selectedPhoneFromStatus={connection ? { maskedPhoneNumber: connection.maskedPhoneNumber, verifiedName: connection.verifiedName } : null}
+        />
+      </section>
+    );
+  }
+
   return (
     <div className="space-y-5">
     <Card className="rounded-lg border-marketing-border bg-marketing-surface shadow-[0_18px_36px_-30px_oklch(0.2_0.04_155/0.35)]">
@@ -365,18 +382,6 @@ export function WhatsappConnectionCard() {
       </CardContent>
     </Card>
 
-    {wizardMode ? (
-      <CustomerOwnedMetaAppWizard
-        initialConnection={wizardMode === "replace" ? safePendingConnection : connection}
-        mode={wizardMode}
-        onCancel={() => setWizardMode(null)}
-        onDone={async () => {
-          setWizardMode(null);
-          await refreshCurrent();
-        }}
-        selectedPhoneFromStatus={connection ? { maskedPhoneNumber: connection.maskedPhoneNumber, verifiedName: connection.verifiedName } : null}
-      />
-    ) : null}
     </div>
   );
 }

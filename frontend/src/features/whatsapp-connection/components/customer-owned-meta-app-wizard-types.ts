@@ -21,6 +21,11 @@ export type CredentialsForm = Readonly<{
   systemUserAccessToken: string;
 }>;
 
+export type SelectedConnectionSummary = Readonly<{
+  maskedPhoneNumber: string | null;
+  verifiedName: string | null;
+}>;
+
 export const EMPTY_CREDENTIALS: CredentialsForm = {
   appId: "",
   appSecret: "",

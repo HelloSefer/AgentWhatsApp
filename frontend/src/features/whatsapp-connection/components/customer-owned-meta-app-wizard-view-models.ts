@@ -1,5 +1,5 @@
 import type { CurrentWhatsAppConnection, DiscoveredWhatsAppPhone } from "../services/embedded-signup-completion-service";
-import type { CustomerOwnedMetaAppWizardMode, WizardStep } from "./customer-owned-meta-app-wizard-types";
+import type { CustomerOwnedMetaAppWizardMode, SelectedConnectionSummary, WizardStep } from "./customer-owned-meta-app-wizard-types";
 
 export const WIZARD_STEPS: Array<{ id: WizardStep; label: string }> = [
   { id: "prepare", label: "Prepare Meta" },
@@ -41,6 +41,13 @@ export function statusText(value: string | null): string {
 export function selectedPhoneLabel(phone: Pick<DiscoveredWhatsAppPhone, "maskedPhoneNumber" | "verifiedName"> | null): string {
   if (!phone) return "Selected WhatsApp number";
   return [phone.maskedPhoneNumber, phone.verifiedName].filter(Boolean).join(" - ") || "Selected WhatsApp number";
+}
+
+export function selectedPhoneSummary(phone: Pick<DiscoveredWhatsAppPhone, "maskedPhoneNumber" | "verifiedName"> | null): SelectedConnectionSummary {
+  return {
+    maskedPhoneNumber: phone?.maskedPhoneNumber ?? null,
+    verifiedName: phone?.verifiedName ?? null,
+  };
 }
 
 export function setupTitle(mode: CustomerOwnedMetaAppWizardMode): string {

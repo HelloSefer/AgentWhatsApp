@@ -1,63 +1,71 @@
 "use client";
 
-import { useState } from "react";
-import { CheckCircle2, ChevronDown, ExternalLink } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { AppWindow, Building2, ExternalLink, KeyRound, MessageCircle, UserRound } from "lucide-react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const META_DEVELOPERS_URL = "https://developers.facebook.com/";
 
 export function CustomerOwnedMetaAppPrepareStep({ onReady }: Readonly<{ onReady: () => void }>) {
-  const [helpOpen, setHelpOpen] = useState(false);
   const checklist = [
-    "Facebook account",
-    "Meta Business Portfolio",
-    "Meta App with WhatsApp added",
-    "WhatsApp Business Account and phone number",
-    "System User with access to the App and WhatsApp Account",
+    { label: "Facebook account", icon: UserRound },
+    { label: "Meta Business Portfolio", icon: Building2 },
+    { label: "Meta App with WhatsApp added", icon: AppWindow },
+    { label: "WhatsApp Business Account and phone number", icon: MessageCircle },
+    { label: "System User with access to the App and WhatsApp Account", icon: KeyRound, className: "sm:col-span-2" },
   ];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div>
         <h3 className="text-lg font-semibold text-foreground">Prepare Meta</h3>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          You will use assets owned by your business in Meta. AgentWhatsApp checks access through the backend before activating the number.
+        <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
+          Make sure these items are ready in your Meta account before continuing.
         </p>
       </div>
 
-      <ul className="grid gap-2">
-        {checklist.map((item) => (
-          <li className="flex items-center gap-3 rounded-xl border border-border bg-background px-3 py-2.5 text-sm" key={item}>
-            <CheckCircle2 aria-hidden="true" className="size-4 shrink-0 text-emerald-600" />
-            <span>{item}</span>
-          </li>
-        ))}
-      </ul>
+      <div className="space-y-2">
+        <p className="text-xs font-semibold tracking-[0.1em] text-marketing-primary uppercase">Preparation checklist</p>
+        <ul className="grid gap-2 rounded-xl border border-marketing-border bg-marketing-canvas p-2.5 sm:grid-cols-2">
+          {checklist.map((item) => {
+            const Icon = item.icon;
 
-      <div className="rounded-xl border border-border bg-muted/30">
-        <button
-          aria-expanded={helpOpen}
-          className="flex min-h-11 w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-foreground outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50"
-          onClick={() => setHelpOpen((value) => !value)}
-          type="button"
-        >
-          Where do I find this?
-          <ChevronDown aria-hidden="true" className={cn("size-4 transition-transform motion-reduce:transition-none", helpOpen && "rotate-180")} />
-        </button>
-        {helpOpen ? (
-          <div className="space-y-3 border-t border-border px-4 py-3 text-sm leading-6 text-muted-foreground">
-            <p>Open Meta for Developers, choose your business app, and confirm WhatsApp is added to it.</p>
-            <p>In Business settings, confirm your System User has access to the app and the WhatsApp Business Account.</p>
-            <Button className="min-h-11 w-full sm:w-auto" render={<a href={META_DEVELOPERS_URL} rel="noopener noreferrer" target="_blank" />} type="button" variant="outline">
-              <ExternalLink aria-hidden="true" />
-              Open Meta for Developers
-            </Button>
-          </div>
-        ) : null}
+            return (
+              <li
+                className={cn(
+                  "flex items-start gap-3 rounded-lg border border-marketing-border bg-white px-3 py-2.5 text-sm text-foreground",
+                  item.className,
+                )}
+                key={item.label}
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100">
+                  <Icon aria-hidden="true" className="size-4" />
+                </span>
+                <span className="min-w-0 pt-1 leading-5">{item.label}</span>
+              </li>
+            );
+          })}
+        </ul>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex flex-col gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 gap-3">
+          <span className="hidden size-9 shrink-0 items-center justify-center rounded-lg bg-white text-emerald-700 ring-1 ring-emerald-100 sm:flex">
+            <ExternalLink aria-hidden="true" className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Need to prepare your Meta account first?</p>
+            <a
+              className={cn(buttonVariants({ variant: "outline", className: "mt-2 min-h-11 w-full bg-white sm:w-auto" }))}
+              href={META_DEVELOPERS_URL}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              <ExternalLink aria-hidden="true" />
+              Open Meta for Developers
+            </a>
+          </div>
+        </div>
         <Button className="min-h-11 w-full bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto" onClick={onReady} type="button">
           I&apos;m ready
         </Button>

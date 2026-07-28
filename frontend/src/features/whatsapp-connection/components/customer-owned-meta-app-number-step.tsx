@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Check, Loader2, RefreshCw, Smartphone } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Loader2, RefreshCw, Smartphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DiscoveredWhatsAppPhone, ManualDiscoveryResult } from "../services/embedded-signup-completion-service";
 import { statusText } from "./customer-owned-meta-app-wizard-view-models";
@@ -13,6 +13,7 @@ export function CustomerOwnedMetaAppNumberStep({
   error,
   isLoading,
   isSelecting,
+  onBack,
   onRefresh,
   onSelect,
 }: Readonly<{
@@ -20,6 +21,7 @@ export function CustomerOwnedMetaAppNumberStep({
   error: string | null;
   isLoading: boolean;
   isSelecting: boolean;
+  onBack: () => void;
   onRefresh: () => void;
   onSelect: (phone: DiscoveredWhatsAppPhone) => void;
 }>) {
@@ -28,12 +30,12 @@ export function CustomerOwnedMetaAppNumberStep({
   const selectedPhone = phones.find((phone) => phone.phoneNumberId === selectedId) ?? null;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h3 className="text-lg font-semibold text-foreground">Choose WhatsApp number</h3>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Select one accessible WhatsApp Business number. Only safe account and phone details are shown here.
+          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Choose the WhatsApp number AgentWhatsApp should use.
           </p>
         </div>
         <Button className="min-h-11 w-full sm:w-auto" disabled={isLoading || isSelecting} onClick={onRefresh} type="button" variant="outline">
@@ -57,10 +59,10 @@ export function CustomerOwnedMetaAppNumberStep({
 
       <div className="space-y-4">
         {discovery?.accounts.map((account) => (
-          <section className="rounded-xl border border-border bg-background p-4" key={account.wabaId}>
+          <section className="rounded-xl border border-marketing-border bg-marketing-canvas p-3" key={account.wabaId}>
             <div className="flex flex-wrap items-center gap-2">
               <h4 className="font-semibold text-foreground">{account.name ?? "WhatsApp Business Account"}</h4>
-              {account.status ? <Badge variant="secondary">{statusText(account.status)}</Badge> : null}
+              {account.status ? <Badge className="rounded-md" variant="secondary">{statusText(account.status)}</Badge> : null}
             </div>
 
             {account.phones.length === 0 ? (
@@ -70,8 +72,8 @@ export function CustomerOwnedMetaAppNumberStep({
                 {account.phones.map((phone) => (
                   <label
                     className={cn(
-                      "flex cursor-pointer gap-3 rounded-xl border p-3 outline-none transition-colors focus-within:ring-3 focus-within:ring-ring/50",
-                      selectedId === phone.phoneNumberId ? "border-emerald-500 bg-emerald-50" : "border-border bg-card hover:bg-muted/40",
+                      "relative flex cursor-pointer gap-3 rounded-xl border bg-white p-3 outline-none transition-colors focus-within:ring-3 focus-within:ring-ring/50",
+                      selectedId === phone.phoneNumberId ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-300" : "border-marketing-border hover:bg-muted/30",
                     )}
                     key={phone.phoneNumberId}
                   >
@@ -84,15 +86,21 @@ export function CustomerOwnedMetaAppNumberStep({
                       value={phone.phoneNumberId}
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-2">
+                      <span className="flex flex-wrap items-center gap-2 pr-8">
                         <Smartphone aria-hidden="true" className="size-4 text-emerald-700" />
                         <span className="font-semibold text-foreground">{phone.maskedPhoneNumber ?? "Masked number not available"}</span>
+                        {selectedId === phone.phoneNumberId ? (
+                          <Badge className="rounded-md bg-emerald-600 text-white">Selected</Badge>
+                        ) : null}
                       </span>
-                      <span className="mt-2 grid gap-1 text-sm text-muted-foreground sm:grid-cols-3">
-                        <span>Business: {phone.verifiedName ?? "Not available"}</span>
-                        <span>Status: {statusText(phone.status)}</span>
-                        <span>Verification: {statusText(phone.verificationStatus)}</span>
+                      <span className="mt-2 grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
+                        <span><span className="font-medium text-foreground">Business</span><br />{phone.verifiedName ?? "Not available"}</span>
+                        <span><span className="font-medium text-foreground">Status</span><br />{statusText(phone.status)}</span>
+                        <span><span className="font-medium text-foreground">Verification</span><br />{statusText(phone.verificationStatus)}</span>
                       </span>
+                      {selectedId === phone.phoneNumberId ? (
+                        <CheckCircle2 aria-hidden="true" className="absolute right-3 top-3 size-5 text-emerald-600" />
+                      ) : null}
                     </span>
                   </label>
                 ))}
@@ -108,7 +116,11 @@ export function CustomerOwnedMetaAppNumberStep({
         </p>
       ) : null}
 
-      <div className="flex justify-end">
+      <div className="flex flex-col justify-between gap-2 border-t border-marketing-border pt-4 sm:flex-row">
+        <Button className="min-h-11 w-full sm:w-auto" disabled={isLoading || isSelecting} onClick={onBack} type="button" variant="outline">
+          <ArrowLeft aria-hidden="true" />
+          Back
+        </Button>
         <Button
           className="min-h-11 w-full bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
           disabled={!selectedPhone || isSelecting}

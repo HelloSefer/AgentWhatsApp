@@ -12,7 +12,7 @@ import {
   type SafeManualSetup,
 } from "../services/embedded-signup-completion-service";
 import { whatsappConnectionErrorMessage } from "../utils/whatsapp-connection-error-message";
-import { connectionStepFromStatus, selectedPhoneLabel } from "./customer-owned-meta-app-wizard-view-models";
+import { connectionStepFromStatus, selectedPhoneLabel, selectedPhoneSummary } from "./customer-owned-meta-app-wizard-view-models";
 import {
   whatsappConnectionQueryKey,
   type CredentialsForm,
@@ -49,6 +49,7 @@ export function useCustomerOwnedMetaAppWizard({
 
   const connectionId = safeSetup?.connectionId || initialConnection?.connectionId || "";
   const selectedConnectionLabel = selectedPhoneLabel(selectedPhone ?? selectedPhoneFromStatus);
+  const selectedConnectionSummary = selectedPhoneSummary(selectedPhone ?? selectedPhoneFromStatus);
 
   const refreshCurrent = async () => {
     await queryClient.invalidateQueries({ queryKey: whatsappConnectionQueryKey });
@@ -154,6 +155,7 @@ export function useCustomerOwnedMetaAppWizard({
     resumeDiscovery,
     runActivation,
     selectedConnectionLabel,
+    selectedConnectionSummary,
     selectMutation,
     setCurrentStep,
     setupMutation,

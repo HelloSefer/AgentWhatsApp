@@ -28,27 +28,39 @@ export function CustomerOwnedMetaAppWizard({
     wizard.selectMutation.isPending ||
     wizard.finalizeStage === "configuring" ||
     wizard.finalizeStage === "finalizing";
+  const canGoBack =
+    !isClosingDisabled &&
+    wizard.finalizeStage !== "done" &&
+    (wizard.currentStep === "credentials" || wizard.currentStep === "number" || wizard.currentStep === "connection");
+  const goBack = () => {
+    if (!canGoBack) return;
+    if (wizard.currentStep === "credentials") wizard.setCurrentStep("prepare");
+    if (wizard.currentStep === "number") wizard.setCurrentStep("credentials");
+    if (wizard.currentStep === "connection") wizard.setCurrentStep("number");
+  };
 
   return (
-    <Card className="rounded-2xl border-border bg-white shadow-[0_18px_44px_-34px_oklch(0.2_0.04_155/0.45)]">
-      <CardHeader className="gap-3 border-b border-border">
+    <Card className="mx-auto max-w-[1120px] rounded-xl border-marketing-border bg-white shadow-[0_14px_34px_-34px_oklch(0.2_0.04_155/0.42)]">
+      <CardHeader className="gap-3 border-b border-marketing-border px-4 py-3.5 sm:px-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <CardTitle className="text-xl font-semibold text-foreground">{setupTitle(mode)}</CardTitle>
-            <CardDescription className="mt-2 max-w-2xl leading-6">
-              Guided setup connects a WhatsApp number through a Meta App owned by your business.
+          <div className="min-w-0">
+            <CardTitle className="text-lg font-semibold text-foreground" id="whatsapp-guided-setup-heading">{setupTitle(mode)}</CardTitle>
+            <CardDescription className="mt-1.5 max-w-2xl leading-6">
+              Connect a WhatsApp Business number through an App owned by your business.
             </CardDescription>
           </div>
           {onCancel ? (
-            <Button className="min-h-11 w-full sm:w-auto" disabled={isClosingDisabled} onClick={onCancel} type="button" variant="outline">
+            <Button className="min-h-11 w-full sm:w-auto" disabled={isClosingDisabled} onClick={onCancel} type="button" variant="ghost">
               Close setup
             </Button>
           ) : null}
         </div>
       </CardHeader>
 
-      <CardContent className="grid gap-5 pt-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <CustomerOwnedMetaAppWizardStepper currentStep={wizard.currentStep} />
+      <CardContent className="grid gap-4 px-4 py-4 sm:px-5 lg:grid-cols-[205px_minmax(0,1fr)]">
+        <div className="lg:border-r lg:border-marketing-border lg:pr-4">
+          <CustomerOwnedMetaAppWizardStepper currentStep={wizard.currentStep} />
+        </div>
         <div className="min-w-0">
           {mode === "replace" ? (
             <p className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm leading-6 text-emerald-950">
@@ -68,6 +80,7 @@ export function CustomerOwnedMetaAppWizard({
             <CustomerOwnedMetaAppCredentialsStep
               error={wizard.stepError}
               isSubmitting={wizard.setupMutation.isPending || wizard.discoverMutation.isPending}
+              onBack={goBack}
               onSubmit={(input) => wizard.setupMutation.mutate(input)}
             />
           ) : null}
@@ -90,6 +103,7 @@ export function CustomerOwnedMetaAppWizard({
                 error={wizard.stepError}
                 isLoading={wizard.discoverMutation.isPending}
                 isSelecting={wizard.selectMutation.isPending}
+                onBack={goBack}
                 onRefresh={wizard.resumeDiscovery}
                 onSelect={(phone) => wizard.selectMutation.mutate(phone)}
               />
@@ -99,7 +113,9 @@ export function CustomerOwnedMetaAppWizard({
           {wizard.currentStep === "connection" ? (
             <CustomerOwnedMetaAppConnectionStep
               connectionLabel={wizard.selectedConnectionLabel}
+              connectionSummary={wizard.selectedConnectionSummary}
               error={wizard.stepError}
+              onBack={goBack}
               onDone={() => void onDone()}
               onRetry={() => void wizard.runActivation()}
               stage={wizard.finalizeStage}
