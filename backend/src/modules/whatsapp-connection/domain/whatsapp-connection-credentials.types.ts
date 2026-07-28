@@ -24,6 +24,26 @@ export type WhatsAppConnectionRegistrationPinStorage = Readonly<{
   registrationPinFingerprint: string;
 }>;
 
+export type PersistManualWhatsAppConnectionCredentialInput = Readonly<{
+  encryptedMetaAppSecret: string;
+  metaAppSecretKeyVersion: string;
+  encryptedSystemUserAccessToken: string;
+  systemUserAccessTokenKeyVersion: string;
+  encryptedWebhookVerifyToken: string;
+  webhookVerifyTokenKeyVersion: string;
+}>;
+
+export type ManualWhatsAppConnectionCredentialStorage = Readonly<{
+  connectionId: string;
+  sellerId: string;
+  encryptedMetaAppSecret: string;
+  metaAppSecretKeyVersion: string;
+  encryptedSystemUserAccessToken: string;
+  systemUserAccessTokenKeyVersion: string;
+  encryptedWebhookVerifyToken: string;
+  webhookVerifyTokenKeyVersion: string;
+}>;
+
 export type PersistWhatsAppConnectionCredentialInput = Readonly<{
   encryptedAccessToken: string;
   tokenKeyVersion: string;

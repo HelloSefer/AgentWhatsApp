@@ -1,13 +1,15 @@
 import type { Request, Response } from "express";
 import type { AuthorizedRequest } from "../../auth/http/auth-request.types";
 import type { EmbeddedSignupCompletionService } from "../application/embedded-signup-completion.service";
+import type { ManualConnectionSetupService } from "../application/manual-connection-setup.service";
 import type { WhatsAppConnectionCurrentService } from "../application/whatsapp-connection-current.service";
 import type { WhatsAppConnectionDisconnectService } from "../application/whatsapp-connection-disconnect.service";
 import type { WhatsAppConnectionFinalizationService } from "../application/whatsapp-connection-finalization.service";
-import { WhatsAppConnectionCompletionValidationError, WhatsAppConnectionDisconnectValidationError } from "../domain/whatsapp-connection.errors";
+import { WhatsAppConnectionCompletionValidationError, WhatsAppConnectionCredentialEncryptionError, WhatsAppConnectionDisconnectValidationError } from "../domain/whatsapp-connection.errors";
 import { sendWhatsappConnectionError } from "./whatsapp-connection-http.errors";
 
 const ACCEPTED_BODY_KEYS = new Set(["code", "wabaId", "phoneNumberId"]);
+const MANUAL_SETUP_BODY_KEYS = new Set(["appId", "appSecret", "systemUserAccessToken"]);
 
 function bodyRecord(req: Request): Record<string, unknown> {
   return typeof req.body === "object" && req.body !== null && !Array.isArray(req.body)
@@ -24,12 +26,22 @@ function strictCompletionBody(req: Request): Record<string, unknown> {
   return body;
 }
 
+function strictManualSetupBody(req: Request): Record<string, unknown> {
+  const body = bodyRecord(req);
+  const keys = Object.keys(body);
+  if (keys.length !== MANUAL_SETUP_BODY_KEYS.size || keys.some((key) => !MANUAL_SETUP_BODY_KEYS.has(key))) {
+    throw new WhatsAppConnectionCompletionValidationError();
+  }
+  return body;
+}
+
 export class WhatsAppConnectionController {
   constructor(
     private readonly completionService: EmbeddedSignupCompletionService,
     private readonly currentService?: WhatsAppConnectionCurrentService,
     private readonly finalizationService?: WhatsAppConnectionFinalizationService,
     private readonly disconnectService?: WhatsAppConnectionDisconnectService,
+    private readonly manualSetupService?: ManualConnectionSetupService,
   ) {}
 
   getCurrentConnection = async (req: Request, res: Response): Promise<Response> => {
@@ -51,6 +63,22 @@ export class WhatsAppConnectionController {
         code: body.code as string,
         wabaId: body.wabaId as string,
         phoneNumberId: body.phoneNumberId as string,
+      });
+      return res.status(200).json(result);
+    } catch (error) {
+      return sendWhatsappConnectionError(res, error);
+    }
+  };
+
+  setupManualConnection = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      if (!this.manualSetupService) throw new WhatsAppConnectionCredentialEncryptionError();
+      const authorized = req as AuthorizedRequest;
+      const body = strictManualSetupBody(req);
+      const result = await this.manualSetupService.setup(authorized.tenant, {
+        appId: body.appId as string,
+        appSecret: body.appSecret as string,
+        systemUserAccessToken: body.systemUserAccessToken as string,
       });
       return res.status(200).json(result);
     } catch (error) {

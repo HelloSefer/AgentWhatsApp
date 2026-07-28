@@ -1,6 +1,6 @@
 import type { TenantContext } from "../../../infrastructure/database";
 import type { WhatsAppConnectionRepository } from "../contracts/whatsapp-connection.repository";
-import type { WhatsAppConnection, WhatsAppConnectionStatus } from "../domain/whatsapp-connection.types";
+import type { WhatsAppConnection, WhatsAppConnectionMethod, WhatsAppConnectionStatus } from "../domain/whatsapp-connection.types";
 
 export type WhatsAppConnectionHealthStatus =
   | "HEALTHY"
@@ -22,6 +22,7 @@ export type WhatsAppConnectionSafeIssueCode =
 export type CurrentWhatsAppConnection = Readonly<{
   connectionId: string;
   status: WhatsAppConnectionStatus;
+  connectionMethod: WhatsAppConnectionMethod;
   maskedPhoneNumber: string | null;
   verifiedName: string | null;
   connectedAt: string | null;
@@ -88,6 +89,7 @@ function safeConnection(connection: WhatsAppConnection): CurrentWhatsAppConnecti
   return {
     connectionId: connection.connectionId,
     status: connection.status,
+    connectionMethod: connection.connectionMethod ?? "EMBEDDED_SIGNUP",
     maskedPhoneNumber: maskPhoneNumber(connection.displayPhoneNumber),
     verifiedName: connection.verifiedName ?? null,
     connectedAt: isoDate(connection.connectedAt),

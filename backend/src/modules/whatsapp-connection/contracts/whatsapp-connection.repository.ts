@@ -1,6 +1,8 @@
 import type { DatabaseQueryExecutor, TenantContext } from "../../../infrastructure/database";
 import type {
   PersistWhatsAppConnectionCredentialInput,
+  PersistManualWhatsAppConnectionCredentialInput,
+  ManualWhatsAppConnectionCredentialStorage,
   PersistWhatsAppConnectionRegistrationPinInput,
   WhatsAppConnectionCredentialStorage,
   WhatsAppConnectionRegistrationPinStorage,
@@ -13,6 +15,11 @@ export type WhatsAppConnectionRepositoryOptions = Readonly<{
 
 export type CreateWhatsAppConnectionCandidateInput = Readonly<{
   connectionId?: string;
+}>;
+
+export type CreateManualWhatsAppConnectionDraftInput = Readonly<{
+  metaAppId: string;
+  publicWebhookId: string;
 }>;
 
 export type VerifiedWhatsAppConnectionMetadataInput = Readonly<{
@@ -50,4 +57,11 @@ export interface WhatsAppConnectionRepository {
   findRegistrationPinStorage(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionRegistrationPinStorage | null>;
   persistFinalizationProgress(tenant: TenantContext, connectionId: string, input: WhatsAppConnectionFinalizationProgressInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
   activateConnection(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
+}
+
+export interface ManualWhatsAppConnectionRepository extends WhatsAppConnectionRepository {
+  createManualDraft(tenant: TenantContext, input: CreateManualWhatsAppConnectionDraftInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection>;
+  findReusableManualDraft(tenant: TenantContext, metaAppId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
+  persistManualCredentials(tenant: TenantContext, connectionId: string, credential: PersistManualWhatsAppConnectionCredentialInput, options?: WhatsAppConnectionRepositoryOptions): Promise<ManualWhatsAppConnectionCredentialStorage | null>;
+  findManualCredentialStorage(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<ManualWhatsAppConnectionCredentialStorage | null>;
 }

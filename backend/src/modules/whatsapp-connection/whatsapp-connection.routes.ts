@@ -8,6 +8,7 @@ import { EmbeddedSignupCompletionService } from "./application/embedded-signup-c
 import { WhatsAppConnectionCurrentService } from "./application/whatsapp-connection-current.service";
 import { WhatsAppConnectionFinalizationService } from "./application/whatsapp-connection-finalization.service";
 import { WhatsAppConnectionDisconnectService } from "./application/whatsapp-connection-disconnect.service";
+import { ManualConnectionSetupService } from "./application/manual-connection-setup.service";
 import { WhatsAppConnectionCredentialEncryptionService } from "./application/whatsapp-connection-credential-encryption.service";
 import { getWhatsAppConnectionCredentialEncryptionConfiguration } from "./application/whatsapp-connection-credential-encryption.config";
 import { WhatsAppConnectionCredentialService } from "./application/whatsapp-connection-credential.service";
@@ -35,6 +36,15 @@ function safeCredentialService(): CredentialService | null {
   }
 }
 
+function safeCredentialEncryptionService(): WhatsAppConnectionCredentialEncryptionService | null {
+  try {
+    const encryptionConfiguration = getWhatsAppConnectionCredentialEncryptionConfiguration();
+    return new WhatsAppConnectionCredentialEncryptionService(encryptionConfiguration);
+  } catch {
+    return null;
+  }
+}
+
 export function createWhatsAppConnectionRoutes(
   authComposition: AuthComposition = createAuthComposition(),
 ): Router {
@@ -46,6 +56,10 @@ export function createWhatsAppConnectionRoutes(
 
   const metaConfiguration = safeMetaConfiguration();
   const credentialService = safeCredentialService();
+  const manualSetupService = new ManualConnectionSetupService(
+    postgreSqlWhatsAppConnectionRepository,
+    safeCredentialEncryptionService(),
+  );
   const metaTransport = metaConfiguration
     ? new FetchMetaEmbeddedSignupTransport(metaConfiguration)
     : {
@@ -71,13 +85,21 @@ export function createWhatsAppConnectionRoutes(
   );
   const currentService = new WhatsAppConnectionCurrentService(postgreSqlWhatsAppConnectionRepository);
   const disconnectService = new WhatsAppConnectionDisconnectService(postgreSqlWhatsAppConnectionRepository);
-  const controller = new WhatsAppConnectionController(completionService, currentService, finalizationService, disconnectService);
+  const controller = new WhatsAppConnectionController(completionService, currentService, finalizationService, disconnectService, manualSetupService);
 
   router.get(
     "/current",
     authenticate,
     authorizeRead,
     controller.getCurrentConnection,
+  );
+
+  router.post(
+    "/manual/setup",
+    authenticate,
+    rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
+    authorizeManage,
+    controller.setupManualConnection,
   );
 
   router.post(

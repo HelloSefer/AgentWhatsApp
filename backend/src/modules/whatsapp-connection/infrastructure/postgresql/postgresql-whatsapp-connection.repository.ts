@@ -7,6 +7,7 @@ import {
 } from "../../../../infrastructure/database";
 import type {
   CreateWhatsAppConnectionCandidateInput,
+  CreateManualWhatsAppConnectionDraftInput,
   VerifiedWhatsAppConnectionMetadataInput,
   WhatsAppConnectionFinalizationProgressInput,
   WhatsAppConnectionRepository,
@@ -14,6 +15,8 @@ import type {
 } from "../../contracts/whatsapp-connection.repository";
 import type {
   PersistWhatsAppConnectionCredentialInput,
+  PersistManualWhatsAppConnectionCredentialInput,
+  ManualWhatsAppConnectionCredentialStorage,
   PersistWhatsAppConnectionRegistrationPinInput,
   WhatsAppConnectionCredentialStorage,
   WhatsAppConnectionRegistrationPinStorage,
@@ -39,9 +42,10 @@ import {
 } from "../../domain/whatsapp-connection.validation";
 import { mapWhatsAppConnection, type WhatsAppConnectionRow } from "./whatsapp-connection-row.mapper";
 
-const CONNECTION_COLUMNS = "connection_id, seller_id, provider, status, meta_business_id, waba_id, phone_number_id, display_phone_number, verified_name, connected_at, last_verified_at, phone_registration_completed_at, waba_subscription_completed_at, finalization_last_error_code, finalization_last_error_at, disconnected_at, replaced_connection_id, created_at, updated_at";
+const CONNECTION_COLUMNS = "connection_id, seller_id, provider, connection_method, status, meta_app_id, public_webhook_id, meta_business_id, waba_id, phone_number_id, display_phone_number, verified_name, connected_at, last_verified_at, phone_registration_completed_at, waba_subscription_completed_at, finalization_last_error_code, finalization_last_error_at, disconnected_at, replaced_connection_id, created_at, updated_at";
 const CREDENTIAL_COLUMNS = "connection_id, seller_id, encrypted_access_token, token_key_version, token_fingerprint, token_expires_at";
 const REGISTRATION_PIN_COLUMNS = "connection_id, seller_id, encrypted_registration_pin, registration_pin_key_version, registration_pin_fingerprint";
+const MANUAL_CREDENTIAL_COLUMNS = "connection_id, seller_id, encrypted_meta_app_secret, meta_app_secret_key_version, encrypted_system_user_access_token, system_user_access_token_key_version, encrypted_webhook_verify_token, webhook_verify_token_key_version";
 
 type WhatsAppConnectionCredentialRow = Readonly<{
   connection_id: string;
@@ -58,6 +62,17 @@ type WhatsAppConnectionRegistrationPinRow = Readonly<{
   encrypted_registration_pin: string;
   registration_pin_key_version: string;
   registration_pin_fingerprint: string;
+}>;
+
+type ManualWhatsAppConnectionCredentialRow = Readonly<{
+  connection_id: string;
+  seller_id: string;
+  encrypted_meta_app_secret: string;
+  meta_app_secret_key_version: string;
+  encrypted_system_user_access_token: string;
+  system_user_access_token_key_version: string;
+  encrypted_webhook_verify_token: string;
+  webhook_verify_token_key_version: string;
 }>;
 
 function executor(options?: WhatsAppConnectionRepositoryOptions): DatabaseQueryExecutor {
@@ -135,6 +150,19 @@ function mapRegistrationPinStorage(row: WhatsAppConnectionRegistrationPinRow): W
   };
 }
 
+function mapManualCredentialStorage(row: ManualWhatsAppConnectionCredentialRow): ManualWhatsAppConnectionCredentialStorage {
+  return {
+    connectionId: row.connection_id,
+    sellerId: row.seller_id,
+    encryptedMetaAppSecret: normalizeCredentialField(row.encrypted_meta_app_secret),
+    metaAppSecretKeyVersion: normalizeCredentialField(row.meta_app_secret_key_version),
+    encryptedSystemUserAccessToken: normalizeCredentialField(row.encrypted_system_user_access_token),
+    systemUserAccessTokenKeyVersion: normalizeCredentialField(row.system_user_access_token_key_version),
+    encryptedWebhookVerifyToken: normalizeCredentialField(row.encrypted_webhook_verify_token),
+    webhookVerifyTokenKeyVersion: normalizeCredentialField(row.webhook_verify_token_key_version),
+  };
+}
+
 function normalizeFinalizationErrorCode(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   const trimmed = value.trim();
@@ -148,8 +176,8 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
     try {
       const result = await executor(options).execute<WhatsAppConnectionRow>({
         text: `
-          INSERT INTO whatsapp_connections (connection_id, seller_id, provider, status)
-          VALUES ($1, $2, $3, 'PENDING')
+          INSERT INTO whatsapp_connections (connection_id, seller_id, provider, connection_method, status)
+          VALUES ($1, $2, $3, 'EMBEDDED_SIGNUP', 'PENDING')
           RETURNING ${CONNECTION_COLUMNS}
         `,
         values: [connectionId, tenant.sellerId, WHATSAPP_CONNECTION_PROVIDER],
@@ -159,6 +187,51 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
       return mapWhatsAppConnection(row);
     } catch (error) {
       mapWriteError(error);
+    }
+  }
+
+  async createManualDraft(tenant: TenantContext, input: CreateManualWhatsAppConnectionDraftInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection> {
+    const connectionId = randomUUID();
+    const publicWebhookId = normalizeConnectionId(input.publicWebhookId);
+    const metaAppId = normalizeMetaId(input.metaAppId);
+    if (!metaAppId) throw new WhatsAppConnectionPersistenceError();
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `
+          INSERT INTO whatsapp_connections (connection_id, seller_id, provider, connection_method, status, meta_app_id, public_webhook_id)
+          VALUES ($1, $2, $3, 'CUSTOMER_OWNED_META_APP', 'PENDING', $4, $5)
+          RETURNING ${CONNECTION_COLUMNS}
+        `,
+        values: [connectionId, tenant.sellerId, WHATSAPP_CONNECTION_PROVIDER, metaAppId, publicWebhookId],
+      });
+      const row = result.rows[0];
+      if (!row) throw new WhatsAppConnectionPersistenceError();
+      return mapWhatsAppConnection(row);
+    } catch (error) {
+      mapWriteError(error);
+    }
+  }
+
+  async findReusableManualDraft(tenant: TenantContext, metaAppId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
+    const normalizedMetaAppId = normalizeMetaId(metaAppId);
+    if (!normalizedMetaAppId) return null;
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `
+          SELECT ${CONNECTION_COLUMNS}
+          FROM whatsapp_connections
+          WHERE seller_id = $1
+            AND connection_method = 'CUSTOMER_OWNED_META_APP'
+            AND status = 'PENDING'
+            AND meta_app_id = $2
+          ORDER BY created_at DESC, connection_id ASC
+          LIMIT 1
+        `,
+        values: [tenant.sellerId, normalizedMetaAppId],
+      });
+      return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
+    } catch (error) {
+      mapReadError(error);
     }
   }
 
@@ -404,6 +477,65 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
         values: [tenant.sellerId, normalizedConnectionId],
       });
       return result.rows[0] ? mapCredentialStorage(result.rows[0]) : null;
+    } catch (error) {
+      mapReadError(error);
+    }
+  }
+
+  async persistManualCredentials(tenant: TenantContext, connectionId: string, credential: PersistManualWhatsAppConnectionCredentialInput, options?: WhatsAppConnectionRepositoryOptions): Promise<ManualWhatsAppConnectionCredentialStorage | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    const encryptedMetaAppSecret = normalizeCredentialField(credential.encryptedMetaAppSecret);
+    const metaAppSecretKeyVersion = normalizeCredentialField(credential.metaAppSecretKeyVersion);
+    const encryptedSystemUserAccessToken = normalizeCredentialField(credential.encryptedSystemUserAccessToken);
+    const systemUserAccessTokenKeyVersion = normalizeCredentialField(credential.systemUserAccessTokenKeyVersion);
+    const encryptedWebhookVerifyToken = normalizeCredentialField(credential.encryptedWebhookVerifyToken);
+    const webhookVerifyTokenKeyVersion = normalizeCredentialField(credential.webhookVerifyTokenKeyVersion);
+    try {
+      const result = await executor(options).execute<ManualWhatsAppConnectionCredentialRow>({
+        text: `
+          UPDATE whatsapp_connections
+          SET
+            encrypted_meta_app_secret = $3,
+            meta_app_secret_key_version = $4,
+            encrypted_system_user_access_token = $5,
+            system_user_access_token_key_version = $6,
+            encrypted_webhook_verify_token = $7,
+            webhook_verify_token_key_version = $8,
+            updated_at = NOW()
+          WHERE seller_id = $1
+            AND connection_id = $2
+            AND connection_method = 'CUSTOMER_OWNED_META_APP'
+            AND status = 'PENDING'
+          RETURNING ${MANUAL_CREDENTIAL_COLUMNS}
+        `,
+        values: [tenant.sellerId, normalizedConnectionId, encryptedMetaAppSecret, metaAppSecretKeyVersion, encryptedSystemUserAccessToken, systemUserAccessTokenKeyVersion, encryptedWebhookVerifyToken, webhookVerifyTokenKeyVersion],
+      });
+      return result.rows[0] ? mapManualCredentialStorage(result.rows[0]) : null;
+    } catch (error) {
+      mapWriteError(error);
+    }
+  }
+
+  async findManualCredentialStorage(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<ManualWhatsAppConnectionCredentialStorage | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    try {
+      const result = await executor(options).execute<ManualWhatsAppConnectionCredentialRow>({
+        text: `
+          SELECT ${MANUAL_CREDENTIAL_COLUMNS}
+          FROM whatsapp_connections
+          WHERE seller_id = $1
+            AND connection_id = $2
+            AND encrypted_meta_app_secret IS NOT NULL
+            AND meta_app_secret_key_version IS NOT NULL
+            AND encrypted_system_user_access_token IS NOT NULL
+            AND system_user_access_token_key_version IS NOT NULL
+            AND encrypted_webhook_verify_token IS NOT NULL
+            AND webhook_verify_token_key_version IS NOT NULL
+          LIMIT 1
+        `,
+        values: [tenant.sellerId, normalizedConnectionId],
+      });
+      return result.rows[0] ? mapManualCredentialStorage(result.rows[0]) : null;
     } catch (error) {
       mapReadError(error);
     }

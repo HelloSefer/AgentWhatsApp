@@ -1,11 +1,14 @@
 import { WhatsAppConnectionPersistenceError } from "../../domain/whatsapp-connection.errors";
-import { WHATSAPP_CONNECTION_PROVIDER, WHATSAPP_CONNECTION_STATUSES, type WhatsAppConnection } from "../../domain/whatsapp-connection.types";
+import { WHATSAPP_CONNECTION_METHODS, WHATSAPP_CONNECTION_PROVIDER, WHATSAPP_CONNECTION_STATUSES, type WhatsAppConnection } from "../../domain/whatsapp-connection.types";
 
 export type WhatsAppConnectionRow = Readonly<{
   connection_id: string;
   seller_id: string;
   provider: string;
+  connection_method: string | null;
   status: string;
+  meta_app_id: string | null;
+  public_webhook_id: string | null;
   meta_business_id: string | null;
   waba_id: string | null;
   phone_number_id: string | null;
@@ -37,7 +40,12 @@ function requiredDate(value: Date | string): Date {
 }
 
 export function mapWhatsAppConnection(row: WhatsAppConnectionRow): WhatsAppConnection {
-  if (row.provider !== WHATSAPP_CONNECTION_PROVIDER || !WHATSAPP_CONNECTION_STATUSES.includes(row.status as never)) {
+  const connectionMethod = row.connection_method ?? "EMBEDDED_SIGNUP";
+  if (
+    row.provider !== WHATSAPP_CONNECTION_PROVIDER ||
+    !WHATSAPP_CONNECTION_STATUSES.includes(row.status as never) ||
+    !WHATSAPP_CONNECTION_METHODS.includes(connectionMethod as never)
+  ) {
     throw new WhatsAppConnectionPersistenceError();
   }
 
@@ -45,7 +53,10 @@ export function mapWhatsAppConnection(row: WhatsAppConnectionRow): WhatsAppConne
     connectionId: row.connection_id,
     sellerId: row.seller_id,
     provider: WHATSAPP_CONNECTION_PROVIDER,
+    connectionMethod: connectionMethod as WhatsAppConnection["connectionMethod"],
     status: row.status as WhatsAppConnection["status"],
+    metaAppId: row.meta_app_id ?? undefined,
+    publicWebhookId: row.public_webhook_id ?? undefined,
     metaBusinessId: row.meta_business_id ?? undefined,
     wabaId: row.waba_id ?? undefined,
     phoneNumberId: row.phone_number_id ?? undefined,

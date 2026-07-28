@@ -22,6 +22,7 @@ import {
   WhatsAppConnectionFinalizationVerificationError,
   WhatsAppConnectionMetaConfigurationError,
   WhatsAppConnectionPersistenceError,
+  WhatsAppConnectionValidationError,
 } from "../domain/whatsapp-connection.errors";
 
 export function sendWhatsappConnectionError(res: Response, error: unknown): Response {
@@ -32,6 +33,7 @@ export function sendWhatsappConnectionError(res: Response, error: unknown): Resp
   if (error instanceof AuthorizationUnauthenticatedError) return res.status(401).json({ message: "Authentication required." });
   if (error instanceof AuthorizationForbiddenError || error instanceof AuthorizationInsufficientPermissionError) return res.status(403).json({ message: "Forbidden." });
   if (error instanceof AuthorizationTenantSelectionRequiredError) return res.status(409).json({ message: "Seller selection required." });
+  if (error instanceof WhatsAppConnectionValidationError) return res.status(400).json({ message: "Invalid request." });
   if (error instanceof WhatsAppConnectionCompletionValidationError) return res.status(400).json({ message: "Invalid request." });
   if (error instanceof WhatsAppConnectionCompletionAccessDeniedError) return res.status(403).json({ message: "WhatsApp connection could not be verified." });
   if (error instanceof WhatsAppConnectionCompletionConflictError) return res.status(409).json({ message: "WhatsApp connection could not be completed safely." });

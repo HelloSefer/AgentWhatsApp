@@ -109,7 +109,43 @@ export class WhatsAppConnectionCredentialEncryptionService {
     return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
   }
 
-  private encryptSecret(secret: string, purpose: "access-token" | "registration-pin"): { encryptedSecret: string; keyVersion: string } {
+  encryptManualMetaAppSecret(appSecret: string): { encryptedMetaAppSecret: string; metaAppSecretKeyVersion: string } {
+    const encrypted = this.encryptSecret(appSecret, "manual-meta-app-secret");
+    return {
+      encryptedMetaAppSecret: encrypted.encryptedSecret,
+      metaAppSecretKeyVersion: encrypted.keyVersion,
+    };
+  }
+
+  decryptManualMetaAppSecret(encryptedMetaAppSecret: string): string {
+    return this.decryptSecret(encryptedMetaAppSecret);
+  }
+
+  encryptManualSystemUserAccessToken(systemUserAccessToken: string): { encryptedSystemUserAccessToken: string; systemUserAccessTokenKeyVersion: string } {
+    const encrypted = this.encryptSecret(systemUserAccessToken, "manual-system-user-access-token");
+    return {
+      encryptedSystemUserAccessToken: encrypted.encryptedSecret,
+      systemUserAccessTokenKeyVersion: encrypted.keyVersion,
+    };
+  }
+
+  decryptManualSystemUserAccessToken(encryptedSystemUserAccessToken: string): string {
+    return this.decryptSecret(encryptedSystemUserAccessToken);
+  }
+
+  encryptManualWebhookVerifyToken(webhookVerifyToken: string): { encryptedWebhookVerifyToken: string; webhookVerifyTokenKeyVersion: string } {
+    const encrypted = this.encryptSecret(webhookVerifyToken, "manual-webhook-verify-token");
+    return {
+      encryptedWebhookVerifyToken: encrypted.encryptedSecret,
+      webhookVerifyTokenKeyVersion: encrypted.keyVersion,
+    };
+  }
+
+  decryptManualWebhookVerifyToken(encryptedWebhookVerifyToken: string): string {
+    return this.decryptSecret(encryptedWebhookVerifyToken);
+  }
+
+  private encryptSecret(secret: string, purpose: "access-token" | "registration-pin" | "manual-meta-app-secret" | "manual-system-user-access-token" | "manual-webhook-verify-token"): { encryptedSecret: string; keyVersion: string } {
     if (typeof secret !== "string" || !secret) throw new WhatsAppConnectionCredentialEncryptionError();
     const key = this.configuration.keys.get(this.configuration.activeKeyVersion);
     if (!key || key.length !== 32) throw new WhatsAppConnectionCredentialEncryptionError();

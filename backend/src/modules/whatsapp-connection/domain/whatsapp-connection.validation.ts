@@ -1,9 +1,11 @@
 import { WhatsAppConnectionValidationError } from "./whatsapp-connection.errors";
-import { WHATSAPP_CONNECTION_STATUSES, type WhatsAppConnectionStatus } from "./whatsapp-connection.types";
+import { WHATSAPP_CONNECTION_METHODS, WHATSAPP_CONNECTION_STATUSES, type WhatsAppConnectionMethod, type WhatsAppConnectionStatus } from "./whatsapp-connection.types";
 
 const CONNECTION_ID_MAX_LENGTH = 64;
 const META_ID_MAX_LENGTH = 128;
 const DISPLAY_PHONE_MAX_LENGTH = 64;
+const META_APP_ID_MAX_LENGTH = 32;
+const MANUAL_SECRET_MAX_LENGTH = 4096;
 
 function normalizeRequired(value: unknown, maxLength: number): string {
   if (typeof value !== "string") throw new WhatsAppConnectionValidationError();
@@ -35,4 +37,21 @@ export function validateWhatsAppConnectionStatus(value: unknown): WhatsAppConnec
     throw new WhatsAppConnectionValidationError();
   }
   return value as WhatsAppConnectionStatus;
+}
+
+export function validateWhatsAppConnectionMethod(value: unknown): WhatsAppConnectionMethod {
+  if (typeof value !== "string" || !WHATSAPP_CONNECTION_METHODS.includes(value as WhatsAppConnectionMethod)) {
+    throw new WhatsAppConnectionValidationError();
+  }
+  return value as WhatsAppConnectionMethod;
+}
+
+export function normalizeMetaAppId(value: unknown): string {
+  const trimmed = normalizeRequired(value, META_APP_ID_MAX_LENGTH);
+  if (!/^[0-9]+$/u.test(trimmed)) throw new WhatsAppConnectionValidationError();
+  return trimmed;
+}
+
+export function normalizeManualSecret(value: unknown): string {
+  return normalizeRequired(value, MANUAL_SECRET_MAX_LENGTH);
 }
