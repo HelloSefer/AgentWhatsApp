@@ -44,7 +44,8 @@
     "test:phase-11b-whatsapp-connection-credentials": "npm run build && node dist/modules/whatsapp-connection/testing/phase-11b-whatsapp-connection-credentials-test.command.js",
     "test:phase-11d-embedded-signup-completion": "node dist/modules/whatsapp-connection/testing/phase-11d-embedded-signup-completion-test.command.js",
     "test:phase-11e1-finalization": "node dist/modules/whatsapp-connection/testing/phase-11e1-finalization-test.command.js",
-    "test:phase-11e2-activation": "node dist/modules/whatsapp-connection/testing/phase-11e2-activation-test.command.js"
+    "test:phase-11e2-activation": "node dist/modules/whatsapp-connection/testing/phase-11e2-activation-test.command.js",
+    "test:phase-11f-dynamic-inbound-routing": "node dist/modules/whatsapp/cloud/inbound-queue/testing/phase-11f-dynamic-inbound-routing-test.command.js"
   },
   "keywords": [],
   "author": "",

@@ -103,6 +103,7 @@ async function processValidatedJob(
   const identity = buildCloudAgentIdentity({
     phoneNumberId: data.phoneNumberId,
     waId: data.customerPhone,
+    sellerId: data.sellerId,
   });
   const result = await processNormalizedCloudMessage(message, identity, {
     preparedResponseGroupDispatcher: options.groupDispatcher,

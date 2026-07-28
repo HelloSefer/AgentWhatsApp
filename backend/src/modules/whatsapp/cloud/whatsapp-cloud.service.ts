@@ -507,10 +507,9 @@ function isUnknownConfiguredPhoneNumberId(phoneNumberId: string): boolean {
 export function buildCloudAgentIdentity(input: {
   phoneNumberId: string;
   waId: string;
+  sellerId?: string;
 }): AgentIdentity {
-  const sellerId = sellerResolverService.resolveSellerIdByPhoneNumberId(
-    input.phoneNumberId,
-  );
+  const sellerId = input.sellerId?.trim() || sellerResolverService.resolveSellerIdByPhoneNumberId(input.phoneNumberId);
   const customerPhone = input.waId;
   const conversationKey = conversationKeyService.buildConversationKey(
     sellerId,

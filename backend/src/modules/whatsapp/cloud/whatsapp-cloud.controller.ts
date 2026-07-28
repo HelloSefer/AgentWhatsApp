@@ -27,15 +27,19 @@ import {
 } from "./whatsapp-cloud.service";
 import { getWhatsAppInboundProducer } from "../../../composition/queue/whatsapp-inbound-queue.composition";
 import type { WhatsAppInboundJobData } from "./inbound-queue/whatsapp-inbound-job.types";
-import { sellerResolverService } from "../../agent/identity/seller-resolver.service";
 import { conversationKeyService } from "../../agent/identity/conversation-key.service";
+import { postgreSqlWhatsAppConnectionRepository } from "../../whatsapp-connection";
+import type { ActiveWhatsAppConnectionResolution } from "../../whatsapp-connection";
 
 type WhatsAppInboundProducerProvider = typeof getWhatsAppInboundProducer;
 type CloudWebhookProcessor = typeof processCloudWebhookBody;
+type ActiveConnectionResolver = (phoneNumberId: string) => Promise<ActiveWhatsAppConnectionResolution | null>;
 
 let whatsappInboundProducerProvider: WhatsAppInboundProducerProvider =
   getWhatsAppInboundProducer;
 let cloudWebhookProcessor: CloudWebhookProcessor = processCloudWebhookBody;
+let activeConnectionResolver: ActiveConnectionResolver = (phoneNumberId) =>
+  postgreSqlWhatsAppConnectionRepository.resolveActiveByPhoneNumberId(phoneNumberId);
 
 export function setWhatsAppInboundProducerProviderForTesting(
   provider: WhatsAppInboundProducerProvider | undefined,
@@ -49,6 +53,13 @@ export function setCloudWebhookProcessorForTesting(
   cloudWebhookProcessor = processor || processCloudWebhookBody;
 }
 
+export function setWhatsAppActiveConnectionResolverForTesting(
+  resolver: ActiveConnectionResolver | undefined,
+): void {
+  activeConnectionResolver = resolver || ((phoneNumberId) =>
+    postgreSqlWhatsAppConnectionRepository.resolveActiveByPhoneNumberId(phoneNumberId));
+}
+
 function getQueryString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -58,6 +69,17 @@ function getRequestBaseUrl(req: Request): string {
   const protocol = forwardedProto || req.protocol;
 
   return `${protocol}://${req.get("host")}`;
+}
+
+function isSupportedMetaPhoneNumberId(value: string): boolean {
+  return /^\d{3,128}$/u.test(value.trim());
+}
+
+function recordInboundRoutingSkip(reason: string): void {
+  console.warn(JSON.stringify({
+    event: "whatsapp.cloud.webhook.routing_skipped",
+    reason,
+  }));
 }
 
 export function verifyWhatsAppCloudWebhook(req: Request, res: Response) {
@@ -158,7 +180,16 @@ export async function receiveWhatsAppCloudWebhook(req: Request, res: Response) {
 
     try {
       for (const message of messages) {
-        const sellerId = sellerResolverService.resolveSellerIdByPhoneNumberId(message.phoneNumberId);
+        if (!isSupportedMetaPhoneNumberId(message.phoneNumberId)) {
+          recordInboundRoutingSkip("invalid_phone_number_id");
+          continue;
+        }
+        const activeConnection = await activeConnectionResolver(message.phoneNumberId);
+        if (!activeConnection) {
+          recordInboundRoutingSkip("inactive_or_unknown_phone_number_id");
+          continue;
+        }
+        const sellerId = activeConnection.sellerId;
         const conversationKey = conversationKeyService.buildConversationKey(sellerId, message.waId);
 
         const jobData: WhatsAppInboundJobData = {

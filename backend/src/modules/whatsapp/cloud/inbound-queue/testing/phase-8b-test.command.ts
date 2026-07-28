@@ -35,6 +35,7 @@ import { env } from "../../../../../config/env";
 import {
   receiveWhatsAppCloudWebhook,
   setCloudWebhookProcessorForTesting,
+  setWhatsAppActiveConnectionResolverForTesting,
   setWhatsAppInboundProducerProviderForTesting,
 } from "../../whatsapp-cloud.controller";
 
@@ -167,6 +168,26 @@ function buildStatusOnlyWebhookBody(): Record<string, unknown> {
       }],
     }],
   };
+}
+
+function setDemoActiveConnectionResolverForTesting(): void {
+  const now = new Date();
+  setWhatsAppActiveConnectionResolverForTesting(async (phoneNumberId) => phoneNumberId === "1168457439687919"
+    ? {
+        sellerId: "seller_demo_sandals",
+        connection: {
+          connectionId: "conn_phase8b_demo",
+          sellerId: "seller_demo_sandals",
+          provider: "META_WHATSAPP_CLOUD_API",
+          status: "ACTIVE",
+          phoneNumberId,
+          connectedAt: now,
+          lastVerifiedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }
+    : null);
 }
 
 type FakeControllerResponse = Readonly<{
@@ -1042,6 +1063,7 @@ async function runActualControllerBoundaryTests(): Promise<void> {
       const queue = registry.getQueue<WhatsAppInboundJobData>(whatsappInboundQueueDefinition.name);
       const producer = new WhatsAppInboundProducerService(registry);
       setWhatsAppInboundProducerProviderForTesting(() => producer);
+      setDemoActiveConnectionResolverForTesting();
 
       const worker = createManagedQueueWorker(
         whatsappInboundQueueDefinition,
@@ -1098,6 +1120,7 @@ async function runActualControllerBoundaryTests(): Promise<void> {
         try { await queue.obliterate({ force: true }); } catch { /* best-effort */ }
         await manager.closeInitializedResources();
         setWhatsAppInboundProducerProviderForTesting(undefined);
+        setWhatsAppActiveConnectionResolverForTesting(undefined);
       }
     }
 
@@ -1111,6 +1134,7 @@ async function runActualControllerBoundaryTests(): Promise<void> {
         },
       } as unknown as WhatsAppInboundProducerService;
       setWhatsAppInboundProducerProviderForTesting(() => failingProducer);
+      setDemoActiveConnectionResolverForTesting();
       setCloudWebhookProcessorForTesting(async () => {
         legacyProcessorCallCount += 1;
         return {
@@ -1140,6 +1164,7 @@ async function runActualControllerBoundaryTests(): Promise<void> {
       add("CONTROLLER Enqueue failure: Cloud outbound call count is zero", true);
       add("CONTROLLER Enqueue failure: direct session-mutation call count is zero", true);
       setWhatsAppInboundProducerProviderForTesting(undefined);
+      setWhatsAppActiveConnectionResolverForTesting(undefined);
       setCloudWebhookProcessorForTesting(undefined);
     }
 
@@ -1150,6 +1175,7 @@ async function runActualControllerBoundaryTests(): Promise<void> {
       const queue = registry.getQueue<WhatsAppInboundJobData>(whatsappInboundQueueDefinition.name);
       const producer = new WhatsAppInboundProducerService(registry);
       setWhatsAppInboundProducerProviderForTesting(() => producer);
+      setDemoActiveConnectionResolverForTesting();
 
       try {
         await queue.obliterate({ force: true });
@@ -1177,12 +1203,14 @@ async function runActualControllerBoundaryTests(): Promise<void> {
         try { await queue.obliterate({ force: true }); } catch { /* best-effort */ }
         await manager.closeInitializedResources();
         setWhatsAppInboundProducerProviderForTesting(undefined);
+        setWhatsAppActiveConnectionResolverForTesting(undefined);
       }
     }
   } finally {
     (env as Record<string, unknown>)["whatsappInboundQueueEnabled"] = previousQueueFlag;
     setWhatsAppInboundProducerProviderForTesting(undefined);
     setCloudWebhookProcessorForTesting(undefined);
+    setWhatsAppActiveConnectionResolverForTesting(undefined);
   }
 }
 
