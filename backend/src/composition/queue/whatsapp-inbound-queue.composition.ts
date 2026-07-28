@@ -124,15 +124,19 @@ export async function startWhatsAppInboundQueue(): Promise<void> {
       ? new WhatsAppOutboundProducerService(registry)
       : undefined;
     outboundConnectionResolver = env.whatsappOutboundQueueEnabled === true && effectiveFlags.outboundQueue
-      ? new PersistentWhatsAppOutboundConnectionResolver(
-          postgreSqlWhatsAppConnectionRepository,
-          new WhatsAppConnectionCredentialService(
+        ? (() => {
+          const encryptionService = new WhatsAppConnectionCredentialEncryptionService(
+            getWhatsAppConnectionCredentialEncryptionConfiguration(),
+          );
+          return new PersistentWhatsAppOutboundConnectionResolver(
             postgreSqlWhatsAppConnectionRepository,
-            new WhatsAppConnectionCredentialEncryptionService(
-              getWhatsAppConnectionCredentialEncryptionConfiguration(),
+            new WhatsAppConnectionCredentialService(
+              postgreSqlWhatsAppConnectionRepository,
+              encryptionService,
             ),
-          ),
-        )
+            encryptionService,
+          );
+        })()
       : undefined;
     outboundWorker = env.whatsappOutboundQueueEnabled === true && effectiveFlags.outboundQueue
       ? createWhatsAppOutboundWorker(connectionManager, {

@@ -165,6 +165,21 @@ export type ManualWebhookIssueCode =
   | "META_PERMISSION_MISSING"
   | "META_TRANSIENT_FAILURE";
 
+export type ManualFinalizationIssueCode =
+  | "MANUAL_CONNECTION_NOT_READY"
+  | "META_TOKEN_INVALID"
+  | "META_TOKEN_EXPIRED"
+  | "META_TOKEN_APP_MISMATCH"
+  | "META_PERMISSION_MISSING"
+  | "META_WABA_ACCESS_MISSING"
+  | "META_PHONE_ACCESS_MISSING"
+  | "META_PHONE_REGISTRATION_FAILED"
+  | "WEBHOOK_NOT_CONFIGURED"
+  | "WEBHOOK_SUBSCRIPTION_UNCONFIRMED"
+  | "WEBHOOK_PUBLIC_URL_INVALID"
+  | "CONNECTION_ACTIVATION_CONFLICT"
+  | "META_TRANSIENT_FAILURE";
+
 export class ManualConnectionValidationError extends Error {
   constructor(readonly issueCode: ManualConnectionValidationIssueCode) {
     super("Manual WhatsApp connection validation failed.");
@@ -176,5 +191,12 @@ export class ManualWebhookConfigurationError extends Error {
   constructor(readonly issueCode: ManualWebhookIssueCode) {
     super("Manual WhatsApp webhook configuration failed.");
     this.name = "ManualWebhookConfigurationError";
+  }
+}
+
+export class ManualFinalizationError extends Error {
+  constructor(readonly issueCode: ManualFinalizationIssueCode) {
+    super("Manual WhatsApp connection finalization failed.");
+    this.name = "ManualFinalizationError";
   }
 }

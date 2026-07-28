@@ -76,6 +76,14 @@ class FakeManualWebhookTransport implements ManualMetaWebhookTransport {
   async listWabaSubscriptions(): Promise<readonly ManualMetaWabaSubscription[]> {
     return this.subscriptions;
   }
+
+  async registerPhoneNumber(): Promise<void> {
+    return undefined;
+  }
+
+  async readPhoneRegistrationStatus(): Promise<{ id: string; registered: boolean }> {
+    return { id: "111111111111111", registered: true };
+  }
 }
 
 class FakeProducer {

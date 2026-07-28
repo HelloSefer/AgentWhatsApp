@@ -23,6 +23,7 @@ export type CurrentWhatsAppConnection = Readonly<{
   connectionId: string;
   status: WhatsAppConnectionStatus;
   connectionMethod: WhatsAppConnectionMethod;
+  appId: string | null;
   maskedPhoneNumber: string | null;
   verifiedName: string | null;
   connectedAt: string | null;
@@ -90,6 +91,7 @@ function safeConnection(connection: WhatsAppConnection): CurrentWhatsAppConnecti
     connectionId: connection.connectionId,
     status: connection.status,
     connectionMethod: connection.connectionMethod ?? "EMBEDDED_SIGNUP",
+    appId: connection.connectionMethod === "CUSTOMER_OWNED_META_APP" ? connection.metaAppId ?? null : null,
     maskedPhoneNumber: maskPhoneNumber(connection.displayPhoneNumber),
     verifiedName: connection.verifiedName ?? null,
     connectedAt: isoDate(connection.connectedAt),

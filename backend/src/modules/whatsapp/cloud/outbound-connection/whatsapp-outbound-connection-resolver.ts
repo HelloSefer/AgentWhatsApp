@@ -1,6 +1,6 @@
 import { createTenantContext } from "../../../../infrastructure/database";
-import type { WhatsAppConnectionRepository } from "../../../whatsapp-connection";
-import { WhatsAppConnectionCredentialEncryptionError, WhatsAppConnectionCredentialService } from "../../../whatsapp-connection";
+import type { ManualWhatsAppConnectionRepository, WhatsAppConnectionRepository } from "../../../whatsapp-connection";
+import { WhatsAppConnectionCredentialEncryptionError, WhatsAppConnectionCredentialEncryptionService, WhatsAppConnectionCredentialService } from "../../../whatsapp-connection";
 import { incrementWhatsAppConnectionMetric, recordWhatsAppConnectionAudit } from "../../../whatsapp-connection/application/whatsapp-connection-operational-events";
 import { WhatsAppOutboundError } from "../outbound-queue/whatsapp-outbound.errors";
 
@@ -29,6 +29,7 @@ export class PersistentWhatsAppOutboundConnectionResolver implements WhatsAppOut
   constructor(
     private readonly repository: WhatsAppConnectionRepository,
     private readonly credentialService: WhatsAppConnectionCredentialService,
+    private readonly manualCredentialEncryptionService?: WhatsAppConnectionCredentialEncryptionService,
   ) {}
 
   async resolveForTrustedSeller(sellerId: string): Promise<ResolvedWhatsAppOutboundConnection> {
@@ -48,10 +49,18 @@ export class PersistentWhatsAppOutboundConnectionResolver implements WhatsAppOut
     }
     let accessToken: string | null;
     try {
-      accessToken = await this.credentialService.decryptStoredAccessToken(
-        tenant,
-        connection.connectionId,
-      );
+      if (connection.connectionMethod === "CUSTOMER_OWNED_META_APP") {
+        if (!this.manualCredentialEncryptionService || !("findManualCredentialStorage" in this.repository)) {
+          throw new WhatsAppConnectionCredentialEncryptionError();
+        }
+        const storage = await (this.repository as ManualWhatsAppConnectionRepository).findManualCredentialStorage(tenant, connection.connectionId);
+        accessToken = storage ? this.manualCredentialEncryptionService.decryptManualSystemUserAccessToken(storage.encryptedSystemUserAccessToken) : null;
+      } else {
+        accessToken = await this.credentialService.decryptStoredAccessToken(
+          tenant,
+          connection.connectionId,
+        );
+      }
     } catch (error) {
       if (error instanceof WhatsAppConnectionCredentialEncryptionError) {
         recordWhatsAppConnectionAudit("whatsapp_connection.token_invalid", { sellerId: tenant.sellerId, connectionId: connection.connectionId, reason: "credential_decryption_failed" });

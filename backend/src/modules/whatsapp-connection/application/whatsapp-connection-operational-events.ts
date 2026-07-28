@@ -13,7 +13,13 @@ export type WhatsAppConnectionAuditEventName =
   | "whatsapp_connection.manual_webhook_subscription_confirmed"
   | "whatsapp_connection.manual_webhook_subscription_failed"
   | "whatsapp_connection.manual_webhook_signature_failed"
-  | "whatsapp_connection.manual_webhook_payload_mismatch";
+  | "whatsapp_connection.manual_webhook_payload_mismatch"
+  | "whatsapp_connection.manual_finalization_started"
+  | "whatsapp_connection.manual_readiness_passed"
+  | "whatsapp_connection.manual_readiness_failed"
+  | "whatsapp_connection.manual_phone_registration_confirmed"
+  | "whatsapp_connection.manual_connection_activated"
+  | "whatsapp_connection.manual_replacement_completed";
 
 export type WhatsAppConnectionMetricName =
   | "whatsapp_connections_active_total"

@@ -52,7 +52,8 @@
     "test:phase-11j-security-audit-health": "node dist/modules/whatsapp-connection/testing/phase-11j-security-audit-health-test.command.js",
     "test:phase-11k-m1-manual-connection-foundation": "node dist/modules/whatsapp-connection/testing/phase-11k-m1-manual-connection-foundation-test.command.js",
     "test:phase-11k-m2-manual-validation-assets": "node dist/modules/whatsapp-connection/testing/phase-11k-m2-manual-validation-assets-test.command.js",
-    "test:phase-11k-m3-manual-webhook-security": "node dist/modules/whatsapp-connection/testing/phase-11k-m3-manual-webhook-security-test.command.js"
+    "test:phase-11k-m3-manual-webhook-security": "node dist/modules/whatsapp-connection/testing/phase-11k-m3-manual-webhook-security-test.command.js",
+    "test:phase-11k-m4-manual-finalization": "node dist/modules/whatsapp-connection/testing/phase-11k-m4-manual-finalization-test.command.js"
   },
   "keywords": [],
   "author": "",

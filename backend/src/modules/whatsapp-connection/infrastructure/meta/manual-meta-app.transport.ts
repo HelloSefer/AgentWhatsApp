@@ -29,6 +29,11 @@ export type ManualMetaWabaSubscription = Readonly<{
   callbackUrl?: string | null;
 }>;
 
+export type ManualMetaPhoneRegistrationStatus = Readonly<{
+  id: string;
+  registered: boolean;
+}>;
+
 export interface ManualMetaAppTransport {
   inspectSystemUserToken(appId: string, appSecret: string, systemUserAccessToken: string): Promise<ManualMetaTokenInspectionResult>;
   listAssignedWabas(systemUserId: string, systemUserAccessToken: string): Promise<readonly ManualMetaWaba[]>;
@@ -38,6 +43,8 @@ export interface ManualMetaAppTransport {
 export interface ManualMetaWebhookTransport extends ManualMetaAppTransport {
   subscribeWabaWithCallback(wabaId: string, callbackUrl: string, verifyToken: string, systemUserAccessToken: string): Promise<void>;
   listWabaSubscriptions(wabaId: string, systemUserAccessToken: string): Promise<readonly ManualMetaWabaSubscription[]>;
+  registerPhoneNumber(phoneNumberId: string, registrationPin: string, systemUserAccessToken: string): Promise<void>;
+  readPhoneRegistrationStatus(phoneNumberId: string, systemUserAccessToken: string): Promise<ManualMetaPhoneRegistrationStatus>;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -236,6 +243,22 @@ export class FetchManualMetaAppTransport implements ManualMetaAppTransport {
       appId: stringField(row.id) ?? "",
       callbackUrl: stringField(row.override_callback_uri) ?? stringField(row.callback_url),
     })).filter((row) => row.appId);
+  }
+
+  async registerPhoneNumber(phoneNumberId: string, registrationPin: string, systemUserAccessToken: string): Promise<void> {
+    const body = await this.post(`${phoneNumberId}/register`, new URLSearchParams({
+      messaging_product: "whatsapp",
+      pin: registrationPin,
+    }), systemUserAccessToken);
+    if (body.success !== true) throw new WhatsAppConnectionMetaTransportError("validation");
+  }
+
+  async readPhoneRegistrationStatus(phoneNumberId: string, systemUserAccessToken: string): Promise<ManualMetaPhoneRegistrationStatus> {
+    const body = await this.request(phoneNumberId, new URLSearchParams({ fields: "id,code_verification_status" }), systemUserAccessToken);
+    const id = stringField(body.id);
+    const status = stringField(body.code_verification_status);
+    if (!id || !status) throw new WhatsAppConnectionMetaTransportError("not_found");
+    return { id, registered: status.toUpperCase() === "VERIFIED" };
   }
 }
 
