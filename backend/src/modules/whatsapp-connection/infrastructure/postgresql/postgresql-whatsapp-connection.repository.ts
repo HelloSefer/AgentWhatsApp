@@ -445,6 +445,32 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
       mapWriteError(error);
     }
   }
+
+  async activateConnection(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `
+          UPDATE whatsapp_connections
+          SET
+            status = 'ACTIVE',
+            connected_at = COALESCE(connected_at, NOW()),
+            last_verified_at = NOW(),
+            finalization_last_error_code = NULL,
+            finalization_last_error_at = NULL,
+            updated_at = NOW()
+          WHERE seller_id = $1
+            AND connection_id = $2
+            AND status = 'VERIFYING'
+          RETURNING ${CONNECTION_COLUMNS}
+        `,
+        values: [tenant.sellerId, normalizedConnectionId],
+      });
+      return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
+    } catch (error) {
+      mapWriteError(error);
+    }
+  }
 }
 
 export const postgreSqlWhatsAppConnectionRepository = new PostgreSqlWhatsAppConnectionRepository();

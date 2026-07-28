@@ -1,8 +1,10 @@
 import { randomInt } from "node:crypto";
-import type { TenantContext } from "../../../infrastructure/database";
+import type { DatabaseTransactionExecutor, TenantContext } from "../../../infrastructure/database";
+import { withTransaction } from "../../../infrastructure/database/transactions/with-transaction.service";
 import type { WhatsAppConnectionRepository } from "../contracts/whatsapp-connection.repository";
 import {
   WhatsAppConnectionCredentialEncryptionError,
+  WhatsAppConnectionActiveAlreadyExistsError,
   WhatsAppConnectionFinalizationAccessDeniedError,
   WhatsAppConnectionFinalizationConflictError,
   WhatsAppConnectionFinalizationRetryableError,
@@ -20,17 +22,22 @@ export type FinalizeWhatsAppConnectionResult = Readonly<{
   finalized: true;
   connection: Readonly<{
     connectionId: string;
-    status: "VERIFYING";
+    status: "VERIFYING" | "ACTIVE";
     phoneRegistrationCompleted: boolean;
     wabaSubscriptionCompleted: boolean;
+    connectedAt: Date | null;
+    lastVerifiedAt: Date | null;
   }>;
 }>;
+
+export type TransactionRunner = <Result>(callback: (transaction: DatabaseTransactionExecutor) => Promise<Result>) => Promise<Result>;
 
 type SafeFinalizationErrorCode =
   | "missing_access_token"
   | "invalid_access_token"
   | "invalid_connection_state"
   | "missing_meta_assets"
+  | "missing_finalization_marker"
   | "phone_registration_rejected"
   | "phone_registration_timeout"
   | "phone_registration_unconfirmed"
@@ -72,28 +79,44 @@ export class WhatsAppConnectionFinalizationService {
     private readonly repository: WhatsAppConnectionRepository,
     private readonly credentialService: WhatsAppConnectionCredentialService | null,
     private readonly metaTransport: MetaEmbeddedSignupTransport,
+    private readonly transactionRunner: TransactionRunner = withTransaction,
   ) {}
 
   async finalize(tenant: TenantContext, connectionId: string): Promise<FinalizeWhatsAppConnectionResult> {
     const normalizedConnectionId = this.normalizeConnectionId(connectionId);
-    try {
-      if (!this.credentialService) throw new WhatsAppConnectionFinalizationAccessDeniedError();
-      const connection = await this.loadVerifyingConnection(tenant, normalizedConnectionId);
-      const accessToken = await this.decryptAccessToken(tenant, connection);
+    if (!this.credentialService) throw new WhatsAppConnectionFinalizationAccessDeniedError();
+    const initial = await this.loadActivatableConnection(tenant, normalizedConnectionId);
+    if (initial.status === "ACTIVE") return responseFromConnection(initial);
 
-      const withRegistration = connection.phoneRegistrationCompletedAt
-        ? connection
-        : await this.ensurePhoneRegistration(tenant, connection, accessToken);
-      const withSubscription = withRegistration.wabaSubscriptionCompletedAt
-        ? withRegistration
-        : await this.ensureWabaSubscription(tenant, withRegistration, accessToken);
-      const cleared = await this.repository.persistFinalizationProgress(tenant, withSubscription.connectionId, { clearFinalizationLastError: true });
-      if (!cleared) throw new WhatsAppConnectionPersistenceError();
+    const active = await this.repository.findActiveBySeller(tenant);
+    if (active && active.connectionId !== initial.connectionId) throw new WhatsAppConnectionFinalizationConflictError();
 
-      return responseFromConnection(cleared);
-    } catch (error) {
-      throw error;
-    }
+    const accessToken = await this.decryptAccessToken(tenant, initial);
+    const withRegistration = initial.phoneRegistrationCompletedAt
+      ? initial
+      : await this.ensurePhoneRegistration(tenant, initial, accessToken);
+    const withSubscription = withRegistration.wabaSubscriptionCompletedAt
+      ? withRegistration
+      : await this.ensureWabaSubscription(tenant, withRegistration, accessToken);
+    const cleared = await this.repository.persistFinalizationProgress(tenant, withSubscription.connectionId, { clearFinalizationLastError: true });
+    if (!cleared) throw new WhatsAppConnectionPersistenceError();
+
+    return this.activateReadyConnection(tenant, cleared.connectionId);
+  }
+
+  async activateReadyConnection(tenant: TenantContext, connectionId: string): Promise<FinalizeWhatsAppConnectionResult> {
+    const normalizedConnectionId = this.normalizeConnectionId(connectionId);
+    if (!this.credentialService) throw new WhatsAppConnectionFinalizationAccessDeniedError();
+    const connection = await this.loadActivatableConnection(tenant, normalizedConnectionId);
+    if (connection.status === "ACTIVE") return responseFromConnection(connection);
+
+    const active = await this.repository.findActiveBySeller(tenant);
+    if (active && active.connectionId !== connection.connectionId) throw new WhatsAppConnectionFinalizationConflictError();
+
+    const accessToken = await this.decryptAccessToken(tenant, connection);
+    await this.verifyReadiness(tenant, connection, accessToken);
+    const activated = await this.activateAtomically(tenant, connection.connectionId);
+    return responseFromConnection(activated);
   }
 
   private normalizeConnectionId(connectionId: string): string {
@@ -104,9 +127,10 @@ export class WhatsAppConnectionFinalizationService {
     }
   }
 
-  private async loadVerifyingConnection(tenant: TenantContext, connectionId: string): Promise<WhatsAppConnection> {
+  private async loadActivatableConnection(tenant: TenantContext, connectionId: string): Promise<WhatsAppConnection> {
     const connection = await this.repository.findByConnectionId(tenant, connectionId);
     if (!connection) throw new WhatsAppConnectionFinalizationConflictError();
+    if (connection.status === "ACTIVE") return connection;
     if (connection.status !== "VERIFYING") {
       await this.persistSafeError(tenant, connection.connectionId, "invalid_connection_state");
       throw new WhatsAppConnectionFinalizationConflictError();
@@ -262,6 +286,82 @@ export class WhatsAppConnectionFinalizationService {
     const updated = await this.repository.persistFinalizationProgress(tenant, connectionId, { finalizationLastErrorCode: code });
     if (!updated) throw new WhatsAppConnectionPersistenceError();
   }
+
+  private async verifyReadiness(tenant: TenantContext, connection: WhatsAppConnection, accessToken: string): Promise<void> {
+    if (!connection.wabaId || !connection.phoneNumberId) {
+      await this.persistSafeError(tenant, connection.connectionId, "missing_meta_assets");
+      throw new WhatsAppConnectionFinalizationVerificationError();
+    }
+    if (!connection.phoneRegistrationCompletedAt || !connection.wabaSubscriptionCompletedAt) {
+      await this.persistSafeError(tenant, connection.connectionId, "missing_finalization_marker");
+      throw new WhatsAppConnectionFinalizationVerificationError();
+    }
+
+    try {
+      const inspection = await this.metaTransport.inspectToken(accessToken);
+      if (!inspection.valid) throw new WhatsAppConnectionMetaTransportError("auth");
+
+      const waba = await this.metaTransport.readWaba(connection.wabaId, accessToken);
+      if (waba.id !== connection.wabaId) throw new WhatsAppConnectionMetaTransportError("not_found");
+
+      const phone = await this.metaTransport.readPhoneNumber(connection.phoneNumberId, accessToken);
+      if (phone.id !== connection.phoneNumberId || phone.wabaId !== connection.wabaId) {
+        throw new WhatsAppConnectionMetaTransportError("not_found");
+      }
+
+      const registered = await this.metaTransport.readPhoneNumberRegistrationStatus(connection.phoneNumberId, accessToken);
+      if (registered.id !== connection.phoneNumberId || !registered.registered) {
+        await this.persistSafeError(tenant, connection.connectionId, "phone_registration_unconfirmed");
+        throw new WhatsAppConnectionFinalizationVerificationError();
+      }
+
+      const subscription = await this.metaTransport.readWabaWebhookSubscriptionStatus(connection.wabaId, accessToken);
+      if (subscription.wabaId !== connection.wabaId || !subscription.subscribed) {
+        await this.persistSafeError(tenant, connection.connectionId, "waba_subscription_unconfirmed");
+        throw new WhatsAppConnectionFinalizationVerificationError();
+      }
+    } catch (error) {
+      if (
+        error instanceof WhatsAppConnectionFinalizationVerificationError ||
+        error instanceof WhatsAppConnectionFinalizationAccessDeniedError ||
+        error instanceof WhatsAppConnectionFinalizationRetryableError
+      ) {
+        throw error;
+      }
+      if (error instanceof WhatsAppConnectionMetaTransportError) {
+        const safe = safeErrorFromMeta(error, "registration");
+        await this.persistSafeError(tenant, connection.connectionId, safe.code);
+        throw safe.error;
+      }
+      await this.persistSafeError(tenant, connection.connectionId, "malformed_meta_response");
+      throw new WhatsAppConnectionFinalizationVerificationError();
+    }
+  }
+
+  private async activateAtomically(tenant: TenantContext, connectionId: string): Promise<WhatsAppConnection> {
+    try {
+      return await this.transactionRunner(async (executor) => {
+        const connection = await this.repository.findByConnectionId(tenant, connectionId, { executor });
+        if (!connection) throw new WhatsAppConnectionFinalizationConflictError();
+        if (connection.status === "ACTIVE") return connection;
+        if (connection.status !== "VERIFYING") throw new WhatsAppConnectionFinalizationConflictError();
+
+        const active = await this.repository.findActiveBySeller(tenant, { executor });
+        if (active && active.connectionId !== connection.connectionId) throw new WhatsAppConnectionFinalizationConflictError();
+
+        const activated = await this.repository.activateConnection(tenant, connection.connectionId, { executor });
+        if (!activated) throw new WhatsAppConnectionPersistenceError();
+        return activated;
+      });
+    } catch (error) {
+      if (error instanceof WhatsAppConnectionActiveAlreadyExistsError) throw new WhatsAppConnectionFinalizationConflictError();
+      if (
+        error instanceof WhatsAppConnectionFinalizationConflictError ||
+        error instanceof WhatsAppConnectionPersistenceError
+      ) throw error;
+      throw new WhatsAppConnectionPersistenceError(error);
+    }
+  }
 }
 
 function responseFromConnection(connection: WhatsAppConnection): FinalizeWhatsAppConnectionResult {
@@ -269,9 +369,11 @@ function responseFromConnection(connection: WhatsAppConnection): FinalizeWhatsAp
     finalized: true,
     connection: {
       connectionId: connection.connectionId,
-      status: "VERIFYING",
+      status: connection.status === "ACTIVE" ? "ACTIVE" : "VERIFYING",
       phoneRegistrationCompleted: Boolean(connection.phoneRegistrationCompletedAt),
       wabaSubscriptionCompleted: Boolean(connection.wabaSubscriptionCompletedAt),
+      connectedAt: connection.connectedAt ?? null,
+      lastVerifiedAt: connection.lastVerifiedAt ?? null,
     },
   };
 }

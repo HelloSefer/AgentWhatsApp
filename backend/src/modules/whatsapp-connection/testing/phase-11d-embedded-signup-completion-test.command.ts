@@ -128,6 +128,15 @@ class FakeRepository implements WhatsAppConnectionRepository {
     return updated;
   }
 
+  async activateConnection(tenant: TenantContext, connectionId: string): Promise<WhatsAppConnection | null> {
+    const current = await this.findByConnectionId(tenant, connectionId);
+    if (!current || current.status !== "VERIFYING") return null;
+    const now = new Date();
+    const updated = { ...current, status: "ACTIVE" as const, connectedAt: current.connectedAt ?? now, lastVerifiedAt: now, updatedAt: now };
+    this.replace(updated);
+    return updated;
+  }
+
   async persistVerifiedMetadata(tenant: TenantContext, connectionId: string, metadata: VerifiedWhatsAppConnectionMetadataInput): Promise<WhatsAppConnection | null> {
     const other = this.connections.find((entry) => entry.sellerId !== tenant.sellerId && entry.phoneNumberId === metadata.phoneNumberId);
     if (other) throw new WhatsAppConnectionPersistenceError();

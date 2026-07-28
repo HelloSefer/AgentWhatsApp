@@ -46,4 +46,5 @@ export interface WhatsAppConnectionRepository {
   persistRegistrationPinCredential(tenant: TenantContext, connectionId: string, credential: PersistWhatsAppConnectionRegistrationPinInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionRegistrationPinStorage | null>;
   findRegistrationPinStorage(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionRegistrationPinStorage | null>;
   persistFinalizationProgress(tenant: TenantContext, connectionId: string, input: WhatsAppConnectionFinalizationProgressInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
+  activateConnection(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
 }
