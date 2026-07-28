@@ -17,11 +17,17 @@ import databaseHealthRoutes from "./infrastructure/database/health/database-heal
 import authRoutes from "./modules/auth/auth.routes";
 import onboardingRoutes from "./modules/onboarding/onboarding.routes";
 import whatsappConnectionRoutes from "./modules/whatsapp-connection/whatsapp-connection.routes";
+import manualWebhookPublicRoutes from "./modules/whatsapp-connection/manual-webhook-public.routes";
 
 const app = express();
 
 app.use(helmet());
 app.use(cors(trustedFrontendCorsOptions));
+app.use(
+  "/api/whatsapp/webhooks/connections",
+  express.raw({ type: "application/json", limit: "256kb" }),
+  manualWebhookPublicRoutes,
+);
 app.use(
   express.json({
     verify: (req, _res, buf) => {

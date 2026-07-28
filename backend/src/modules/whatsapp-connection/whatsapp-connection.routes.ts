@@ -10,6 +10,7 @@ import { WhatsAppConnectionFinalizationService } from "./application/whatsapp-co
 import { WhatsAppConnectionDisconnectService } from "./application/whatsapp-connection-disconnect.service";
 import { ManualConnectionSetupService } from "./application/manual-connection-setup.service";
 import { ManualConnectionAssetsService } from "./application/manual-connection-assets.service";
+import { ManualWebhookConfigurationService } from "./application/manual-webhook-configuration.service";
 import { WhatsAppConnectionCredentialEncryptionService } from "./application/whatsapp-connection-credential-encryption.service";
 import { getWhatsAppConnectionCredentialEncryptionConfiguration } from "./application/whatsapp-connection-credential-encryption.config";
 import { WhatsAppConnectionCredentialService } from "./application/whatsapp-connection-credential.service";
@@ -67,6 +68,11 @@ export function createWhatsAppConnectionRoutes(
     safeCredentialEncryptionService(),
     new FetchManualMetaAppTransport(metaConfiguration?.graphApiVersion ?? "v25.0"),
   );
+  const manualWebhookConfigurationService = new ManualWebhookConfigurationService(
+    postgreSqlWhatsAppConnectionRepository,
+    safeCredentialEncryptionService(),
+    new FetchManualMetaAppTransport(metaConfiguration?.graphApiVersion ?? "v25.0"),
+  );
   const metaTransport = metaConfiguration
     ? new FetchMetaEmbeddedSignupTransport(metaConfiguration)
     : {
@@ -92,7 +98,7 @@ export function createWhatsAppConnectionRoutes(
   );
   const currentService = new WhatsAppConnectionCurrentService(postgreSqlWhatsAppConnectionRepository);
   const disconnectService = new WhatsAppConnectionDisconnectService(postgreSqlWhatsAppConnectionRepository);
-  const controller = new WhatsAppConnectionController(completionService, currentService, finalizationService, disconnectService, manualSetupService, manualAssetsService);
+  const controller = new WhatsAppConnectionController(completionService, currentService, finalizationService, disconnectService, manualSetupService, manualAssetsService, manualWebhookConfigurationService);
 
   router.get(
     "/current",
@@ -123,6 +129,14 @@ export function createWhatsAppConnectionRoutes(
     rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
     authorizeManage,
     controller.selectManualAssets,
+  );
+
+  router.post(
+    "/manual/:connectionId/configure-webhook",
+    authenticate,
+    rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
+    authorizeManage,
+    controller.configureManualWebhook,
   );
 
   router.post(

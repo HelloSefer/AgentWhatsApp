@@ -235,6 +235,25 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
     }
   }
 
+  async findByPublicWebhookId(publicWebhookId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
+    const normalizedPublicWebhookId = normalizeConnectionId(publicWebhookId);
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `
+          SELECT ${CONNECTION_COLUMNS}
+          FROM whatsapp_connections
+          WHERE public_webhook_id = $1
+            AND connection_method = 'CUSTOMER_OWNED_META_APP'
+          LIMIT 1
+        `,
+        values: [normalizedPublicWebhookId],
+      });
+      return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
+    } catch (error) {
+      mapReadError(error);
+    }
+  }
+
   async findByConnectionId(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
     const normalizedConnectionId = normalizeConnectionId(connectionId);
     try {

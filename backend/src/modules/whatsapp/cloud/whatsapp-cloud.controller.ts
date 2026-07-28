@@ -157,6 +157,10 @@ export async function receiveWhatsAppCloudWebhook(req: Request, res: Response) {
     });
   }
 
+  return processVerifiedWhatsAppCloudWebhook(req, res, req.body);
+}
+
+export async function processVerifiedWhatsAppCloudWebhook(req: Request, res: Response, body: unknown) {
   if (env.whatsappInboundQueueEnabled === true) {
     const producer = whatsappInboundProducerProvider();
 
@@ -164,12 +168,12 @@ export async function receiveWhatsAppCloudWebhook(req: Request, res: Response) {
       return res.status(503).json({ ok: false });
     }
 
-    const messages = extractIncomingMessages(req.body);
+    const messages = extractIncomingMessages(body);
 
     if (!messages.length) {
       res.status(200).json({ ok: true });
 
-      cloudWebhookProcessor(req.body, {
+      cloudWebhookProcessor(body, {
         publicBaseUrl: getRequestBaseUrl(req),
       }).catch((error) => {
         console.error(
@@ -223,7 +227,7 @@ export async function receiveWhatsAppCloudWebhook(req: Request, res: Response) {
 
   res.status(200).json({ ok: true });
 
-  cloudWebhookProcessor(req.body, {
+  cloudWebhookProcessor(body, {
     publicBaseUrl: getRequestBaseUrl(req),
   }).catch((error) => {
     console.error(

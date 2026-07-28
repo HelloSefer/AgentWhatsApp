@@ -8,6 +8,7 @@ function excludedPath(path: string): boolean {
     path.startsWith("/health/") ||
     path.startsWith("/api/database/health") ||
     path.startsWith("/api/whatsapp/cloud/webhook") ||
+    path.startsWith("/api/whatsapp/webhooks/connections") ||
     path.startsWith("/api/auth/google/callback");
 }
 

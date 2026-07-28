@@ -6,7 +6,14 @@ export type WhatsAppConnectionAuditEventName =
   | "whatsapp_connection.replaced"
   | "whatsapp_connection.disconnected"
   | "whatsapp_connection.token_invalid"
-  | "whatsapp_connection.unknown_phone_webhook";
+  | "whatsapp_connection.unknown_phone_webhook"
+  | "whatsapp_connection.manual_webhook_configuration_started"
+  | "whatsapp_connection.manual_webhook_verification_succeeded"
+  | "whatsapp_connection.manual_webhook_verification_failed"
+  | "whatsapp_connection.manual_webhook_subscription_confirmed"
+  | "whatsapp_connection.manual_webhook_subscription_failed"
+  | "whatsapp_connection.manual_webhook_signature_failed"
+  | "whatsapp_connection.manual_webhook_payload_mismatch";
 
 export type WhatsAppConnectionMetricName =
   | "whatsapp_connections_active_total"

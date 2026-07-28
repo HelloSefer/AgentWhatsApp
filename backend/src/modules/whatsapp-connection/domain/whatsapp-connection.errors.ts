@@ -154,9 +154,27 @@ export type ManualConnectionValidationIssueCode =
   | "META_WABA_ACCESS_MISSING"
   | "META_ASSET_DISCOVERY_FAILED";
 
+export type ManualWebhookIssueCode =
+  | "WEBHOOK_PUBLIC_URL_INVALID"
+  | "WEBHOOK_VERIFICATION_FAILED"
+  | "WEBHOOK_SIGNATURE_INVALID"
+  | "WEBHOOK_SUBSCRIPTION_FAILED"
+  | "WEBHOOK_SUBSCRIPTION_UNCONFIRMED"
+  | "WEBHOOK_PAYLOAD_INVALID"
+  | "WEBHOOK_CONNECTION_MISMATCH"
+  | "META_PERMISSION_MISSING"
+  | "META_TRANSIENT_FAILURE";
+
 export class ManualConnectionValidationError extends Error {
   constructor(readonly issueCode: ManualConnectionValidationIssueCode) {
     super("Manual WhatsApp connection validation failed.");
     this.name = "ManualConnectionValidationError";
+  }
+}
+
+export class ManualWebhookConfigurationError extends Error {
+  constructor(readonly issueCode: ManualWebhookIssueCode) {
+    super("Manual WhatsApp webhook configuration failed.");
+    this.name = "ManualWebhookConfigurationError";
   }
 }

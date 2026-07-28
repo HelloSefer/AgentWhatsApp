@@ -3,6 +3,7 @@ import type { AuthorizedRequest } from "../../auth/http/auth-request.types";
 import type { EmbeddedSignupCompletionService } from "../application/embedded-signup-completion.service";
 import type { ManualConnectionAssetsService } from "../application/manual-connection-assets.service";
 import type { ManualConnectionSetupService } from "../application/manual-connection-setup.service";
+import type { ManualWebhookConfigurationService } from "../application/manual-webhook-configuration.service";
 import type { WhatsAppConnectionCurrentService } from "../application/whatsapp-connection-current.service";
 import type { WhatsAppConnectionDisconnectService } from "../application/whatsapp-connection-disconnect.service";
 import type { WhatsAppConnectionFinalizationService } from "../application/whatsapp-connection-finalization.service";
@@ -58,6 +59,7 @@ export class WhatsAppConnectionController {
     private readonly disconnectService?: WhatsAppConnectionDisconnectService,
     private readonly manualSetupService?: ManualConnectionSetupService,
     private readonly manualAssetsService?: ManualConnectionAssetsService,
+    private readonly manualWebhookConfigurationService?: ManualWebhookConfigurationService,
   ) {}
 
   getCurrentConnection = async (req: Request, res: Response): Promise<Response> => {
@@ -125,6 +127,19 @@ export class WhatsAppConnectionController {
         wabaId: body.wabaId as string,
         phoneNumberId: body.phoneNumberId as string,
       });
+      return res.status(200).json(result);
+    } catch (error) {
+      return sendWhatsappConnectionError(res, error);
+    }
+  };
+
+  configureManualWebhook = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      if (!this.manualWebhookConfigurationService) throw new WhatsAppConnectionCredentialEncryptionError();
+      strictEmptyBody(req);
+      const authorized = req as AuthorizedRequest;
+      const connectionId = typeof req.params.connectionId === "string" ? req.params.connectionId : "";
+      const result = await this.manualWebhookConfigurationService.configure(authorized.tenant, connectionId);
       return res.status(200).json(result);
     } catch (error) {
       return sendWhatsappConnectionError(res, error);

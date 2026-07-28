@@ -8,6 +8,7 @@ import {
 } from "../../auth/application/authorization.errors";
 import {
   ManualConnectionValidationError,
+  ManualWebhookConfigurationError,
   WhatsAppConnectionCompletionAccessDeniedError,
   WhatsAppConnectionCompletionConflictError,
   WhatsAppConnectionCompletionValidationError,
@@ -36,6 +37,7 @@ export function sendWhatsappConnectionError(res: Response, error: unknown): Resp
   if (error instanceof AuthorizationTenantSelectionRequiredError) return res.status(409).json({ message: "Seller selection required." });
   if (error instanceof WhatsAppConnectionValidationError) return res.status(400).json({ message: "Invalid request." });
   if (error instanceof ManualConnectionValidationError) return res.status(400).json({ message: "WhatsApp connection could not be validated.", issueCode: error.issueCode });
+  if (error instanceof ManualWebhookConfigurationError) return res.status(400).json({ message: "WhatsApp webhook could not be configured.", issueCode: error.issueCode });
   if (error instanceof WhatsAppConnectionCompletionValidationError) return res.status(400).json({ message: "Invalid request." });
   if (error instanceof WhatsAppConnectionCompletionAccessDeniedError) return res.status(403).json({ message: "WhatsApp connection could not be verified." });
   if (error instanceof WhatsAppConnectionCompletionConflictError) return res.status(409).json({ message: "WhatsApp connection could not be completed safely." });

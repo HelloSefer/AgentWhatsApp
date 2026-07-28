@@ -62,6 +62,7 @@ export interface WhatsAppConnectionRepository {
 export interface ManualWhatsAppConnectionRepository extends WhatsAppConnectionRepository {
   createManualDraft(tenant: TenantContext, input: CreateManualWhatsAppConnectionDraftInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection>;
   findReusableManualDraft(tenant: TenantContext, metaAppId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
+  findByPublicWebhookId(publicWebhookId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
   persistManualCredentials(tenant: TenantContext, connectionId: string, credential: PersistManualWhatsAppConnectionCredentialInput, options?: WhatsAppConnectionRepositoryOptions): Promise<ManualWhatsAppConnectionCredentialStorage | null>;
   findManualCredentialStorage(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<ManualWhatsAppConnectionCredentialStorage | null>;
 }

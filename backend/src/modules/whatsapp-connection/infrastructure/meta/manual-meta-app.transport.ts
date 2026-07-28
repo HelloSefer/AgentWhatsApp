@@ -24,10 +24,20 @@ export type ManualMetaPhoneNumber = Readonly<{
   codeVerificationStatus?: string | null;
 }>;
 
+export type ManualMetaWabaSubscription = Readonly<{
+  appId: string;
+  callbackUrl?: string | null;
+}>;
+
 export interface ManualMetaAppTransport {
   inspectSystemUserToken(appId: string, appSecret: string, systemUserAccessToken: string): Promise<ManualMetaTokenInspectionResult>;
   listAssignedWabas(systemUserId: string, systemUserAccessToken: string): Promise<readonly ManualMetaWaba[]>;
   listPhoneNumbers(wabaId: string, systemUserAccessToken: string): Promise<readonly ManualMetaPhoneNumber[]>;
+}
+
+export interface ManualMetaWebhookTransport extends ManualMetaAppTransport {
+  subscribeWabaWithCallback(wabaId: string, callbackUrl: string, verifyToken: string, systemUserAccessToken: string): Promise<void>;
+  listWabaSubscriptions(wabaId: string, systemUserAccessToken: string): Promise<readonly ManualMetaWabaSubscription[]>;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -139,6 +149,28 @@ export class FetchManualMetaAppTransport implements ManualMetaAppTransport {
     }
   }
 
+  private async post(path: string, params: URLSearchParams, accessToken: string): Promise<JsonRecord> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      params.set("access_token", accessToken);
+      const response = await this.fetchImpl(this.graphUrl(path, new URLSearchParams()), {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+        signal: controller.signal,
+      });
+      const body = await boundedJson(response);
+      if (!response.ok) throw new WhatsAppConnectionMetaTransportError(classifyStatus(response.status));
+      return body;
+    } catch (error) {
+      if (error instanceof WhatsAppConnectionMetaTransportError) throw error;
+      throw new WhatsAppConnectionMetaTransportError("unavailable");
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   private async listPaged(path: string, params: URLSearchParams, accessToken: string): Promise<readonly JsonRecord[]> {
     const rows: JsonRecord[] = [];
     const seen = new Set<string>();
@@ -188,6 +220,22 @@ export class FetchManualMetaAppTransport implements ManualMetaAppTransport {
       status: stringField(row.status),
       codeVerificationStatus: stringField(row.code_verification_status),
     })).filter((row) => row.id);
+  }
+
+  async subscribeWabaWithCallback(wabaId: string, callbackUrl: string, verifyToken: string, systemUserAccessToken: string): Promise<void> {
+    const body = await this.post(`${wabaId}/subscribed_apps`, new URLSearchParams({
+      override_callback_uri: callbackUrl,
+      verify_token: verifyToken,
+    }), systemUserAccessToken);
+    if (body.success !== true) throw new WhatsAppConnectionMetaTransportError("validation");
+  }
+
+  async listWabaSubscriptions(wabaId: string, systemUserAccessToken: string): Promise<readonly ManualMetaWabaSubscription[]> {
+    const rows = await this.listPaged(`${wabaId}/subscribed_apps`, new URLSearchParams({ fields: "id,callback_url,override_callback_uri" }), systemUserAccessToken);
+    return rows.map((row) => ({
+      appId: stringField(row.id) ?? "",
+      callbackUrl: stringField(row.override_callback_uri) ?? stringField(row.callback_url),
+    })).filter((row) => row.appId);
   }
 }
 

@@ -8,6 +8,8 @@ export { ManualConnectionSetupService } from "./application/manual-connection-se
 export type { ManualConnectionSetupInput, ManualConnectionSetupResult } from "./application/manual-connection-setup.service";
 export { ManualConnectionAssetsService } from "./application/manual-connection-assets.service";
 export type { ManualConnectionDiscoveryResult, ManualConnectionSelectAssetsInput, ManualConnectionSelectAssetsResult } from "./application/manual-connection-assets.service";
+export { ManualWebhookConfigurationService } from "./application/manual-webhook-configuration.service";
+export type { ManualWebhookConfigurationResult } from "./application/manual-webhook-configuration.service";
 export { FetchManualMetaAppTransport } from "./infrastructure/meta/manual-meta-app.transport";
 export type { ManualMetaAppTransport, ManualMetaPhoneNumber, ManualMetaTokenInspectionResult, ManualMetaWaba } from "./infrastructure/meta/manual-meta-app.transport";
 export { WhatsAppConnectionCredentialEncryptionService } from "./application/whatsapp-connection-credential-encryption.service";
@@ -25,6 +27,7 @@ export type {
 } from "./domain/whatsapp-connection-credentials.types";
 export {
   ManualConnectionValidationError,
+  ManualWebhookConfigurationError,
   WhatsAppConnectionActiveAlreadyExistsError,
   WhatsAppConnectionCredentialEncryptionError,
   WhatsAppConnectionDisconnectAccessDeniedError,
