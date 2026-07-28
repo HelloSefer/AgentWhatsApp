@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useAuthSession } from "@/features/auth/hooks/use-auth-session";
+import { CustomerOwnedMetaAppWizard, whatsappConnectionQueryKey } from "./customer-owned-meta-app-wizard";
 import { getMetaEmbeddedSignupConfig } from "../config/meta-embedded-signup-config";
 import { useMetaEmbeddedSignup } from "../hooks/use-meta-embedded-signup";
 import {
@@ -26,15 +27,15 @@ import {
 } from "../services/embedded-signup-completion-service";
 import { whatsappConnectionErrorMessage } from "../utils/whatsapp-connection-error-message";
 
-const whatsappConnectionQueryKey = ["whatsapp-connection", "current"] as const;
-
 type ConfirmationKind = "replace" | "disconnect" | null;
+type WizardMode = "new" | "replace" | "resume" | null;
 
 const STATUS_LABELS: Record<WhatsAppConnectionStatus, string> = {
   PENDING: "Setup pending",
   VERIFYING: "Verifying",
   ACTIVE: "Connected",
   REPLACEMENT_PENDING: "Replacement pending",
+  ACTION_REQUIRED: "Action required",
   ERROR: "Needs retry",
   DISCONNECTED: "Disconnected",
   REVOKED: "Revoked",
@@ -53,7 +54,7 @@ function formatDate(value: string | null): string {
 
 function statusTone(status: WhatsAppConnectionStatus | null): "default" | "secondary" | "outline" | "destructive" {
   if (status === "ACTIVE") return "default";
-  if (status === "ERROR" || status === "REVOKED") return "destructive";
+  if (status === "ERROR" || status === "ACTION_REQUIRED" || status === "REVOKED") return "destructive";
   if (status === "DISCONNECTED" || status === null) return "outline";
   return "secondary";
 }
@@ -62,7 +63,7 @@ function stateCopy(connection: CurrentWhatsAppConnection | null): { title: strin
   if (!connection) {
     return {
       title: "No WhatsApp connection",
-      description: "Connect a WhatsApp Business number through Meta Embedded Signup. AgentWhatsApp will use it only after backend verification.",
+      description: "Choose a trusted setup method. AgentWhatsApp will use the number only after backend verification.",
     };
   }
 
@@ -87,10 +88,10 @@ function stateCopy(connection: CurrentWhatsAppConnection | null): { title: strin
     };
   }
 
-  if (connection.status === "ERROR") {
+  if (connection.status === "ERROR" || connection.status === "ACTION_REQUIRED") {
     return {
       title: "Connection needs attention",
-      description: "Retry the connection flow. Detailed Meta errors are kept out of the dashboard.",
+      description: "Review the guided setup. Detailed Meta errors are kept out of the dashboard.",
     };
   }
 
@@ -104,6 +105,8 @@ function connectionDetails(connection: CurrentWhatsAppConnection): Array<{ label
   return [
     { label: "Phone", value: connection.maskedPhoneNumber ?? "Not available" },
     { label: "Business name", value: connection.verifiedName ?? "Not available" },
+    { label: "Connection method", value: connection.connectionMethod === "CUSTOMER_OWNED_META_APP" ? "Your Meta App" : "Meta Embedded Signup" },
+    { label: "Health", value: connection.health ?? (connection.status === "ACTIVE" ? "Healthy" : "Not available") },
     { label: "Connected", value: formatDate(connection.connectedAt) },
     { label: "Last verified", value: formatDate(connection.lastVerifiedAt) },
     ...(connection.disconnectedAt ? [{ label: "Disconnected", value: formatDate(connection.disconnectedAt) }] : []),
@@ -117,6 +120,7 @@ export function WhatsappConnectionCard() {
   const hasManagePermission = canManageWhatsApp(currentRole);
   const configState = getMetaEmbeddedSignupConfig();
   const [confirmation, setConfirmation] = useState<ConfirmationKind>(null);
+  const [wizardMode, setWizardMode] = useState<WizardMode>(null);
 
   const currentQuery = useQuery({
     queryKey: whatsappConnectionQueryKey,
@@ -147,12 +151,20 @@ export function WhatsappConnectionCard() {
   });
 
   const connection = currentQuery.data?.connection ?? null;
+  const safeActiveConnection = connection?.activeConnection ?? (connection?.status === "ACTIVE" ? connection : null);
+  const safePendingConnection = connection?.pendingConnection ?? (connection?.status === "REPLACEMENT_PENDING" ? connection : null);
   const copy = stateCopy(connection);
   const isLoading = currentQuery.isLoading || (currentQuery.isFetching && !currentQuery.data);
   const isSetupInProgress = connection?.status === "PENDING" || connection?.status === "VERIFYING" || connection?.status === "REPLACEMENT_PENDING";
-  const canLaunch = hasManagePermission && !isSetupInProgress && signup.canLaunch && !disconnectMutation.isPending;
+  const canLaunch = hasManagePermission && !isSetupInProgress && signup.canLaunch && !disconnectMutation.isPending && wizardMode === null;
+  const canReplace = hasManagePermission && connection?.status === "ACTIVE" && !disconnectMutation.isPending && !signup.isBusy && wizardMode === null;
   const canDisconnect = hasManagePermission && connection?.status === "ACTIVE" && !signup.isBusy && !disconnectMutation.isPending;
   const showConnect = !connection || connection.status === "DISCONNECTED" || connection.status === "REVOKED" || connection.status === "ERROR";
+  const canStartGuidedSetup = hasManagePermission && !disconnectMutation.isPending && !signup.isBusy && wizardMode === null;
+  const canResumeCustomerOwnedSetup =
+    hasManagePermission &&
+    connection?.connectionMethod === "CUSTOMER_OWNED_META_APP" &&
+    (connection.status === "PENDING" || connection.status === "VERIFYING" || connection.status === "ACTION_REQUIRED" || connection.status === "ERROR");
 
   const statusMessage = useMemo(() => {
     if (signup.isBusy || signup.message) return signup.message;
@@ -168,7 +180,7 @@ export function WhatsappConnectionCard() {
 
   const confirmReplace = () => {
     setConfirmation(null);
-    launchSignup();
+    setWizardMode("replace");
   };
 
   const confirmDisconnect = () => {
@@ -177,6 +189,7 @@ export function WhatsappConnectionCard() {
   };
 
   return (
+    <div className="space-y-5">
     <Card className="rounded-lg border-marketing-border bg-marketing-surface shadow-[0_18px_36px_-30px_oklch(0.2_0.04_155/0.35)]">
       <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
@@ -205,7 +218,7 @@ export function WhatsappConnectionCard() {
                   <div className="flex flex-wrap items-center gap-2">
                     {connection?.status === "ACTIVE" ? (
                       <CheckCircle2 aria-hidden="true" className="size-5 text-marketing-primary" />
-                    ) : connection?.status === "ERROR" || connection?.status === "REVOKED" ? (
+                    ) : connection?.status === "ERROR" || connection?.status === "ACTION_REQUIRED" || connection?.status === "REVOKED" ? (
                       <ShieldAlert aria-hidden="true" className="size-5 text-destructive" />
                     ) : (
                       <PlugZap aria-hidden="true" className="size-5 text-muted-foreground" />
@@ -231,6 +244,12 @@ export function WhatsappConnectionCard() {
                   ))}
                 </dl>
               ) : null}
+
+              {connection?.status === "REPLACEMENT_PENDING" && safeActiveConnection ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm leading-6 text-emerald-950">
+                  Current active number {safeActiveConnection.maskedPhoneNumber ?? "not available"} remains operational while the replacement is prepared.
+                </div>
+              ) : null}
             </div>
           )}
         </div>
@@ -241,25 +260,61 @@ export function WhatsappConnectionCard() {
           </p>
         ) : null}
 
-        {!configState.isConfigured ? (
-          <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm leading-6 text-foreground" role="alert">
-            WhatsApp Embedded Signup is not configured for this environment.
-          </p>
+        {canResumeCustomerOwnedSetup && wizardMode === null ? (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="font-semibold text-emerald-950">{connection.status === "VERIFYING" ? "Connection is ready to continue" : "Setup in progress"}</p>
+            <p className="mt-1 text-sm leading-6 text-emerald-950/80">
+              Credentials already accepted by the backend stay stored securely there. Continue without entering secrets again unless Meta access needs to be refreshed.
+            </p>
+            <Button className="mt-3 min-h-11 w-full bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto" onClick={() => setWizardMode("resume")} type="button">
+              {connection.status === "VERIFYING" ? "Continue connection" : "Resume setup"}
+            </Button>
+          </div>
+        ) : null}
+
+        {showConnect && wizardMode === null ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-emerald-200 bg-white p-4 shadow-[0_12px_28px_-26px_oklch(0.25_0.04_155/0.45)]">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-semibold text-foreground">Connect your own Meta App</p>
+                <Badge className="bg-emerald-600 text-white">Recommended</Badge>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">Connect using a Meta App owned by your business.</p>
+              <p className="mt-1 text-xs font-medium text-muted-foreground">About 10-15 minutes</p>
+              <Button
+                className="mt-4 min-h-11 w-full bg-emerald-600 text-white hover:bg-emerald-700"
+                disabled={!canStartGuidedSetup}
+                onClick={() => setWizardMode("new")}
+                type="button"
+              >
+                Start guided setup
+              </Button>
+            </div>
+
+            <div className="rounded-xl border border-border bg-background p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-semibold text-foreground">Quick connection with Meta</p>
+                <Badge variant={configState.isConfigured ? "secondary" : "outline"}>{configState.isConfigured ? "Supported" : "Coming soon"}</Badge>
+              </div>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                {configState.isConfigured
+                  ? "Use Meta Embedded Signup when it is available for your workspace."
+                  : "Quick connection - Coming soon while platform approval is completed."}
+              </p>
+              <Button aria-busy={signup.isBusy} className="mt-4 min-h-11 w-full" disabled={!canLaunch} onClick={launchSignup} type="button" variant="outline">
+                {signup.isBusy ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <PlugZap aria-hidden="true" />}
+                {configState.isConfigured ? "Use quick connection" : "Quick connection - Coming soon"}
+              </Button>
+            </div>
+          </div>
         ) : null}
 
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          {showConnect ? (
-            <Button aria-busy={signup.isBusy} className="min-h-11 w-full sm:w-auto" disabled={!canLaunch} onClick={launchSignup} type="button">
-              {signup.isBusy ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <PlugZap aria-hidden="true" />}
-              {connection?.status === "ERROR" ? "Retry connection" : "Connect WhatsApp"}
-            </Button>
-          ) : null}
-
           {connection?.status === "ACTIVE" ? (
             <>
-              <Button className="min-h-11 w-full sm:w-auto" disabled={!canLaunch} onClick={() => setConfirmation("replace")} type="button" variant="outline">
+              <Button className="min-h-11 w-full sm:w-auto" disabled={!canReplace} onClick={() => setConfirmation("replace")} type="button" variant="outline">
                 <PlugZap aria-hidden="true" />
-                Replace number
+                Replace connection
               </Button>
               <Button className="min-h-11 w-full sm:w-auto" disabled={!canDisconnect} onClick={() => setConfirmation("disconnect")} type="button" variant="destructive">
                 {disconnectMutation.isPending ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <Unplug aria-hidden="true" />}
@@ -274,13 +329,13 @@ export function WhatsappConnectionCard() {
             <DialogHeader>
               <DialogTitle>Replace WhatsApp number?</DialogTitle>
               <DialogDescription>
-                The current number remains active until the replacement is verified and activated by the backend.
+                Your current WhatsApp connection will stay active until the new connection is completely ready.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <DialogClose render={<Button className="min-h-11" type="button" variant="outline" />}>Cancel</DialogClose>
-              <Button className="min-h-11" disabled={!canLaunch} onClick={confirmReplace} type="button">
-                Start replacement
+              <Button className="min-h-11" disabled={!canReplace} onClick={confirmReplace} type="button">
+                Start guided setup
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -309,5 +364,19 @@ export function WhatsappConnectionCard() {
         </Dialog>
       </CardContent>
     </Card>
+
+    {wizardMode ? (
+      <CustomerOwnedMetaAppWizard
+        initialConnection={wizardMode === "replace" ? safePendingConnection : connection}
+        mode={wizardMode}
+        onCancel={() => setWizardMode(null)}
+        onDone={async () => {
+          setWizardMode(null);
+          await refreshCurrent();
+        }}
+        selectedPhoneFromStatus={connection ? { maskedPhoneNumber: connection.maskedPhoneNumber, verifiedName: connection.verifiedName } : null}
+      />
+    ) : null}
+    </div>
   );
 }
