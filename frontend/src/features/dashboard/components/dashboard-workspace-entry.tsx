@@ -4,7 +4,6 @@ import { AlertCircle, CheckCircle2, Circle, ImageIcon, PackageOpen, PlugZap, Ref
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { SignOutButton } from "@/features/auth/components/sign-out-button";
 import { useAuthSession } from "@/features/auth/hooks/use-auth-session";
 import { useOnboardingStatus } from "@/features/onboarding/hooks/use-onboarding";
 import type { WorkspaceSummary } from "@/features/onboarding/types/onboarding-contracts";
@@ -185,7 +184,6 @@ export function DashboardWorkspaceEntry() {
               Your workspace is created. Finish the remaining setup steps when each backend capability becomes available.
             </p>
           </div>
-          <SignOutButton />
         </div>
       </section>
       <div className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">

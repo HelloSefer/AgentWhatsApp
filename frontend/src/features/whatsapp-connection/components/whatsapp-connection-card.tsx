@@ -193,8 +193,8 @@ export function WhatsappConnectionCard() {
     <Card className="rounded-lg border-marketing-border bg-marketing-surface shadow-[0_18px_36px_-30px_oklch(0.2_0.04_155/0.35)]">
       <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-semibold tracking-[0.1em] text-marketing-primary uppercase">Settings</p>
-          <CardTitle className="mt-2 text-2xl font-semibold text-foreground">WhatsApp connection</CardTitle>
+          <p className="text-xs font-semibold tracking-[0.1em] text-marketing-primary uppercase">Settings / WhatsApp</p>
+          <CardTitle className="mt-2 text-2xl font-semibold text-foreground">Connection status</CardTitle>
           <CardDescription className="mt-2 max-w-2xl leading-6">
             Manage the WhatsApp Business number used by AgentWhatsApp. Connection state is always loaded from the backend.
           </CardDescription>
