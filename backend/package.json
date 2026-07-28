@@ -40,7 +40,8 @@
     "test:phase-10c-r1-r2-storage": "npm run build && node dist/modules/seller-logo/testing/phase-10c-r1-r2-storage-test.command.js",
     "test:phase-10d-onboarding-http": "npm run build && node dist/modules/onboarding/testing/phase-10d-onboarding-http-test.command.js",
     "test:phase-10e-backend-acceptance": "npm run build && node dist/modules/onboarding/testing/phase-10e-backend-acceptance-test.command.js",
-    "test:phase-11a-whatsapp-connection": "npm run build && node dist/modules/whatsapp-connection/testing/phase-11a-whatsapp-connection-test.command.js"
+    "test:phase-11a-whatsapp-connection": "npm run build && node dist/modules/whatsapp-connection/testing/phase-11a-whatsapp-connection-test.command.js",
+    "test:phase-11b-whatsapp-connection-credentials": "npm run build && node dist/modules/whatsapp-connection/testing/phase-11b-whatsapp-connection-credentials-test.command.js"
   },
   "keywords": [],
   "author": "",

@@ -11,6 +11,7 @@ import type {
   WhatsAppConnectionRepository,
   WhatsAppConnectionRepositoryOptions,
 } from "../../contracts/whatsapp-connection.repository";
+import type { PersistWhatsAppConnectionCredentialInput, WhatsAppConnectionCredentialStorage } from "../../domain/whatsapp-connection-credentials.types";
 import {
   WhatsAppConnectionActiveAlreadyExistsError,
   WhatsAppConnectionPersistenceError,
@@ -33,6 +34,16 @@ import {
 import { mapWhatsAppConnection, type WhatsAppConnectionRow } from "./whatsapp-connection-row.mapper";
 
 const CONNECTION_COLUMNS = "connection_id, seller_id, provider, status, meta_business_id, waba_id, phone_number_id, display_phone_number, verified_name, connected_at, last_verified_at, disconnected_at, created_at, updated_at";
+const CREDENTIAL_COLUMNS = "connection_id, seller_id, encrypted_access_token, token_key_version, token_fingerprint, token_expires_at";
+
+type WhatsAppConnectionCredentialRow = Readonly<{
+  connection_id: string;
+  seller_id: string;
+  encrypted_access_token: string;
+  token_key_version: string;
+  token_fingerprint: string;
+  token_expires_at: Date | string | null;
+}>;
 
 function executor(options?: WhatsAppConnectionRepositoryOptions): DatabaseQueryExecutor {
   return options?.executor ?? { execute: executeDatabaseQuery };
@@ -78,6 +89,25 @@ function mapWriteError(error: unknown): never {
 function mapReadError(error: unknown): never {
   if (error instanceof WhatsAppConnectionPersistenceError) throw error;
   throw new WhatsAppConnectionPersistenceError(error);
+}
+
+function normalizeCredentialField(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new WhatsAppConnectionPersistenceError();
+  return trimmed;
+}
+
+function mapCredentialStorage(row: WhatsAppConnectionCredentialRow): WhatsAppConnectionCredentialStorage {
+  const tokenExpiresAt = row.token_expires_at === null ? undefined : new Date(row.token_expires_at);
+  if (tokenExpiresAt && Number.isNaN(tokenExpiresAt.getTime())) throw new WhatsAppConnectionPersistenceError();
+  return {
+    connectionId: row.connection_id,
+    sellerId: row.seller_id,
+    encryptedAccessToken: row.encrypted_access_token,
+    tokenKeyVersion: row.token_key_version,
+    tokenFingerprint: row.token_fingerprint,
+    tokenExpiresAt,
+  };
 }
 
 export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectionRepository {
@@ -216,6 +246,54 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
       return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
     } catch (error) {
       mapWriteError(error);
+    }
+  }
+
+  async persistAccessTokenCredential(tenant: TenantContext, connectionId: string, credential: PersistWhatsAppConnectionCredentialInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionCredentialStorage | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    const encryptedAccessToken = normalizeCredentialField(credential.encryptedAccessToken);
+    const tokenKeyVersion = normalizeCredentialField(credential.tokenKeyVersion);
+    const tokenFingerprint = normalizeCredentialField(credential.tokenFingerprint);
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionCredentialRow>({
+        text: `
+          UPDATE whatsapp_connections
+          SET
+            encrypted_access_token = $3,
+            token_key_version = $4,
+            token_fingerprint = $5,
+            token_expires_at = $6,
+            updated_at = NOW()
+          WHERE seller_id = $1 AND connection_id = $2
+          RETURNING ${CREDENTIAL_COLUMNS}
+        `,
+        values: [tenant.sellerId, normalizedConnectionId, encryptedAccessToken, tokenKeyVersion, tokenFingerprint, credential.tokenExpiresAt ?? null],
+      });
+      return result.rows[0] ? mapCredentialStorage(result.rows[0]) : null;
+    } catch (error) {
+      mapWriteError(error);
+    }
+  }
+
+  async findCredentialStorage(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnectionCredentialStorage | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionCredentialRow>({
+        text: `
+          SELECT ${CREDENTIAL_COLUMNS}
+          FROM whatsapp_connections
+          WHERE seller_id = $1
+            AND connection_id = $2
+            AND encrypted_access_token IS NOT NULL
+            AND token_key_version IS NOT NULL
+            AND token_fingerprint IS NOT NULL
+          LIMIT 1
+        `,
+        values: [tenant.sellerId, normalizedConnectionId],
+      });
+      return result.rows[0] ? mapCredentialStorage(result.rows[0]) : null;
+    } catch (error) {
+      mapReadError(error);
     }
   }
 }

@@ -4,8 +4,17 @@ export type {
   WhatsAppConnectionRepository,
   WhatsAppConnectionRepositoryOptions,
 } from "./contracts/whatsapp-connection.repository";
+export { WhatsAppConnectionCredentialEncryptionService } from "./application/whatsapp-connection-credential-encryption.service";
+export { WhatsAppConnectionCredentialService } from "./application/whatsapp-connection-credential.service";
+export type {
+  PersistWhatsAppConnectionCredentialInput,
+  StoreWhatsAppConnectionAccessTokenInput,
+  WhatsAppConnectionCredentialStorage,
+  WhatsAppConnectionEncryptedTokenEnvelope,
+} from "./domain/whatsapp-connection-credentials.types";
 export {
   WhatsAppConnectionActiveAlreadyExistsError,
+  WhatsAppConnectionCredentialEncryptionError,
   WhatsAppConnectionPersistenceError,
   WhatsAppConnectionPhoneNumberAlreadyAssignedError,
   WhatsAppConnectionSellerNotFoundError,

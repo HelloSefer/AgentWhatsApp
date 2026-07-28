@@ -142,7 +142,7 @@ async function main(): Promise<void> {
         ORDER BY ordinal_position
       `,
     });
-    add("WhatsApp connection table contains the Phase 11A persistence shape", columns.rows.map((row) => row.column_name).join("|") === "connection_id|seller_id|provider|status|meta_business_id|waba_id|phone_number_id|display_phone_number|verified_name|connected_at|last_verified_at|disconnected_at|created_at|updated_at");
+    add("WhatsApp connection table contains the Phase 11A and nullable credential persistence shape", columns.rows.map((row) => row.column_name).join("|") === "connection_id|seller_id|provider|status|meta_business_id|waba_id|phone_number_id|display_phone_number|verified_name|connected_at|last_verified_at|disconnected_at|created_at|updated_at|encrypted_access_token|token_key_version|token_fingerprint|token_expires_at");
   } finally {
     await cleanup();
     const remaining = sellerIds.length

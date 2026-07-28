@@ -35,3 +35,13 @@ export class WhatsAppConnectionPhoneNumberAlreadyAssignedError extends Error {
     this.name = "WhatsAppConnectionPhoneNumberAlreadyAssignedError";
   }
 }
+
+export class WhatsAppConnectionCredentialEncryptionError extends Error {
+  readonly cause?: unknown;
+
+  constructor(cause?: unknown) {
+    super("WhatsApp connection credential encryption failed.");
+    this.name = "WhatsAppConnectionCredentialEncryptionError";
+    this.cause = cause;
+  }
+}

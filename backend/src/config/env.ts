@@ -47,6 +47,10 @@ export const env = {
     process.env.WHATSAPP_CLOUD_PHONE_NUMBER_ID || "",
   whatsappCloudBusinessAccountId:
     process.env.WHATSAPP_CLOUD_BUSINESS_ACCOUNT_ID || "",
+  whatsappConnectionTokenActiveKeyVersion:
+    process.env.WHATSAPP_CONNECTION_TOKEN_ACTIVE_KEY_VERSION || "",
+  whatsappConnectionTokenEncryptionKeysJson:
+    process.env.WHATSAPP_CONNECTION_TOKEN_ENCRYPTION_KEYS_JSON || "",
   whatsappCloudVerifyToken:
     process.env.WHATSAPP_CLOUD_VERIFY_TOKEN || "agentwhatsapp_verify_123",
   whatsappCloudAppSecret: process.env.WHATSAPP_CLOUD_APP_SECRET || "",
