@@ -39,7 +39,7 @@ import {
 } from "../../domain/whatsapp-connection.validation";
 import { mapWhatsAppConnection, type WhatsAppConnectionRow } from "./whatsapp-connection-row.mapper";
 
-const CONNECTION_COLUMNS = "connection_id, seller_id, provider, status, meta_business_id, waba_id, phone_number_id, display_phone_number, verified_name, connected_at, last_verified_at, phone_registration_completed_at, waba_subscription_completed_at, finalization_last_error_code, finalization_last_error_at, disconnected_at, created_at, updated_at";
+const CONNECTION_COLUMNS = "connection_id, seller_id, provider, status, meta_business_id, waba_id, phone_number_id, display_phone_number, verified_name, connected_at, last_verified_at, phone_registration_completed_at, waba_subscription_completed_at, finalization_last_error_code, finalization_last_error_at, disconnected_at, replaced_connection_id, created_at, updated_at";
 const CREDENTIAL_COLUMNS = "connection_id, seller_id, encrypted_access_token, token_key_version, token_fingerprint, token_expires_at";
 const REGISTRATION_PIN_COLUMNS = "connection_id, seller_id, encrypted_registration_pin, registration_pin_key_version, registration_pin_fingerprint";
 
@@ -96,7 +96,7 @@ function mapWriteError(error: unknown): never {
   if (databaseCode(error) === "23505") {
     const constraint = constraintName(error);
     if (constraint === "whatsapp_connections_one_active_per_seller_idx") throw new WhatsAppConnectionActiveAlreadyExistsError();
-    if (constraint === "whatsapp_connections_phone_number_id_unique_idx") throw new WhatsAppConnectionPhoneNumberAlreadyAssignedError();
+    if (constraint === "whatsapp_connections_phone_number_id_unique_idx" || constraint === "whatsapp_connections_current_phone_number_id_unique_idx") throw new WhatsAppConnectionPhoneNumberAlreadyAssignedError();
   }
   throw new WhatsAppConnectionPersistenceError(error);
 }
@@ -216,7 +216,15 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
     if (!normalizedPhoneNumberId) return null;
     try {
       const result = await executor(options).execute<WhatsAppConnectionRow>({
-        text: `SELECT ${CONNECTION_COLUMNS} FROM whatsapp_connections WHERE seller_id = $1 AND phone_number_id = $2 ORDER BY created_at DESC LIMIT 1`,
+        text: `
+          SELECT ${CONNECTION_COLUMNS}
+          FROM whatsapp_connections
+          WHERE seller_id = $1
+            AND phone_number_id = $2
+            AND status IN ('PENDING', 'VERIFYING', 'ACTIVE', 'REPLACEMENT_PENDING')
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
         values: [tenant.sellerId, normalizedPhoneNumberId],
       });
       return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
@@ -230,7 +238,14 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
     if (!normalizedPhoneNumberId) return null;
     try {
       const result = await executor(options).execute<WhatsAppConnectionRow>({
-        text: `SELECT ${CONNECTION_COLUMNS} FROM whatsapp_connections WHERE phone_number_id = $1 LIMIT 1`,
+        text: `
+          SELECT ${CONNECTION_COLUMNS}
+          FROM whatsapp_connections
+          WHERE phone_number_id = $1
+            AND status IN ('PENDING', 'VERIFYING', 'ACTIVE', 'REPLACEMENT_PENDING')
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
         values: [normalizedPhoneNumberId],
       });
       const row = result.rows[0];
@@ -275,6 +290,40 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
           RETURNING ${CONNECTION_COLUMNS}
         `,
         values: [tenant.sellerId, normalizedConnectionId, normalizedStatus],
+      });
+      return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
+    } catch (error) {
+      mapWriteError(error);
+    }
+  }
+
+  async markReplacementPending(tenant: TenantContext, connectionId: string, replacedConnectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    const normalizedReplacedConnectionId = normalizeConnectionId(replacedConnectionId);
+    if (normalizedConnectionId === normalizedReplacedConnectionId) return null;
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `
+          UPDATE whatsapp_connections candidate
+          SET
+            status = 'REPLACEMENT_PENDING',
+            replaced_connection_id = $3,
+            connected_at = NULL,
+            disconnected_at = NULL,
+            updated_at = NOW()
+          WHERE candidate.seller_id = $1
+            AND candidate.connection_id = $2
+            AND candidate.status IN ('PENDING', 'VERIFYING', 'REPLACEMENT_PENDING')
+            AND EXISTS (
+              SELECT 1
+              FROM whatsapp_connections active
+              WHERE active.seller_id = $1
+                AND active.connection_id = $3
+                AND active.status = 'ACTIVE'
+            )
+          RETURNING ${CONNECTION_COLUMNS}
+        `,
+        values: [tenant.sellerId, normalizedConnectionId, normalizedReplacedConnectionId],
       });
       return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
     } catch (error) {
@@ -462,6 +511,74 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
           WHERE seller_id = $1
             AND connection_id = $2
             AND status = 'VERIFYING'
+          RETURNING ${CONNECTION_COLUMNS}
+        `,
+        values: [tenant.sellerId, normalizedConnectionId],
+      });
+      return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
+    } catch (error) {
+      mapWriteError(error);
+    }
+  }
+
+  async replaceActiveConnection(tenant: TenantContext, activeConnectionId: string, replacementConnectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
+    const normalizedActiveConnectionId = normalizeConnectionId(activeConnectionId);
+    const normalizedReplacementConnectionId = normalizeConnectionId(replacementConnectionId);
+    if (normalizedActiveConnectionId === normalizedReplacementConnectionId) return null;
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `
+          WITH old_connection AS (
+            UPDATE whatsapp_connections
+            SET
+              status = 'DISCONNECTED',
+              disconnected_at = COALESCE(disconnected_at, NOW()),
+              updated_at = NOW()
+            WHERE seller_id = $1
+              AND connection_id = $2
+              AND status = 'ACTIVE'
+            RETURNING connection_id
+          ),
+          new_connection AS (
+            UPDATE whatsapp_connections
+            SET
+              status = 'ACTIVE',
+              connected_at = NOW(),
+              last_verified_at = NOW(),
+              finalization_last_error_code = NULL,
+              finalization_last_error_at = NULL,
+              disconnected_at = NULL,
+              updated_at = NOW()
+            WHERE seller_id = $1
+              AND connection_id = $3
+              AND status = 'REPLACEMENT_PENDING'
+              AND replaced_connection_id = $2
+              AND EXISTS (SELECT 1 FROM old_connection)
+            RETURNING ${CONNECTION_COLUMNS}
+          )
+          SELECT ${CONNECTION_COLUMNS} FROM new_connection
+        `,
+        values: [tenant.sellerId, normalizedActiveConnectionId, normalizedReplacementConnectionId],
+      });
+      return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
+    } catch (error) {
+      mapWriteError(error);
+    }
+  }
+
+  async disconnectActiveConnection(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `
+          UPDATE whatsapp_connections
+          SET
+            status = 'DISCONNECTED',
+            disconnected_at = COALESCE(disconnected_at, NOW()),
+            updated_at = NOW()
+          WHERE seller_id = $1
+            AND connection_id = $2
+            AND status = 'ACTIVE'
           RETURNING ${CONNECTION_COLUMNS}
         `,
         values: [tenant.sellerId, normalizedConnectionId],

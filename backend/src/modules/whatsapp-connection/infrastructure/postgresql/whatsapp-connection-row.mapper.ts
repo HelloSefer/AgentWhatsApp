@@ -18,6 +18,7 @@ export type WhatsAppConnectionRow = Readonly<{
   finalization_last_error_code: string | null;
   finalization_last_error_at: Date | string | null;
   disconnected_at: Date | string | null;
+  replaced_connection_id: string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }>;
@@ -57,6 +58,7 @@ export function mapWhatsAppConnection(row: WhatsAppConnectionRow): WhatsAppConne
     finalizationLastErrorCode: row.finalization_last_error_code ?? undefined,
     finalizationLastErrorAt: date(row.finalization_last_error_at),
     disconnectedAt: date(row.disconnected_at),
+    replacedConnectionId: row.replaced_connection_id ?? undefined,
     createdAt: requiredDate(row.created_at),
     updatedAt: requiredDate(row.updated_at),
   };

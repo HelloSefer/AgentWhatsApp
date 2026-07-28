@@ -6,6 +6,7 @@ export type {
 } from "./contracts/whatsapp-connection.repository";
 export { WhatsAppConnectionCredentialEncryptionService } from "./application/whatsapp-connection-credential-encryption.service";
 export { WhatsAppConnectionCredentialService } from "./application/whatsapp-connection-credential.service";
+export { WhatsAppConnectionDisconnectService } from "./application/whatsapp-connection-disconnect.service";
 export { WhatsAppConnectionFinalizationService } from "./application/whatsapp-connection-finalization.service";
 export type {
   PersistWhatsAppConnectionCredentialInput,
@@ -16,6 +17,9 @@ export type {
 export {
   WhatsAppConnectionActiveAlreadyExistsError,
   WhatsAppConnectionCredentialEncryptionError,
+  WhatsAppConnectionDisconnectAccessDeniedError,
+  WhatsAppConnectionDisconnectConflictError,
+  WhatsAppConnectionDisconnectValidationError,
   WhatsAppConnectionCompletionAccessDeniedError,
   WhatsAppConnectionCompletionConflictError,
   WhatsAppConnectionCompletionValidationError,

@@ -29,7 +29,7 @@ export type CompleteEmbeddedSignupResult = Readonly<{
   verified: true;
   connection: Readonly<{
     connectionId: string;
-    status: "VERIFYING";
+    status: "VERIFYING" | "REPLACEMENT_PENDING";
     displayPhoneNumber: string | null;
     verifiedName: string | null;
   }>;
@@ -89,12 +89,10 @@ export class EmbeddedSignupCompletionService {
     const credentialService = this.credentialService;
     const input = normalizeInput(rawInput);
 
-    const active = await this.repository.findActiveBySeller(tenant);
-    if (active) throw new WhatsAppConnectionCompletionConflictError();
-
     const assigned = await this.repository.resolveByPhoneNumberId(input.phoneNumberId);
     if (assigned && assigned.sellerId !== tenant.sellerId) throw new WhatsAppConnectionCompletionConflictError();
-    if (assigned?.connection.status === "VERIFYING") {
+    if (assigned?.connection.status === "ACTIVE") throw new WhatsAppConnectionCompletionConflictError();
+    if (assigned?.connection.status === "VERIFYING" || assigned?.connection.status === "REPLACEMENT_PENDING") {
       const stored = await this.repository.findCredentialStorage(tenant, assigned.connection.connectionId);
       if (stored) return responseFromConnection(assigned.connection);
     }
@@ -141,10 +139,10 @@ export class EmbeddedSignupCompletionService {
     try {
       const connection = await this.transactionRunner(async (executor) => {
         const existingActive = await this.repository.findActiveBySeller(tenant, { executor });
-        if (existingActive) throw new WhatsAppConnectionCompletionConflictError();
 
         const assigned = await this.repository.resolveByPhoneNumberId(input.phoneNumberId, { executor });
         if (assigned && assigned.sellerId !== tenant.sellerId) throw new WhatsAppConnectionCompletionConflictError();
+        if (assigned?.connection.status === "ACTIVE") throw new WhatsAppConnectionCompletionConflictError();
 
         const existing = await this.repository.findByPhoneNumberIdForSeller(tenant, input.phoneNumberId, { executor });
         const candidate = existing ?? await this.repository.createCandidate(tenant, undefined, { executor });
@@ -158,7 +156,9 @@ export class EmbeddedSignupCompletionService {
         }, { executor });
         if (!withMetadata) throw new WhatsAppConnectionPersistenceError();
 
-        const verifying = await this.repository.updateLifecycleStatus(tenant, candidate.connectionId, "VERIFYING", { executor });
+        const verifying = existingActive && existingActive.connectionId !== candidate.connectionId
+          ? await this.repository.markReplacementPending(tenant, candidate.connectionId, existingActive.connectionId, { executor })
+          : await this.repository.updateLifecycleStatus(tenant, candidate.connectionId, "VERIFYING", { executor });
         if (!verifying) throw new WhatsAppConnectionPersistenceError();
 
         const stored = await credentialService.storeAccessToken(tenant, candidate.connectionId, { accessToken, tokenExpiresAt }, { executor });
@@ -179,7 +179,7 @@ function responseFromConnection(connection: WhatsAppConnection): CompleteEmbedde
     verified: true,
     connection: {
       connectionId: connection.connectionId,
-      status: "VERIFYING",
+      status: connection.status === "REPLACEMENT_PENDING" ? "REPLACEMENT_PENDING" : "VERIFYING",
       displayPhoneNumber: connection.displayPhoneNumber ?? null,
       verifiedName: connection.verifiedName ?? null,
     },

@@ -1,8 +1,9 @@
 import type { Request, Response } from "express";
 import type { AuthorizedRequest } from "../../auth/http/auth-request.types";
 import type { EmbeddedSignupCompletionService } from "../application/embedded-signup-completion.service";
+import type { WhatsAppConnectionDisconnectService } from "../application/whatsapp-connection-disconnect.service";
 import type { WhatsAppConnectionFinalizationService } from "../application/whatsapp-connection-finalization.service";
-import { WhatsAppConnectionCompletionValidationError } from "../domain/whatsapp-connection.errors";
+import { WhatsAppConnectionCompletionValidationError, WhatsAppConnectionDisconnectValidationError } from "../domain/whatsapp-connection.errors";
 import { sendWhatsappConnectionError } from "./whatsapp-connection-http.errors";
 
 const ACCEPTED_BODY_KEYS = new Set(["code", "wabaId", "phoneNumberId"]);
@@ -26,6 +27,7 @@ export class WhatsAppConnectionController {
   constructor(
     private readonly completionService: EmbeddedSignupCompletionService,
     private readonly finalizationService?: WhatsAppConnectionFinalizationService,
+    private readonly disconnectService?: WhatsAppConnectionDisconnectService,
   ) {}
 
   completeEmbeddedSignup = async (req: Request, res: Response): Promise<Response> => {
@@ -50,6 +52,19 @@ export class WhatsAppConnectionController {
       if (Object.keys(bodyRecord(req)).length !== 0) throw new WhatsAppConnectionCompletionValidationError();
       const connectionId = typeof req.params.connectionId === "string" ? req.params.connectionId : "";
       const result = await this.finalizationService.finalize(authorized.tenant, connectionId);
+      return res.status(200).json(result);
+    } catch (error) {
+      return sendWhatsappConnectionError(res, error);
+    }
+  };
+
+  disconnectConnection = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      if (!this.disconnectService) throw new WhatsAppConnectionDisconnectValidationError();
+      const authorized = req as AuthorizedRequest;
+      if (Object.keys(bodyRecord(req)).length !== 0) throw new WhatsAppConnectionDisconnectValidationError();
+      const connectionId = typeof req.params.connectionId === "string" ? req.params.connectionId : "";
+      const result = await this.disconnectService.disconnect(authorized.tenant, connectionId);
       return res.status(200).json(result);
     } catch (error) {
       return sendWhatsappConnectionError(res, error);

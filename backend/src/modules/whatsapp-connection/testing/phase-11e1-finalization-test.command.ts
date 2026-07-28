@@ -73,6 +73,7 @@ function connection(input: Partial<WhatsAppConnection> & { sellerId: string }): 
     finalizationLastErrorCode: input.finalizationLastErrorCode,
     finalizationLastErrorAt: input.finalizationLastErrorAt,
     disconnectedAt: input.disconnectedAt,
+    replacedConnectionId: input.replacedConnectionId,
     createdAt: input.createdAt ?? now,
     updatedAt: input.updatedAt ?? now,
   };
@@ -148,6 +149,35 @@ class FakeRepository implements WhatsAppConnectionRepository {
     if (!current || current.status !== "VERIFYING") return null;
     const now = new Date();
     const updated = { ...current, status: "ACTIVE" as const, connectedAt: current.connectedAt ?? now, lastVerifiedAt: now, updatedAt: now };
+    this.replace(updated);
+    return updated;
+  }
+
+  async markReplacementPending(tenant: TenantContext, connectionId: string, replacedConnectionId: string): Promise<WhatsAppConnection | null> {
+    const current = await this.findByConnectionId(tenant, connectionId);
+    const active = await this.findByConnectionId(tenant, replacedConnectionId);
+    if (!current || !active || active.status !== "ACTIVE" || current.connectionId === active.connectionId) return null;
+    const updated = { ...current, status: "REPLACEMENT_PENDING" as const, replacedConnectionId: active.connectionId, connectedAt: undefined, disconnectedAt: undefined, updatedAt: new Date() };
+    this.replace(updated);
+    return updated;
+  }
+
+  async replaceActiveConnection(tenant: TenantContext, activeConnectionId: string, replacementConnectionId: string): Promise<WhatsAppConnection | null> {
+    const active = await this.findByConnectionId(tenant, activeConnectionId);
+    const replacement = await this.findByConnectionId(tenant, replacementConnectionId);
+    if (!active || !replacement || active.status !== "ACTIVE" || replacement.status !== "REPLACEMENT_PENDING" || replacement.replacedConnectionId !== active.connectionId) return null;
+    const now = new Date();
+    this.replace({ ...active, status: "DISCONNECTED", disconnectedAt: active.disconnectedAt ?? now, updatedAt: now });
+    const updated = { ...replacement, status: "ACTIVE" as const, connectedAt: now, lastVerifiedAt: now, disconnectedAt: undefined, updatedAt: now };
+    this.replace(updated);
+    return updated;
+  }
+
+  async disconnectActiveConnection(tenant: TenantContext, connectionId: string): Promise<WhatsAppConnection | null> {
+    const current = await this.findByConnectionId(tenant, connectionId);
+    if (!current || current.status !== "ACTIVE") return null;
+    const now = new Date();
+    const updated = { ...current, status: "DISCONNECTED" as const, disconnectedAt: current.disconnectedAt ?? now, updatedAt: now };
     this.replace(updated);
     return updated;
   }

@@ -1,9 +1,11 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import type { Request, Response } from "express";
 import { closeDatabasePool, createTenantContext, getDatabasePoolState, type DatabaseTransactionExecutor, type TenantContext } from "../../../infrastructure/database";
-import { validateWhatsAppConnectionCredentialEncryptionConfiguration } from "../application/whatsapp-connection-credential-encryption.config";
+import { EmbeddedSignupCompletionService } from "../application/embedded-signup-completion.service";
+import { validateMetaEmbeddedSignupConfiguration } from "../application/meta-embedded-signup.config";
 import { WhatsAppConnectionCredentialEncryptionService } from "../application/whatsapp-connection-credential-encryption.service";
+import { validateWhatsAppConnectionCredentialEncryptionConfiguration } from "../application/whatsapp-connection-credential-encryption.config";
 import { WhatsAppConnectionCredentialService } from "../application/whatsapp-connection-credential.service";
+import { WhatsAppConnectionDisconnectService } from "../application/whatsapp-connection-disconnect.service";
 import { WhatsAppConnectionFinalizationService } from "../application/whatsapp-connection-finalization.service";
 import type { WhatsAppConnectionFinalizationProgressInput, WhatsAppConnectionRepository, VerifiedWhatsAppConnectionMetadataInput } from "../contracts/whatsapp-connection.repository";
 import type {
@@ -13,11 +15,10 @@ import type {
   WhatsAppConnectionRegistrationPinStorage,
 } from "../domain/whatsapp-connection-credentials.types";
 import {
-  WhatsAppConnectionFinalizationAccessDeniedError,
+  WhatsAppConnectionCompletionConflictError,
+  WhatsAppConnectionDisconnectConflictError,
   WhatsAppConnectionFinalizationConflictError,
-  WhatsAppConnectionFinalizationRetryableError,
   WhatsAppConnectionFinalizationVerificationError,
-  WhatsAppConnectionMetaTransportError,
   WhatsAppConnectionPersistenceError,
 } from "../domain/whatsapp-connection.errors";
 import type { ActiveWhatsAppConnectionResolution, WhatsAppConnection, WhatsAppConnectionStatus } from "../domain/whatsapp-connection.types";
@@ -30,7 +31,6 @@ import type {
   MetaWabaResult,
   MetaWabaSubscriptionStatusResult,
 } from "../infrastructure/meta/meta-embedded-signup.transport";
-import { WhatsAppConnectionController } from "../http/whatsapp-connection.controller";
 
 type TestCase = Readonly<{ name: string; passed: boolean }>;
 type Snapshot = Readonly<{
@@ -61,15 +61,15 @@ function id(prefix: string): string {
 function connection(input: Partial<WhatsAppConnection> & { sellerId: string }): WhatsAppConnection {
   const now = new Date();
   return {
-    connectionId: input.connectionId ?? id("conn_phase11e2"),
+    connectionId: input.connectionId ?? id("conn_phase11h"),
     sellerId: input.sellerId,
     provider: "META_WHATSAPP_CLOUD_API",
     status: input.status ?? "VERIFYING",
     metaBusinessId: input.metaBusinessId,
-    wabaId: input.wabaId ?? "waba_phase11e2",
-    phoneNumberId: input.phoneNumberId ?? "phone_phase11e2",
-    displayPhoneNumber: input.displayPhoneNumber ?? "+212 600 000 022",
-    verifiedName: input.verifiedName ?? "Atlas Ready",
+    wabaId: input.wabaId ?? "111111111111111",
+    phoneNumberId: input.phoneNumberId ?? "222222222222222",
+    displayPhoneNumber: input.displayPhoneNumber ?? "+212 600 000 088",
+    verifiedName: input.verifiedName ?? "Phase Eleven H",
     connectedAt: input.connectedAt,
     lastVerifiedAt: input.lastVerifiedAt,
     phoneRegistrationCompletedAt: input.phoneRegistrationCompletedAt,
@@ -87,7 +87,8 @@ class FakeRepository implements WhatsAppConnectionRepository {
   connections: WhatsAppConnection[] = [];
   credentials: WhatsAppConnectionCredentialStorage[] = [];
   pins: WhatsAppConnectionRegistrationPinStorage[] = [];
-  failActivateAfterWrite = false;
+  failReplaceAfterWrite = false;
+  sawOldActiveAtReplace = false;
 
   snapshot(): Snapshot {
     return {
@@ -104,7 +105,7 @@ class FakeRepository implements WhatsAppConnectionRepository {
   }
 
   async createCandidate(tenant: TenantContext): Promise<WhatsAppConnection> {
-    const candidate = connection({ sellerId: tenant.sellerId, status: "PENDING" });
+    const candidate = connection({ sellerId: tenant.sellerId, status: "PENDING", wabaId: undefined, phoneNumberId: undefined });
     this.connections.push(candidate);
     return candidate;
   }
@@ -126,11 +127,11 @@ class FakeRepository implements WhatsAppConnectionRepository {
   }
 
   async findByPhoneNumberIdForSeller(tenant: TenantContext, phoneNumberId: string): Promise<WhatsAppConnection | null> {
-    return this.connections.find((entry) => entry.sellerId === tenant.sellerId && entry.phoneNumberId === phoneNumberId) ?? null;
+    return this.connections.find((entry) => entry.sellerId === tenant.sellerId && entry.phoneNumberId === phoneNumberId && ["PENDING", "VERIFYING", "ACTIVE", "REPLACEMENT_PENDING"].includes(entry.status)) ?? null;
   }
 
   async resolveByPhoneNumberId(phoneNumberId: string): Promise<ActiveWhatsAppConnectionResolution | null> {
-    const found = this.connections.find((entry) => entry.phoneNumberId === phoneNumberId);
+    const found = this.connections.find((entry) => entry.phoneNumberId === phoneNumberId && ["PENDING", "VERIFYING", "ACTIVE", "REPLACEMENT_PENDING"].includes(entry.status));
     return found ? { sellerId: found.sellerId, connection: found } : null;
   }
 
@@ -143,18 +144,8 @@ class FakeRepository implements WhatsAppConnectionRepository {
     const current = await this.findByConnectionId(tenant, connectionId);
     if (!current) return null;
     const now = new Date();
-    const updated = { ...current, status, connectedAt: status === "ACTIVE" ? current.connectedAt ?? now : current.connectedAt, updatedAt: now };
+    const updated = { ...current, status, connectedAt: status === "ACTIVE" ? current.connectedAt ?? now : current.connectedAt, disconnectedAt: status === "DISCONNECTED" ? current.disconnectedAt ?? now : current.disconnectedAt, updatedAt: now };
     this.replace(updated);
-    return updated;
-  }
-
-  async activateConnection(tenant: TenantContext, connectionId: string): Promise<WhatsAppConnection | null> {
-    const current = await this.findByConnectionId(tenant, connectionId);
-    if (!current || current.status !== "VERIFYING") return null;
-    const now = new Date();
-    const updated = { ...current, status: "ACTIVE" as const, connectedAt: current.connectedAt ?? now, lastVerifiedAt: now, updatedAt: now };
-    this.replace(updated);
-    if (this.failActivateAfterWrite) throw new WhatsAppConnectionPersistenceError();
     return updated;
   }
 
@@ -167,15 +158,25 @@ class FakeRepository implements WhatsAppConnectionRepository {
     return updated;
   }
 
+  async activateConnection(tenant: TenantContext, connectionId: string): Promise<WhatsAppConnection | null> {
+    const current = await this.findByConnectionId(tenant, connectionId);
+    if (!current || current.status !== "VERIFYING") return null;
+    const now = new Date();
+    const updated = { ...current, status: "ACTIVE" as const, connectedAt: current.connectedAt ?? now, lastVerifiedAt: now, updatedAt: now };
+    this.replace(updated);
+    return updated;
+  }
+
   async replaceActiveConnection(tenant: TenantContext, activeConnectionId: string, replacementConnectionId: string): Promise<WhatsAppConnection | null> {
     const active = await this.findByConnectionId(tenant, activeConnectionId);
     const replacement = await this.findByConnectionId(tenant, replacementConnectionId);
+    this.sawOldActiveAtReplace = active?.status === "ACTIVE" && replacement?.status === "REPLACEMENT_PENDING";
     if (!active || !replacement || active.status !== "ACTIVE" || replacement.status !== "REPLACEMENT_PENDING" || replacement.replacedConnectionId !== active.connectionId) return null;
     const now = new Date();
     this.replace({ ...active, status: "DISCONNECTED", disconnectedAt: active.disconnectedAt ?? now, updatedAt: now });
     const updated = { ...replacement, status: "ACTIVE" as const, connectedAt: now, lastVerifiedAt: now, disconnectedAt: undefined, updatedAt: now };
     this.replace(updated);
-    if (this.failActivateAfterWrite) throw new WhatsAppConnectionPersistenceError();
+    if (this.failReplaceAfterWrite) throw new WhatsAppConnectionPersistenceError();
     return updated;
   }
 
@@ -198,6 +199,7 @@ class FakeRepository implements WhatsAppConnectionRepository {
       phoneNumberId: metadata.phoneNumberId ?? current.phoneNumberId,
       displayPhoneNumber: metadata.displayPhoneNumber ?? current.displayPhoneNumber,
       verifiedName: metadata.verifiedName ?? current.verifiedName,
+      lastVerifiedAt: new Date(),
       updatedAt: new Date(),
     };
     this.replace(updated);
@@ -264,60 +266,42 @@ class FakeRepository implements WhatsAppConnectionRepository {
 }
 
 class FakeMetaTransport implements MetaEmbeddedSignupTransport {
+  exchangeCalls = 0;
   inspectCalls = 0;
-  wabaCalls = 0;
-  phoneCalls = 0;
-  registrationReadCalls = 0;
-  subscriptionReadCalls = 0;
-  registerCalls = 0;
-  subscribeCalls = 0;
-  tokenValid = true;
   registered = true;
   subscribed = true;
-  phoneWabaId = "waba_phase11e2";
-  wabaError: Error | null = null;
-  phoneError: Error | null = null;
-  registrationReadError: Error | null = null;
-  subscriptionReadError: Error | null = null;
 
   async exchangeCode(): Promise<MetaCodeExchangeResult> {
-    throw new Error("Phase 11E2 must not exchange Embedded Signup codes.");
+    this.exchangeCalls += 1;
+    return { accessToken: `token_phase11h_${randomUUID().replace(/-/gu, "")}` };
   }
 
   async inspectToken(): Promise<MetaTokenInspectionResult> {
     this.inspectCalls += 1;
-    return { valid: this.tokenValid, scopes: [] };
+    return { valid: true, appId: "app_phase11h", scopes: [] };
   }
 
   async readWaba(wabaId: string): Promise<MetaWabaResult> {
-    this.wabaCalls += 1;
-    if (this.wabaError) throw this.wabaError;
     return { id: wabaId };
   }
 
   async readPhoneNumber(phoneNumberId: string): Promise<MetaPhoneNumberResult> {
-    this.phoneCalls += 1;
-    if (this.phoneError) throw this.phoneError;
-    return { id: phoneNumberId, wabaId: this.phoneWabaId };
+    return { id: phoneNumberId, wabaId: "333333333333333", displayPhoneNumber: "+212 600 000 088", verifiedName: "Phase Eleven H" };
   }
 
   async registerPhoneNumber(): Promise<void> {
-    this.registerCalls += 1;
+    return undefined;
   }
 
   async readPhoneNumberRegistrationStatus(phoneNumberId: string): Promise<MetaPhoneRegistrationStatusResult> {
-    this.registrationReadCalls += 1;
-    if (this.registrationReadError) throw this.registrationReadError;
     return { id: phoneNumberId, registered: this.registered };
   }
 
   async subscribeWabaToWebhooks(): Promise<void> {
-    this.subscribeCalls += 1;
+    return undefined;
   }
 
   async readWabaWebhookSubscriptionStatus(wabaId: string): Promise<MetaWabaSubscriptionStatusResult> {
-    this.subscriptionReadCalls += 1;
-    if (this.subscriptionReadError) throw this.subscriptionReadError;
     return { wabaId, subscribed: this.subscribed };
   }
 }
@@ -341,155 +325,134 @@ function transactionRunner(repository: FakeRepository) {
   };
 }
 
-async function fixture(status: WhatsAppConnectionStatus = "VERIFYING") {
+function harness() {
   const repository = new FakeRepository();
   const transport = new FakeMetaTransport();
-  const credentialEncryption = encryptionService();
-  const credentialService = new WhatsAppConnectionCredentialService(repository, credentialEncryption);
-  const tenant = createTenantContext("seller_phase11e2");
-  const candidate = connection({
-    sellerId: tenant.sellerId,
-    status,
-    phoneRegistrationCompletedAt: new Date(),
-    wabaSubscriptionCompletedAt: new Date(),
-  });
-  repository.connections.push(candidate);
-  const accessToken = `token_phase11e2_${randomUUID().replace(/-/gu, "")}`;
-  await credentialService.storeAccessToken(tenant, candidate.connectionId, { accessToken });
+  const credentialService = new WhatsAppConnectionCredentialService(repository, encryptionService());
+  const runner = transactionRunner(repository);
   return {
     repository,
     transport,
     credentialService,
-    tenant,
-    candidate,
-    accessToken,
-    service: new WhatsAppConnectionFinalizationService(repository, credentialService, transport, transactionRunner(repository)),
+    completion: new EmbeddedSignupCompletionService(
+      repository,
+      credentialService,
+      transport,
+      validateMetaEmbeddedSignupConfiguration({ appId: "app_phase11h", appSecret: "secret_phase11h", graphApiVersion: "v25.0" }),
+      runner,
+    ),
+    finalization: new WhatsAppConnectionFinalizationService(repository, credentialService, transport, runner),
+    disconnect: new WhatsAppConnectionDisconnectService(repository, runner),
   };
 }
 
-function responseProbe(): Partial<Response> & { statusCode?: number; body?: unknown } {
-  const probe: Partial<Response> & { statusCode?: number; body?: unknown } = {};
-  probe.status = (status: number) => {
-    probe.statusCode = status;
-    return probe as Response;
-  };
-  probe.json = (body: unknown) => {
-    probe.body = body;
-    return probe as Response;
-  };
-  probe.setHeader = () => probe as Response;
-  return probe;
+async function makeReadyReplacement(fixture = harness(), tenant = createTenantContext("seller_phase11h")) {
+  const old = connection({ sellerId: tenant.sellerId, status: "ACTIVE", phoneNumberId: "111111111111111", wabaId: "999999999999999", connectedAt: new Date() });
+  fixture.repository.connections.push(old);
+  const completed = await fixture.completion.complete(tenant, { code: "code_phase11h", wabaId: "333333333333333", phoneNumberId: "222222222222222" });
+  const candidate = fixture.repository.connections.find((entry) => entry.connectionId === completed.connection.connectionId);
+  if (!candidate) throw new Error("missing candidate");
+  await fixture.repository.persistFinalizationProgress(tenant, candidate.connectionId, {
+    phoneRegistrationCompletedAt: new Date(),
+    wabaSubscriptionCompletedAt: new Date(),
+    clearFinalizationLastError: true,
+  });
+  return { fixture, tenant, old, candidate };
 }
 
 async function main(): Promise<void> {
   await closeDatabasePool();
-  add("Phase 11E2 imports do not initialize PostgreSQL", !getDatabasePoolState().initialized);
+  add("Phase 11H imports do not initialize PostgreSQL", !getDatabasePoolState().initialized);
 
-  const ready = await fixture();
-  const activated = await ready.service.activateReadyConnection(ready.tenant, ready.candidate.connectionId);
-  const storedReady = ready.repository.connections[0];
-  add("Fully ready VERIFYING connection becomes ACTIVE", activated.connection.status === "ACTIVE" && storedReady?.status === "ACTIVE");
-  add("Activation persists connected_at and last_verified_at", storedReady?.connectedAt instanceof Date && storedReady.lastVerifiedAt instanceof Date);
-  add("Readiness verification uses reads only and no WhatsApp send or E1 POST calls", ready.transport.inspectCalls === 1 && ready.transport.wabaCalls === 1 && ready.transport.phoneCalls === 1 && ready.transport.registrationReadCalls === 1 && ready.transport.subscriptionReadCalls === 1 && ready.transport.registerCalls === 0 && ready.transport.subscribeCalls === 0);
+  const normal = harness();
+  const normalTenant = createTenantContext("seller_phase11h_normal");
+  const normalResult = await normal.completion.complete(normalTenant, { code: "code", wabaId: "333333333333333", phoneNumberId: "222222222222222" });
+  await normal.repository.persistFinalizationProgress(normalTenant, normalResult.connection.connectionId, { phoneRegistrationCompletedAt: new Date(), wabaSubscriptionCompletedAt: new Date() });
+  const normalActivated = await normal.finalization.activateReadyConnection(normalTenant, normalResult.connection.connectionId);
+  add("seller with no ACTIVE connection still activates normally", normalResult.connection.status === "VERIFYING" && normalActivated.connection.status === "ACTIVE");
 
-  const alreadyActive = await fixture("ACTIVE");
-  const alreadyActiveResult = await alreadyActive.service.activateReadyConnection(alreadyActive.tenant, alreadyActive.candidate.connectionId);
-  add("Already ACTIVE same connection is idempotent", alreadyActiveResult.connection.status === "ACTIVE" && alreadyActive.transport.inspectCalls === 0);
+  const replacement = await makeReadyReplacement();
+  const replacementResult = await replacement.fixture.finalization.activateReadyConnection(replacement.tenant, replacement.candidate.connectionId);
+  const oldAfter = replacement.fixture.repository.connections.find((entry) => entry.connectionId === replacement.old.connectionId);
+  const newAfter = replacement.fixture.repository.connections.find((entry) => entry.connectionId === replacement.candidate.connectionId);
+  add("fully ready replacement candidate atomically replaces old ACTIVE", replacementResult.connection.status === "ACTIVE" && oldAfter?.status === "DISCONNECTED" && newAfter?.status === "ACTIVE");
+  add("old connection remains ACTIVE until switch commits", replacement.fixture.repository.sawOldActiveAtReplace);
+  add("no outcome leaves two ACTIVE connections", replacement.fixture.repository.connections.filter((entry) => entry.sellerId === replacement.tenant.sellerId && entry.status === "ACTIVE").length === 1);
+  add("old phone_number_id no longer resolves inbound after replacement", await replacement.fixture.repository.resolveActiveByPhoneNumberId("111111111111111") === null);
 
-  const activeBlock = await fixture();
-  const previousActive = connection({ sellerId: activeBlock.tenant.sellerId, status: "ACTIVE", phoneNumberId: "phone_previous_active", wabaId: "waba_previous_active" });
-  activeBlock.repository.connections.push(previousActive);
-  add("Another existing ACTIVE connection is preserved and blocks activation", await expectsError(
-    () => activeBlock.service.activateReadyConnection(activeBlock.tenant, activeBlock.candidate.connectionId),
-    (error) => error instanceof WhatsAppConnectionFinalizationConflictError,
-  ) && activeBlock.repository.connections.find((entry) => entry.connectionId === previousActive.connectionId)?.status === "ACTIVE" && activeBlock.repository.connections.find((entry) => entry.connectionId === activeBlock.candidate.connectionId)?.status === "VERIFYING");
-
-  const missingRegistration = await fixture();
-  missingRegistration.repository.connections[0] = { ...missingRegistration.candidate, phoneRegistrationCompletedAt: undefined };
-  add("Missing E1 registration marker blocks activation", await expectsError(
-    () => missingRegistration.service.activateReadyConnection(missingRegistration.tenant, missingRegistration.candidate.connectionId),
+  const failedReadiness = await makeReadyReplacement();
+  failedReadiness.fixture.transport.registered = false;
+  add("failed readiness leaves old connection ACTIVE", await expectsError(
+    () => failedReadiness.fixture.finalization.activateReadyConnection(failedReadiness.tenant, failedReadiness.candidate.connectionId),
     (error) => error instanceof WhatsAppConnectionFinalizationVerificationError,
-  ) && missingRegistration.repository.connections[0]?.status === "VERIFYING");
+  ) && failedReadiness.fixture.repository.connections.find((entry) => entry.connectionId === failedReadiness.old.connectionId)?.status === "ACTIVE");
 
-  const missingSubscription = await fixture();
-  missingSubscription.repository.connections[0] = { ...missingSubscription.candidate, wabaSubscriptionCompletedAt: undefined };
-  add("Missing E1 subscription marker blocks activation", await expectsError(
-    () => missingSubscription.service.activateReadyConnection(missingSubscription.tenant, missingSubscription.candidate.connectionId),
-    (error) => error instanceof WhatsAppConnectionFinalizationVerificationError,
-  ) && missingSubscription.repository.connections[0]?.status === "VERIFYING");
-
-  const invalidToken = await fixture();
-  invalidToken.transport.tokenValid = false;
-  add("Invalid or revoked token blocks activation", await expectsError(
-    () => invalidToken.service.activateReadyConnection(invalidToken.tenant, invalidToken.candidate.connectionId),
-    (error) => error instanceof WhatsAppConnectionFinalizationAccessDeniedError,
-  ) && invalidToken.repository.connections[0]?.status === "VERIFYING");
-
-  const wabaFailure = await fixture();
-  wabaFailure.transport.wabaError = new WhatsAppConnectionMetaTransportError("auth");
-  add("WABA access failure blocks activation", await expectsError(
-    () => wabaFailure.service.activateReadyConnection(wabaFailure.tenant, wabaFailure.candidate.connectionId),
-    (error) => error instanceof WhatsAppConnectionFinalizationAccessDeniedError,
-  ) && wabaFailure.repository.connections[0]?.status === "VERIFYING");
-
-  const mismatch = await fixture();
-  mismatch.transport.phoneWabaId = "other_waba";
-  add("Phone/WABA mismatch blocks activation", await expectsError(
-    () => mismatch.service.activateReadyConnection(mismatch.tenant, mismatch.candidate.connectionId),
-    (error) => error instanceof WhatsAppConnectionFinalizationVerificationError,
-  ) && mismatch.repository.connections[0]?.status === "VERIFYING");
-
-  const unregistered = await fixture();
-  unregistered.transport.registered = false;
-  add("Unregistered phone blocks activation", await expectsError(
-    () => unregistered.service.activateReadyConnection(unregistered.tenant, unregistered.candidate.connectionId),
-    (error) => error instanceof WhatsAppConnectionFinalizationVerificationError,
-  ) && unregistered.repository.connections[0]?.status === "VERIFYING");
-
-  const unsubscribed = await fixture();
-  unsubscribed.transport.subscribed = false;
-  add("Missing app subscription blocks activation", await expectsError(
-    () => unsubscribed.service.activateReadyConnection(unsubscribed.tenant, unsubscribed.candidate.connectionId),
-    (error) => error instanceof WhatsAppConnectionFinalizationVerificationError,
-  ) && unsubscribed.repository.connections[0]?.status === "VERIFYING");
-
-  const timeout = await fixture();
-  timeout.transport.registrationReadError = new WhatsAppConnectionMetaTransportError("unavailable");
-  add("Ambiguous Meta timeout does not activate", await expectsError(
-    () => timeout.service.activateReadyConnection(timeout.tenant, timeout.candidate.connectionId),
-    (error) => error instanceof WhatsAppConnectionFinalizationRetryableError,
-  ) && timeout.repository.connections[0]?.status === "VERIFYING" && !timeout.repository.connections[0]?.connectedAt);
-
-  const rollback = await fixture();
-  rollback.repository.failActivateAfterWrite = true;
-  add("Persistence failure rolls back activation", await expectsError(
-    () => rollback.service.activateReadyConnection(rollback.tenant, rollback.candidate.connectionId),
+  const rollback = await makeReadyReplacement();
+  rollback.fixture.repository.failReplaceAfterWrite = true;
+  add("transaction failure rolls back old and new statuses", await expectsError(
+    () => rollback.fixture.finalization.activateReadyConnection(rollback.tenant, rollback.candidate.connectionId),
     (error) => error instanceof WhatsAppConnectionPersistenceError,
-  ) && rollback.repository.connections[0]?.status === "VERIFYING" && !rollback.repository.connections[0]?.connectedAt);
+  ) && rollback.fixture.repository.connections.find((entry) => entry.connectionId === rollback.old.connectionId)?.status === "ACTIVE" && rollback.fixture.repository.connections.find((entry) => entry.connectionId === rollback.candidate.connectionId)?.status === "REPLACEMENT_PENDING");
 
-  const isolation = await fixture();
-  add("Seller isolation blocks activation of another seller connection", await expectsError(
-    () => isolation.service.activateReadyConnection(createTenantContext("seller_phase11e2_other"), isolation.candidate.connectionId),
+  const unapproved = await makeReadyReplacement();
+  await unapproved.fixture.repository.updateLifecycleStatus(unapproved.tenant, unapproved.candidate.connectionId, "VERIFYING");
+  add("unapproved candidate cannot replace", await expectsError(
+    () => unapproved.fixture.finalization.activateReadyConnection(unapproved.tenant, unapproved.candidate.connectionId),
     (error) => error instanceof WhatsAppConnectionFinalizationConflictError,
-  ) && isolation.transport.inspectCalls === 0);
+  ) && unapproved.fixture.repository.connections.find((entry) => entry.connectionId === unapproved.old.connectionId)?.status === "ACTIVE");
 
-  const requestBoundary = await fixture();
-  const controller = new WhatsAppConnectionController({} as never, requestBoundary.service);
-  const req = {
-    tenant: requestBoundary.tenant,
-    params: { connectionId: requestBoundary.candidate.connectionId },
-    body: { sellerId: "attacker", wabaId: "attacker_waba", phoneNumberId: "attacker_phone", status: "ACTIVE", token: "attacker_token", pin: "123456" },
-  } as unknown as Request;
-  const res = responseProbe();
-  await controller.finalizeConnection(req, res as Response);
-  add("Request data cannot override persisted identifiers or activation status", res.statusCode === 400 && requestBoundary.transport.inspectCalls === 0 && !JSON.stringify(res.body).includes("attacker"));
+  const isolation = await makeReadyReplacement();
+  const isolationInspectCalls = isolation.fixture.transport.inspectCalls;
+  add("another seller's candidate cannot replace", await expectsError(
+    () => isolation.fixture.finalization.activateReadyConnection(createTenantContext("seller_phase11h_other"), isolation.candidate.connectionId),
+    (error) => error instanceof WhatsAppConnectionFinalizationConflictError,
+  ) && isolation.fixture.transport.inspectCalls === isolationInspectCalls);
 
-  const safe = await fixture();
-  const safeResult = await safe.service.activateReadyConnection(safe.tenant, safe.candidate.connectionId);
-  const safeJson = JSON.stringify(safeResult);
-  add("Safe response contains no token, PIN, fingerprint, or encrypted fields", !safeJson.includes("token") && !safeJson.toLowerCase().includes("pin") && !safeJson.includes("fingerprint") && !safeJson.includes("encrypted"));
+  const concurrent = harness();
+  const concurrentTenant = createTenantContext("seller_phase11h_concurrent");
+  concurrent.repository.connections.push(connection({ sellerId: concurrentTenant.sellerId, status: "ACTIVE", phoneNumberId: "101010101010101" }));
+  const first = await concurrent.completion.complete(concurrentTenant, { code: "code_one", wabaId: "333333333333333", phoneNumberId: "202020202020202" });
+  const second = await concurrent.completion.complete(concurrentTenant, { code: "code_two", wabaId: "333333333333333", phoneNumberId: "303030303030303" });
+  for (const candidateId of [first.connection.connectionId, second.connection.connectionId]) {
+    await concurrent.repository.persistFinalizationProgress(concurrentTenant, candidateId, { phoneRegistrationCompletedAt: new Date(), wabaSubscriptionCompletedAt: new Date() });
+  }
+  await concurrent.finalization.activateReadyConnection(concurrentTenant, first.connection.connectionId);
+  add("concurrent replacement attempts preserve one ACTIVE connection", await expectsError(
+    () => concurrent.finalization.activateReadyConnection(concurrentTenant, second.connection.connectionId),
+    (error) => error instanceof WhatsAppConnectionFinalizationConflictError,
+  ) && concurrent.repository.connections.filter((entry) => entry.sellerId === concurrentTenant.sellerId && entry.status === "ACTIVE").length === 1);
 
-  add("Test outputs and errors contain no plaintext token", !JSON.stringify(cases).includes(ready.accessToken));
+  const disconnect = harness();
+  const disconnectTenant = createTenantContext("seller_phase11h_disconnect");
+  const active = connection({ sellerId: disconnectTenant.sellerId, status: "ACTIVE", phoneNumberId: "404040404040404", connectedAt: new Date() });
+  disconnect.repository.connections.push(active);
+  const disconnected = await disconnect.disconnect.disconnect(disconnectTenant, active.connectionId);
+  add("disconnect own ACTIVE connection succeeds", disconnected.connection.status === "DISCONNECTED");
+  add("disconnect sets DISCONNECTED and disconnected_at", disconnect.repository.connections[0]?.status === "DISCONNECTED" && disconnect.repository.connections[0]?.disconnectedAt instanceof Date);
+  add("seller no longer resolves outbound after disconnect", await disconnect.repository.findActiveBySeller(disconnectTenant) === null);
+  add("old phone_number_id no longer resolves inbound after disconnect", await disconnect.repository.resolveActiveByPhoneNumberId("404040404040404") === null);
+  const duplicate = await disconnect.disconnect.disconnect(disconnectTenant, active.connectionId);
+  add("duplicate disconnect is safe", duplicate.disconnected && duplicate.connection.status === "DISCONNECTED");
+  add("another seller cannot disconnect", await expectsError(
+    () => disconnect.disconnect.disconnect(createTenantContext("seller_phase11h_attacker"), active.connectionId),
+    (error) => error instanceof WhatsAppConnectionDisconnectConflictError,
+  ));
+
+  const reconnect = harness();
+  const reconnectTenant = createTenantContext("seller_phase11h_reconnect");
+  reconnect.repository.connections.push(connection({ sellerId: reconnectTenant.sellerId, status: "DISCONNECTED", phoneNumberId: "505050505050505", disconnectedAt: new Date() }));
+  const reconnected = await reconnect.completion.complete(reconnectTenant, { code: "code", wabaId: "333333333333333", phoneNumberId: "505050505050505" });
+  add("reconnect through a new verified candidate works", reconnected.connection.status === "VERIFYING" && reconnect.repository.connections.length === 2);
+
+  const conflict = harness();
+  conflict.repository.connections.push(connection({ sellerId: "seller_phase11h_owner", status: "ACTIVE", phoneNumberId: "606060606060606" }));
+  add("phone owned by another current seller cannot be completed", await expectsError(
+    () => conflict.completion.complete(createTenantContext("seller_phase11h_conflict"), { code: "code", wabaId: "333333333333333", phoneNumberId: "606060606060606" }),
+    (error) => error instanceof WhatsAppConnectionCompletionConflictError,
+  ));
+
+  const safeJson = JSON.stringify([normalResult, replacementResult, disconnected, reconnected]);
+  add("no credentials or sensitive metadata appear in responses", !/token|pin|fingerprint|encrypted|333333333333333|606060606060606|secret/i.test(safeJson));
 
   const failed = cases.filter((entry) => !entry.passed);
   process.stdout.write(`${JSON.stringify({ summary: { total: cases.length, passed: cases.length - failed.length, failed: failed.length }, cases })}\n`);
@@ -498,6 +461,6 @@ async function main(): Promise<void> {
 
 main().catch(async () => {
   await closeDatabasePool();
-  process.stderr.write(`${JSON.stringify({ ok: false, message: "Phase 11E2 activation test failed safely." })}\n`);
+  process.stderr.write(`${JSON.stringify({ ok: false, message: "Phase 11H replacement and disconnect test failed safely." })}\n`);
   process.exitCode = 1;
 });

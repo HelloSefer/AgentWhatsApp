@@ -30,6 +30,7 @@ export type WhatsAppConnection = Readonly<{
   finalizationLastErrorCode?: string;
   finalizationLastErrorAt?: Date;
   disconnectedAt?: Date;
+  replacedConnectionId?: string;
   createdAt: Date;
   updatedAt: Date;
 }>;

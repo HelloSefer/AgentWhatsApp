@@ -89,7 +89,9 @@ export class WhatsAppConnectionFinalizationService {
     if (initial.status === "ACTIVE") return responseFromConnection(initial);
 
     const active = await this.repository.findActiveBySeller(tenant);
-    if (active && active.connectionId !== initial.connectionId) throw new WhatsAppConnectionFinalizationConflictError();
+    if (active && active.connectionId !== initial.connectionId && initial.status !== "REPLACEMENT_PENDING") {
+      throw new WhatsAppConnectionFinalizationConflictError();
+    }
 
     const accessToken = await this.decryptAccessToken(tenant, initial);
     const withRegistration = initial.phoneRegistrationCompletedAt
@@ -111,7 +113,9 @@ export class WhatsAppConnectionFinalizationService {
     if (connection.status === "ACTIVE") return responseFromConnection(connection);
 
     const active = await this.repository.findActiveBySeller(tenant);
-    if (active && active.connectionId !== connection.connectionId) throw new WhatsAppConnectionFinalizationConflictError();
+    if (active && active.connectionId !== connection.connectionId && connection.status !== "REPLACEMENT_PENDING") {
+      throw new WhatsAppConnectionFinalizationConflictError();
+    }
 
     const accessToken = await this.decryptAccessToken(tenant, connection);
     await this.verifyReadiness(tenant, connection, accessToken);
@@ -131,7 +135,7 @@ export class WhatsAppConnectionFinalizationService {
     const connection = await this.repository.findByConnectionId(tenant, connectionId);
     if (!connection) throw new WhatsAppConnectionFinalizationConflictError();
     if (connection.status === "ACTIVE") return connection;
-    if (connection.status !== "VERIFYING") {
+    if (connection.status !== "VERIFYING" && connection.status !== "REPLACEMENT_PENDING") {
       await this.persistSafeError(tenant, connection.connectionId, "invalid_connection_state");
       throw new WhatsAppConnectionFinalizationConflictError();
     }
@@ -344,10 +348,15 @@ export class WhatsAppConnectionFinalizationService {
         const connection = await this.repository.findByConnectionId(tenant, connectionId, { executor });
         if (!connection) throw new WhatsAppConnectionFinalizationConflictError();
         if (connection.status === "ACTIVE") return connection;
-        if (connection.status !== "VERIFYING") throw new WhatsAppConnectionFinalizationConflictError();
+        if (connection.status !== "VERIFYING" && connection.status !== "REPLACEMENT_PENDING") throw new WhatsAppConnectionFinalizationConflictError();
 
         const active = await this.repository.findActiveBySeller(tenant, { executor });
-        if (active && active.connectionId !== connection.connectionId) throw new WhatsAppConnectionFinalizationConflictError();
+        if (active && active.connectionId !== connection.connectionId) {
+          if (connection.status !== "REPLACEMENT_PENDING") throw new WhatsAppConnectionFinalizationConflictError();
+          const replaced = await this.repository.replaceActiveConnection(tenant, active.connectionId, connection.connectionId, { executor });
+          if (!replaced) throw new WhatsAppConnectionFinalizationConflictError();
+          return replaced;
+        }
 
         const activated = await this.repository.activateConnection(tenant, connection.connectionId, { executor });
         if (!activated) throw new WhatsAppConnectionPersistenceError();

@@ -122,3 +122,24 @@ export class WhatsAppConnectionFinalizationRetryableError extends Error {
     this.name = "WhatsAppConnectionFinalizationRetryableError";
   }
 }
+
+export class WhatsAppConnectionDisconnectValidationError extends Error {
+  constructor() {
+    super("WhatsApp connection disconnect input is invalid.");
+    this.name = "WhatsAppConnectionDisconnectValidationError";
+  }
+}
+
+export class WhatsAppConnectionDisconnectConflictError extends Error {
+  constructor() {
+    super("WhatsApp connection disconnect conflicts with existing state.");
+    this.name = "WhatsAppConnectionDisconnectConflictError";
+  }
+}
+
+export class WhatsAppConnectionDisconnectAccessDeniedError extends Error {
+  constructor() {
+    super("WhatsApp connection disconnect is not authorized.");
+    this.name = "WhatsAppConnectionDisconnectAccessDeniedError";
+  }
+}

@@ -6,6 +6,7 @@ import { rateLimitAuth } from "../auth/http/auth-rate-limit.middleware";
 import { getMetaEmbeddedSignupConfiguration } from "./application/meta-embedded-signup.config";
 import { EmbeddedSignupCompletionService } from "./application/embedded-signup-completion.service";
 import { WhatsAppConnectionFinalizationService } from "./application/whatsapp-connection-finalization.service";
+import { WhatsAppConnectionDisconnectService } from "./application/whatsapp-connection-disconnect.service";
 import { WhatsAppConnectionCredentialEncryptionService } from "./application/whatsapp-connection-credential-encryption.service";
 import { getWhatsAppConnectionCredentialEncryptionConfiguration } from "./application/whatsapp-connection-credential-encryption.config";
 import { WhatsAppConnectionCredentialService } from "./application/whatsapp-connection-credential.service";
@@ -66,7 +67,8 @@ export function createWhatsAppConnectionRoutes(
     credentialService,
     metaTransport,
   );
-  const controller = new WhatsAppConnectionController(completionService, finalizationService);
+  const disconnectService = new WhatsAppConnectionDisconnectService(postgreSqlWhatsAppConnectionRepository);
+  const controller = new WhatsAppConnectionController(completionService, finalizationService, disconnectService);
 
   router.post(
     "/embedded-signup/complete",
@@ -82,6 +84,14 @@ export function createWhatsAppConnectionRoutes(
     rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
     authorize,
     controller.finalizeConnection,
+  );
+
+  router.post(
+    "/:connectionId/disconnect",
+    authenticate,
+    rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
+    authorize,
+    controller.disconnectConnection,
   );
 
   return router;

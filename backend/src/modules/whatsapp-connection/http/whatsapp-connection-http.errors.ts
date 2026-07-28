@@ -12,6 +12,9 @@ import {
   WhatsAppConnectionCompletionValidationError,
   WhatsAppConnectionCompletionVerificationError,
   WhatsAppConnectionCredentialEncryptionError,
+  WhatsAppConnectionDisconnectAccessDeniedError,
+  WhatsAppConnectionDisconnectConflictError,
+  WhatsAppConnectionDisconnectValidationError,
   WhatsAppConnectionFinalizationAccessDeniedError,
   WhatsAppConnectionFinalizationConflictError,
   WhatsAppConnectionFinalizationRetryableError,
@@ -38,6 +41,9 @@ export function sendWhatsappConnectionError(res: Response, error: unknown): Resp
   if (error instanceof WhatsAppConnectionFinalizationConflictError) return res.status(409).json({ message: "WhatsApp connection could not be finalized safely." });
   if (error instanceof WhatsAppConnectionFinalizationRetryableError) return res.status(503).json({ message: "WhatsApp connection finalization can be retried." });
   if (error instanceof WhatsAppConnectionFinalizationVerificationError) return res.status(400).json({ message: "WhatsApp connection could not be finalized." });
+  if (error instanceof WhatsAppConnectionDisconnectValidationError) return res.status(400).json({ message: "Invalid request." });
+  if (error instanceof WhatsAppConnectionDisconnectAccessDeniedError) return res.status(403).json({ message: "WhatsApp connection could not be disconnected." });
+  if (error instanceof WhatsAppConnectionDisconnectConflictError) return res.status(409).json({ message: "WhatsApp connection could not be disconnected safely." });
   if (error instanceof WhatsAppConnectionMetaConfigurationError) return res.status(503).json({ message: "WhatsApp connection is not configured." });
   if (error instanceof WhatsAppConnectionCredentialEncryptionError || error instanceof WhatsAppConnectionPersistenceError) return res.status(500).json({ message: "WhatsApp connection service unavailable." });
   return res.status(500).json({ message: "WhatsApp connection service unavailable." });
