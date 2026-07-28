@@ -143,3 +143,20 @@ export class WhatsAppConnectionDisconnectAccessDeniedError extends Error {
     this.name = "WhatsAppConnectionDisconnectAccessDeniedError";
   }
 }
+
+export type ManualConnectionValidationIssueCode =
+  | "META_APP_CREDENTIALS_INVALID"
+  | "META_TOKEN_INVALID"
+  | "META_TOKEN_EXPIRED"
+  | "META_TOKEN_APP_MISMATCH"
+  | "META_TOKEN_TYPE_UNSUPPORTED"
+  | "META_PERMISSION_MISSING"
+  | "META_WABA_ACCESS_MISSING"
+  | "META_ASSET_DISCOVERY_FAILED";
+
+export class ManualConnectionValidationError extends Error {
+  constructor(readonly issueCode: ManualConnectionValidationIssueCode) {
+    super("Manual WhatsApp connection validation failed.");
+    this.name = "ManualConnectionValidationError";
+  }
+}

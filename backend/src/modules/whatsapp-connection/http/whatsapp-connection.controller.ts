@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import type { AuthorizedRequest } from "../../auth/http/auth-request.types";
 import type { EmbeddedSignupCompletionService } from "../application/embedded-signup-completion.service";
+import type { ManualConnectionAssetsService } from "../application/manual-connection-assets.service";
 import type { ManualConnectionSetupService } from "../application/manual-connection-setup.service";
 import type { WhatsAppConnectionCurrentService } from "../application/whatsapp-connection-current.service";
 import type { WhatsAppConnectionDisconnectService } from "../application/whatsapp-connection-disconnect.service";
@@ -10,6 +11,7 @@ import { sendWhatsappConnectionError } from "./whatsapp-connection-http.errors";
 
 const ACCEPTED_BODY_KEYS = new Set(["code", "wabaId", "phoneNumberId"]);
 const MANUAL_SETUP_BODY_KEYS = new Set(["appId", "appSecret", "systemUserAccessToken"]);
+const MANUAL_SELECT_ASSETS_BODY_KEYS = new Set(["wabaId", "phoneNumberId"]);
 
 function bodyRecord(req: Request): Record<string, unknown> {
   return typeof req.body === "object" && req.body !== null && !Array.isArray(req.body)
@@ -35,6 +37,19 @@ function strictManualSetupBody(req: Request): Record<string, unknown> {
   return body;
 }
 
+function strictEmptyBody(req: Request): void {
+  if (Object.keys(bodyRecord(req)).length !== 0) throw new WhatsAppConnectionCompletionValidationError();
+}
+
+function strictManualSelectAssetsBody(req: Request): Record<string, unknown> {
+  const body = bodyRecord(req);
+  const keys = Object.keys(body);
+  if (keys.length !== MANUAL_SELECT_ASSETS_BODY_KEYS.size || keys.some((key) => !MANUAL_SELECT_ASSETS_BODY_KEYS.has(key))) {
+    throw new WhatsAppConnectionCompletionValidationError();
+  }
+  return body;
+}
+
 export class WhatsAppConnectionController {
   constructor(
     private readonly completionService: EmbeddedSignupCompletionService,
@@ -42,6 +57,7 @@ export class WhatsAppConnectionController {
     private readonly finalizationService?: WhatsAppConnectionFinalizationService,
     private readonly disconnectService?: WhatsAppConnectionDisconnectService,
     private readonly manualSetupService?: ManualConnectionSetupService,
+    private readonly manualAssetsService?: ManualConnectionAssetsService,
   ) {}
 
   getCurrentConnection = async (req: Request, res: Response): Promise<Response> => {
@@ -79,6 +95,35 @@ export class WhatsAppConnectionController {
         appId: body.appId as string,
         appSecret: body.appSecret as string,
         systemUserAccessToken: body.systemUserAccessToken as string,
+      });
+      return res.status(200).json(result);
+    } catch (error) {
+      return sendWhatsappConnectionError(res, error);
+    }
+  };
+
+  discoverManualAssets = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      if (!this.manualAssetsService) throw new WhatsAppConnectionCredentialEncryptionError();
+      strictEmptyBody(req);
+      const authorized = req as AuthorizedRequest;
+      const connectionId = typeof req.params.connectionId === "string" ? req.params.connectionId : "";
+      const result = await this.manualAssetsService.discover(authorized.tenant, connectionId);
+      return res.status(200).json(result);
+    } catch (error) {
+      return sendWhatsappConnectionError(res, error);
+    }
+  };
+
+  selectManualAssets = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      if (!this.manualAssetsService) throw new WhatsAppConnectionCredentialEncryptionError();
+      const authorized = req as AuthorizedRequest;
+      const connectionId = typeof req.params.connectionId === "string" ? req.params.connectionId : "";
+      const body = strictManualSelectAssetsBody(req);
+      const result = await this.manualAssetsService.selectAssets(authorized.tenant, connectionId, {
+        wabaId: body.wabaId as string,
+        phoneNumberId: body.phoneNumberId as string,
       });
       return res.status(200).json(result);
     } catch (error) {
