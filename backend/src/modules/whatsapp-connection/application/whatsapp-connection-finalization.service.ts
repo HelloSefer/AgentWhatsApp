@@ -15,6 +15,7 @@ import {
 } from "../domain/whatsapp-connection.errors";
 import type { WhatsAppConnection } from "../domain/whatsapp-connection.types";
 import { normalizeConnectionId } from "../domain/whatsapp-connection.validation";
+import { incrementWhatsAppConnectionMetric, recordWhatsAppConnectionAudit } from "./whatsapp-connection-operational-events";
 import type { MetaEmbeddedSignupTransport } from "../infrastructure/meta/meta-embedded-signup.transport";
 import type { WhatsAppConnectionCredentialService } from "./whatsapp-connection-credential.service";
 
@@ -152,10 +153,14 @@ export class WhatsAppConnectionFinalizationService {
       const storage = await this.credentialService.getCredentialStorage(tenant, connection.connectionId);
       if (!storage?.encryptedAccessToken) {
         await this.persistSafeError(tenant, connection.connectionId, "missing_access_token");
+        recordWhatsAppConnectionAudit("whatsapp_connection.token_invalid", { sellerId: tenant.sellerId, connectionId: connection.connectionId, reason: "token_invalid" });
+        incrementWhatsAppConnectionMetric("whatsapp_connection_token_failures_total", { sellerId: tenant.sellerId, connectionId: connection.connectionId, reason: "token_invalid" });
         throw new WhatsAppConnectionFinalizationAccessDeniedError();
       }
       if (storage.tokenExpiresAt && storage.tokenExpiresAt.getTime() <= Date.now()) {
         await this.persistSafeError(tenant, connection.connectionId, "invalid_access_token");
+        recordWhatsAppConnectionAudit("whatsapp_connection.token_invalid", { sellerId: tenant.sellerId, connectionId: connection.connectionId, reason: "token_invalid" });
+        incrementWhatsAppConnectionMetric("whatsapp_connection_token_failures_total", { sellerId: tenant.sellerId, connectionId: connection.connectionId, reason: "token_invalid" });
         throw new WhatsAppConnectionFinalizationAccessDeniedError();
       }
       const token = await this.credentialService.decryptStoredAccessToken(tenant, connection.connectionId);
@@ -164,6 +169,8 @@ export class WhatsAppConnectionFinalizationService {
     } catch (error) {
       if (error instanceof WhatsAppConnectionFinalizationAccessDeniedError) throw error;
       await this.persistSafeError(tenant, connection.connectionId, "invalid_access_token");
+      recordWhatsAppConnectionAudit("whatsapp_connection.token_invalid", { sellerId: tenant.sellerId, connectionId: connection.connectionId, reason: "credential_decryption_failed" });
+      incrementWhatsAppConnectionMetric("whatsapp_connection_token_failures_total", { sellerId: tenant.sellerId, connectionId: connection.connectionId, reason: "credential_decryption_failed" });
       throw new WhatsAppConnectionFinalizationAccessDeniedError();
     }
   }
@@ -355,11 +362,15 @@ export class WhatsAppConnectionFinalizationService {
           if (connection.status !== "REPLACEMENT_PENDING") throw new WhatsAppConnectionFinalizationConflictError();
           const replaced = await this.repository.replaceActiveConnection(tenant, active.connectionId, connection.connectionId, { executor });
           if (!replaced) throw new WhatsAppConnectionFinalizationConflictError();
+          recordWhatsAppConnectionAudit("whatsapp_connection.replaced", { sellerId: tenant.sellerId, connectionId: replaced.connectionId, status: replaced.status });
+          incrementWhatsAppConnectionMetric("whatsapp_connections_active_total", { sellerId: tenant.sellerId, connectionId: replaced.connectionId, status: replaced.status });
           return replaced;
         }
 
         const activated = await this.repository.activateConnection(tenant, connection.connectionId, { executor });
         if (!activated) throw new WhatsAppConnectionPersistenceError();
+        recordWhatsAppConnectionAudit("whatsapp_connection.activated", { sellerId: tenant.sellerId, connectionId: activated.connectionId, status: activated.status });
+        incrementWhatsAppConnectionMetric("whatsapp_connections_active_total", { sellerId: tenant.sellerId, connectionId: activated.connectionId, status: activated.status });
         return activated;
       });
     } catch (error) {

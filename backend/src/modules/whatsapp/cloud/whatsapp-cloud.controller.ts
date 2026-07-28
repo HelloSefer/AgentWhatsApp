@@ -30,6 +30,7 @@ import type { WhatsAppInboundJobData } from "./inbound-queue/whatsapp-inbound-jo
 import { conversationKeyService } from "../../agent/identity/conversation-key.service";
 import { postgreSqlWhatsAppConnectionRepository } from "../../whatsapp-connection";
 import type { ActiveWhatsAppConnectionResolution } from "../../whatsapp-connection";
+import { incrementWhatsAppConnectionMetric, recordWhatsAppConnectionAudit, type SafeWhatsAppConnectionReason } from "../../whatsapp-connection/application/whatsapp-connection-operational-events";
 
 type WhatsAppInboundProducerProvider = typeof getWhatsAppInboundProducer;
 type CloudWebhookProcessor = typeof processCloudWebhookBody;
@@ -75,11 +76,16 @@ function isSupportedMetaPhoneNumberId(value: string): boolean {
   return /^\d{3,128}$/u.test(value.trim());
 }
 
-function recordInboundRoutingSkip(reason: string): void {
+function recordInboundRoutingSkip(reason: SafeWhatsAppConnectionReason): void {
   console.warn(JSON.stringify({
     event: "whatsapp.cloud.webhook.routing_skipped",
     reason,
   }));
+  incrementWhatsAppConnectionMetric("whatsapp_connection_inbound_resolution_failures_total", { reason });
+  if (reason === "inactive_or_unknown_phone_number_id" || reason === "invalid_phone_number_id") {
+    recordWhatsAppConnectionAudit("whatsapp_connection.unknown_phone_webhook", { reason });
+    incrementWhatsAppConnectionMetric("whatsapp_connection_unknown_phone_webhooks_total", { reason });
+  }
 }
 
 export function verifyWhatsAppCloudWebhook(req: Request, res: Response) {

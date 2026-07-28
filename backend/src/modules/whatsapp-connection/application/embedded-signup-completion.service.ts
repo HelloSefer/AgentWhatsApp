@@ -16,6 +16,7 @@ import {
 import type { WhatsAppConnection } from "../domain/whatsapp-connection.types";
 import { normalizeMetaId } from "../domain/whatsapp-connection.validation";
 import type { MetaEmbeddedSignupConfiguration } from "./meta-embedded-signup.config";
+import { incrementWhatsAppConnectionMetric, observeWhatsAppConnectionMetric, recordWhatsAppConnectionAudit, type SafeWhatsAppConnectionReason } from "./whatsapp-connection-operational-events";
 import type { WhatsAppConnectionCredentialService } from "./whatsapp-connection-credential.service";
 import type { MetaEmbeddedSignupTransport, MetaPhoneNumberResult, MetaTokenInspectionResult, MetaWabaResult } from "../infrastructure/meta/meta-embedded-signup.transport";
 
@@ -74,6 +75,16 @@ function safePersistenceError(error: unknown): never {
   throw new WhatsAppConnectionPersistenceError(error);
 }
 
+function reasonFromCompletionError(error: unknown): SafeWhatsAppConnectionReason {
+  if (error instanceof WhatsAppConnectionCompletionAccessDeniedError) return "token_invalid";
+  if (error instanceof WhatsAppConnectionCompletionConflictError) return "conflict";
+  if (error instanceof WhatsAppConnectionCompletionValidationError) return "invalid_request";
+  if (error instanceof WhatsAppConnectionMetaConfigurationError) return "missing_configuration";
+  if (error instanceof WhatsAppConnectionCredentialEncryptionError) return "credential_unavailable";
+  if (error instanceof WhatsAppConnectionPersistenceError) return "persistence_failure";
+  return "verification_failed";
+}
+
 export class EmbeddedSignupCompletionService {
   constructor(
     private readonly repository: WhatsAppConnectionRepository,
@@ -84,8 +95,17 @@ export class EmbeddedSignupCompletionService {
   ) {}
 
   async complete(tenant: TenantContext, rawInput: CompleteEmbeddedSignupInput): Promise<CompleteEmbeddedSignupResult> {
-    if (!this.metaConfiguration) throw new WhatsAppConnectionMetaConfigurationError();
-    if (!this.credentialService) throw new WhatsAppConnectionCredentialEncryptionError();
+    const startedAt = Date.now();
+    if (!this.metaConfiguration) {
+      recordWhatsAppConnectionAudit("whatsapp_connection.verification_failed", { sellerId: tenant.sellerId, reason: "missing_configuration" });
+      incrementWhatsAppConnectionMetric("whatsapp_connection_failures_total", { sellerId: tenant.sellerId, reason: "missing_configuration" });
+      throw new WhatsAppConnectionMetaConfigurationError();
+    }
+    if (!this.credentialService) {
+      recordWhatsAppConnectionAudit("whatsapp_connection.verification_failed", { sellerId: tenant.sellerId, reason: "credential_unavailable" });
+      incrementWhatsAppConnectionMetric("whatsapp_connection_failures_total", { sellerId: tenant.sellerId, reason: "credential_unavailable" });
+      throw new WhatsAppConnectionCredentialEncryptionError();
+    }
     const credentialService = this.credentialService;
     const input = normalizeInput(rawInput);
 
@@ -108,8 +128,33 @@ export class EmbeddedSignupCompletionService {
       const phone = await this.metaTransport.readPhoneNumber(input.phoneNumberId, exchange.accessToken);
       verifyMetaAssets(input, waba, phone);
 
-      return await this.persistCompletion(tenant, input, phone, exchange.accessToken, exchange.tokenExpiresAt ?? null, credentialService);
+      const result = await this.persistCompletion(tenant, input, phone, exchange.accessToken, exchange.tokenExpiresAt ?? null, credentialService);
+      recordWhatsAppConnectionAudit("whatsapp_connection.signup_completed", {
+        sellerId: tenant.sellerId,
+        connectionId: result.connection.connectionId,
+        status: result.connection.status,
+      });
+      if (result.connection.status === "REPLACEMENT_PENDING") {
+        recordWhatsAppConnectionAudit("whatsapp_connection.replacement_started", {
+          sellerId: tenant.sellerId,
+          connectionId: result.connection.connectionId,
+          status: result.connection.status,
+        });
+      }
+      observeWhatsAppConnectionMetric("whatsapp_connection_signup_completion_duration", Date.now() - startedAt, {
+        sellerId: tenant.sellerId,
+        connectionId: result.connection.connectionId,
+        status: result.connection.status,
+      });
+      return result;
     } catch (error) {
+      const reason = reasonFromCompletionError(error);
+      recordWhatsAppConnectionAudit("whatsapp_connection.verification_failed", { sellerId: tenant.sellerId, reason });
+      incrementWhatsAppConnectionMetric("whatsapp_connection_failures_total", { sellerId: tenant.sellerId, reason });
+      if (reason === "token_invalid") {
+        recordWhatsAppConnectionAudit("whatsapp_connection.token_invalid", { sellerId: tenant.sellerId, reason });
+        incrementWhatsAppConnectionMetric("whatsapp_connection_token_failures_total", { sellerId: tenant.sellerId, reason });
+      }
       if (
         error instanceof WhatsAppConnectionCompletionAccessDeniedError ||
         error instanceof WhatsAppConnectionCompletionConflictError ||

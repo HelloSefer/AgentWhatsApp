@@ -8,6 +8,7 @@ import {
 } from "../domain/whatsapp-connection.errors";
 import type { WhatsAppConnection } from "../domain/whatsapp-connection.types";
 import { normalizeConnectionId } from "../domain/whatsapp-connection.validation";
+import { recordWhatsAppConnectionAudit } from "./whatsapp-connection-operational-events";
 
 export type DisconnectWhatsAppConnectionResult = Readonly<{
   disconnected: true;
@@ -43,6 +44,11 @@ export class WhatsAppConnectionDisconnectService {
         const updated = await this.repository.disconnectActiveConnection(tenant, normalizedConnectionId, { executor });
         if (!updated) throw new WhatsAppConnectionDisconnectConflictError();
         return updated;
+      });
+      recordWhatsAppConnectionAudit("whatsapp_connection.disconnected", {
+        sellerId: tenant.sellerId,
+        connectionId: disconnected.connectionId,
+        status: disconnected.status,
       });
       return responseFromConnection(disconnected);
     } catch (error) {
