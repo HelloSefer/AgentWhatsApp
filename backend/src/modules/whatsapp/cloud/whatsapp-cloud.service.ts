@@ -79,6 +79,8 @@ import {
   type WhatsAppOutboundGroupDispatcher,
   type WhatsAppOutboundResponseGroup,
 } from "./outbound-queue/whatsapp-outbound-job.types";
+import type { WhatsAppOutboundConnectionResolver } from "./outbound-connection/whatsapp-outbound-connection-resolver";
+import { WhatsAppOutboundError } from "./outbound-queue/whatsapp-outbound.errors";
 
 export type CloudPreparedResponseGroupDispatcher = WhatsAppOutboundGroupDispatcher;
 
@@ -943,6 +945,7 @@ export function verifyWebhookSignature(input: {
 export async function postCloudMessage(
   phoneNumberId: string,
   payload: unknown,
+  options: Readonly<{ accessToken?: string }> = {},
 ): Promise<WhatsAppCloudSendResult> {
   if (env.whatsappCloudDryRun) {
     return {
@@ -953,7 +956,9 @@ export async function postCloudMessage(
     };
   }
 
-  if (!env.whatsappCloudAccessToken) {
+  const accessToken = options.accessToken || env.whatsappCloudAccessToken;
+
+  if (!accessToken) {
     pushDiagnosticError("send_cloud_message", "WHATSAPP_CLOUD_ACCESS_TOKEN is required");
     return {
       success: false,
@@ -968,7 +973,7 @@ export async function postCloudMessage(
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.whatsappCloudAccessToken}`,
+        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
@@ -1104,6 +1109,7 @@ export async function subscribeAppToWaba(subscribedFields?: string[]) {
 export async function sendCloudText(input: {
   to: string;
   phoneNumberId?: string;
+  accessToken?: string;
   text: string;
   forceDryRun?: boolean;
 }): Promise<WhatsAppCloudSendResult> {
@@ -1137,7 +1143,9 @@ export async function sendCloudText(input: {
     return result;
   }
 
-  const result = await postCloudMessage(phoneNumberId, payload);
+  const result = await postCloudMessage(phoneNumberId, payload, {
+    accessToken: input.accessToken,
+  });
 
   logJson({
     event: "whatsapp.cloud.send.text",
@@ -1265,6 +1273,7 @@ function validateInteractivePreview(
 export async function sendCloudInteractiveMessage(input: {
   to: string;
   phoneNumberId?: string;
+  accessToken?: string;
   interactivePreview: WhatsAppInteractivePreview;
   forceDryRun?: boolean;
 }): Promise<WhatsAppCloudSendResult> {
@@ -1318,7 +1327,9 @@ export async function sendCloudInteractiveMessage(input: {
     return result;
   }
 
-  const result = await postCloudMessage(phoneNumberId, payload);
+  const result = await postCloudMessage(phoneNumberId, payload, {
+    accessToken: input.accessToken,
+  });
 
   logJson({
     event: "whatsapp.cloud.send.interactive",
@@ -1336,6 +1347,7 @@ export async function sendCloudInteractiveMessage(input: {
 
 export async function uploadMedia(input: {
   phoneNumberId?: string;
+  accessToken?: string;
   filePath: string;
   mimeType: string;
   forceDryRun?: boolean;
@@ -1357,7 +1369,9 @@ export async function uploadMedia(input: {
     };
   }
 
-  if (!env.whatsappCloudAccessToken) {
+  const accessToken = input.accessToken || env.whatsappCloudAccessToken;
+
+  if (!accessToken) {
     const errorMessage = "WHATSAPP_CLOUD_ACCESS_TOKEN is required";
 
     pushDiagnosticError("upload_media", errorMessage);
@@ -1388,7 +1402,7 @@ export async function uploadMedia(input: {
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${env.whatsappCloudAccessToken}`,
+          Authorization: `Bearer ${accessToken}`,
         },
         body: formData,
       },
@@ -1474,6 +1488,7 @@ export async function uploadMedia(input: {
 export async function sendDocument(input: {
   to: string;
   phoneNumberId?: string;
+  accessToken?: string;
   filePath: string;
   filename: string;
   caption?: string;
@@ -1484,6 +1499,7 @@ export async function sendDocument(input: {
     input.phoneNumberId || env.whatsappCloudPhoneNumberId || "";
   const uploadResult = await uploadMedia({
     phoneNumberId,
+    accessToken: input.accessToken,
     filePath: input.filePath,
     mimeType: "application/pdf",
     forceDryRun: input.forceDryRun,
@@ -1501,6 +1517,7 @@ export async function sendDocument(input: {
       await sendCloudText({
         to: input.to,
         phoneNumberId,
+        accessToken: input.accessToken,
         text: "تم تأكيد الطلب ✅ وغادي نرسل لك وصل الطلب بعد قليل.",
         forceDryRun: input.forceDryRun,
       });
@@ -1533,7 +1550,9 @@ export async function sendDocument(input: {
       mediaId: uploadResult.mediaId,
     };
   }
-  const result = await postCloudMessage(phoneNumberId, payload);
+  const result = await postCloudMessage(phoneNumberId, payload, {
+    accessToken: input.accessToken,
+  });
 
   logJson({
     event: result.success
@@ -1728,7 +1747,6 @@ async function stageRuntimeReceiptArtifactForOutboundQueue(input: {
   return {
     type: "runtime_receipt_document",
     to: input.to,
-    phoneNumberId: input.phoneNumberId,
     filePath,
     filename: safeFilename,
     caption: `هذا وصل الطلب ديالك ✅\nرقم الطلب: ${input.artifact.publicOrderCode}`,
@@ -1748,6 +1766,7 @@ async function sendPersistedConfirmedOrderReceiptDocument(input: {
   conversationKey: string;
   to: string;
   phoneNumberId: string;
+  accessToken?: string;
   confirmedOrderId: string;
 }): Promise<WhatsAppCloudSendResult> {
   const tenant = createTenantContext(input.sellerId);
@@ -1835,6 +1854,7 @@ async function sendPersistedConfirmedOrderReceiptDocument(input: {
     const result = await sendDocument({
       to: input.to,
       phoneNumberId: input.phoneNumberId,
+      accessToken: input.accessToken,
       filePath,
       filename: safeFilename,
       caption: `هذا وصل الطلب ديالك ✅\nرقم الطلب: ${snapshot.id}`,
@@ -1885,6 +1905,7 @@ async function sendPersistedConfirmedOrderReceiptDocument(input: {
 export async function sendOrderReceiptDocumentForOrder(input: {
   to: string;
   phoneNumberId?: string;
+  accessToken?: string;
   order: ConfirmedOrder;
   allowDuplicate?: boolean;
 }): Promise<
@@ -2029,6 +2050,7 @@ export async function sendOrderReceiptDocumentForOrder(input: {
   const sendResult = await sendDocument({
     to: input.to,
     phoneNumberId: input.phoneNumberId,
+    accessToken: input.accessToken,
     filePath: pdfResult.pdfPath,
     filename: `recu-commande-${input.order.publicOrderCode}.pdf`,
     caption: [
@@ -2112,16 +2134,21 @@ export async function dispatchPreparedOutboundGroupDirectly(
   options: Readonly<{
     startCommandIndex?: number;
     onCommandSuccess?: (nextCommandIndex: number) => Promise<void>;
+    outboundConnectionResolver?: WhatsAppOutboundConnectionResolver;
   }> = {},
 ): Promise<{ accepted: true; duplicate: false; commandResults: WhatsAppOutboundCommandResult[] }> {
   const commandResults: WhatsAppOutboundCommandResult[] = [];
   const startCommandIndex = Math.max(0, Math.min(group.commands.length, options.startCommandIndex || 0));
+  const connection = options.outboundConnectionResolver
+    ? await options.outboundConnectionResolver.resolveForTrustedSeller(group.sellerId)
+    : undefined;
   for (let index = startCommandIndex; index < group.commands.length; index += 1) {
     const command = group.commands[index];
     if (command.type === "agent_reply") {
       const result = await cloudReplyDispatchService.dispatchAgentReply({
         to: command.to,
-        phoneNumberId: command.phoneNumberId,
+        phoneNumberId: connection?.phoneNumberId,
+        accessToken: connection?.accessToken,
         replyText: command.replyText,
         whatsappInteractivePreview: command.whatsappInteractivePreview,
         interactiveSendDecision: command.interactiveSendDecision,
@@ -2147,14 +2174,16 @@ export async function dispatchPreparedOutboundGroupDirectly(
       const result = order
         ? await sendOrderReceiptDocumentForOrder({
           to: command.to,
-          phoneNumberId: command.phoneNumberId,
+          phoneNumberId: connection?.phoneNumberId,
+          accessToken: connection?.accessToken,
           order,
         })
         : await sendPersistedConfirmedOrderReceiptDocument({
           sellerId: group.sellerId,
           conversationKey: group.conversationKey,
           to: command.to,
-          phoneNumberId: command.phoneNumberId,
+          phoneNumberId: connection?.phoneNumberId || env.whatsappCloudPhoneNumberId || "",
+          accessToken: connection?.accessToken,
           confirmedOrderId: command.confirmedOrderId,
         });
       commandResults.push({
@@ -2174,7 +2203,8 @@ export async function dispatchPreparedOutboundGroupDirectly(
       try {
         const result = await sendDocument({
           to: command.to,
-          phoneNumberId: command.phoneNumberId,
+          phoneNumberId: connection?.phoneNumberId,
+          accessToken: connection?.accessToken,
           filePath: command.filePath,
           filename: command.filename,
           caption: command.caption,
@@ -2984,7 +3014,6 @@ async function sendAgentCloudResult(input: {
 
 function buildAgentReplyOutboundCommand(input: {
   to: string;
-  phoneNumberId: string;
   result: AgentResult;
   forceDryRun?: boolean;
   cloudDryRunOverride?: boolean;
@@ -2994,7 +3023,6 @@ function buildAgentReplyOutboundCommand(input: {
   return {
     type: "agent_reply",
     to: input.to,
-    phoneNumberId: input.phoneNumberId,
     replyText: buildCloudInteractiveFallbackText(input.result),
     whatsappInteractivePreview:
       input.result.meta?.whatsappInteractivePreview ?? null,
@@ -3011,7 +3039,6 @@ function buildOutboundResponseGroup(input: {
   sellerId: string;
   conversationKey: string;
   to: string;
-  phoneNumberId: string;
   sourceType: WhatsAppOutboundResponseGroup["source"]["type"];
   sourceId: string;
   responseGroupRole: string;
@@ -3022,7 +3049,6 @@ function buildOutboundResponseGroup(input: {
     sellerId: input.sellerId,
     conversationKey: input.conversationKey,
     recipient: { waId: input.to },
-    sender: { phoneNumberId: input.phoneNumberId },
     source: { type: input.sourceType, id: input.sourceId },
     responseGroupId: `${input.sourceType}.${input.sourceId}.${input.responseGroupRole}`,
     responseGroupRole: input.responseGroupRole,
@@ -3087,7 +3113,6 @@ export async function dispatchAgentResultThroughCloud(input: {
         sellerId,
         conversationKey,
         to: input.to,
-        phoneNumberId: input.phoneNumberId,
         sourceType: "inbound_message",
         sourceId: sourceMessageId,
         responseGroupRole: orderConfirmationMessages
@@ -3852,7 +3877,6 @@ export async function processNormalizedCloudMessage(
                   sellerId: identity.sellerId,
                   conversationKey: identity.conversationKey,
                   to: message.waId,
-                  phoneNumberId: message.phoneNumberId,
                   sourceType: "runtime_receipt",
                   sourceId: runtimeReceiptArtifact.snapshotId,
                   responseGroupRole: "runtime_receipt_document",
@@ -3935,15 +3959,13 @@ export async function processNormalizedCloudMessage(
                   sellerId: identity.sellerId,
                   conversationKey: identity.conversationKey,
                   to: message.waId,
-                  phoneNumberId: message.phoneNumberId,
                   sourceType: "confirmed_order_receipt",
                   sourceId: confirmedOrder.id,
                   responseGroupRole: "confirmed_order_receipt",
                   commands: [
-                    {
+                  {
                       type: "confirmed_order_receipt",
                       to: message.waId,
-                      phoneNumberId: message.phoneNumberId,
                       confirmedOrderId: confirmedOrder.id,
                     },
                   ],

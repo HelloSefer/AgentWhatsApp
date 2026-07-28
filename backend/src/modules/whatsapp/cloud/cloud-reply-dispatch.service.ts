@@ -28,6 +28,7 @@ export class CloudReplyDispatchService {
   async dispatchAgentReply(input: {
     to: string;
     phoneNumberId?: string;
+    accessToken?: string;
     replyText: string;
     whatsappInteractivePreview?: WhatsAppInteractivePreview | null;
     interactiveSendDecision?: InteractiveSendDecision | null;
@@ -56,6 +57,7 @@ export class CloudReplyDispatchService {
       const textResult = await sendCloudText({
         to: input.to,
         phoneNumberId: input.phoneNumberId,
+        accessToken: input.accessToken,
         text: input.replyText,
         forceDryRun: effectiveForceDryRun,
       });
@@ -93,6 +95,7 @@ export class CloudReplyDispatchService {
       const textResult = await sendCloudText({
         to: input.to,
         phoneNumberId: input.phoneNumberId,
+        accessToken: input.accessToken,
         text: input.replyText,
       });
       const result: CloudReplyDispatchResult = {
@@ -132,6 +135,7 @@ export class CloudReplyDispatchService {
       const textResult = await sendCloudText({
         to: input.to,
         phoneNumberId: input.phoneNumberId,
+        accessToken: input.accessToken,
         text: input.replyText,
         forceDryRun: true,
       });
@@ -167,6 +171,7 @@ export class CloudReplyDispatchService {
     const interactiveResult = await sendCloudInteractiveMessage({
       to: input.to,
       phoneNumberId: input.phoneNumberId,
+      accessToken: input.accessToken,
       interactivePreview: input.whatsappInteractivePreview as WhatsAppInteractivePreview,
       forceDryRun: effectiveForceDryRun,
     });
@@ -199,6 +204,7 @@ export class CloudReplyDispatchService {
     const textResult = await sendCloudText({
       to: input.to,
       phoneNumberId: input.phoneNumberId,
+      accessToken: input.accessToken,
       text: input.replyText,
       forceDryRun: effectiveForceDryRun,
     });

@@ -10,6 +10,7 @@ import type {
 import { whatsappOutboundQueueDefinition } from "./whatsapp-outbound-queue.definition";
 import { validateWhatsAppOutboundResponseGroup } from "./whatsapp-outbound-validation";
 import { WhatsAppOutboundError } from "./whatsapp-outbound.errors";
+import type { WhatsAppOutboundConnectionResolver } from "../outbound-connection/whatsapp-outbound-connection-resolver";
 import {
   handleOutboundFailure,
   validateOutboundProgress,
@@ -19,8 +20,16 @@ function maskRecipient(value: string): string {
   return value.length > 6 ? `${value.slice(0, 3)}***${value.slice(-3)}` : "***";
 }
 
+function isPermanentTransportFailure(error: string | undefined): boolean {
+  if (!error) return false;
+  return /Cloud (?:API|media upload) returned 4\d\d|WHATSAPP_CLOUD_ACCESS_TOKEN is required/iu.test(error);
+}
+
 function createOutboundProcessor(
-  options: Readonly<{ dlqPublisher?: WhatsAppDlqPublisher }> = {},
+  options: Readonly<{
+    dlqPublisher?: WhatsAppDlqPublisher;
+    outboundConnectionResolver: WhatsAppOutboundConnectionResolver;
+  }>,
 ): QueueJobProcessor<WhatsAppOutboundJobData, WhatsAppOutboundJobResult> {
   return async (job): Promise<WhatsAppOutboundJobResult> => {
     let failedCommand: Readonly<{ index: number; type: WhatsAppOutboundJobData["commands"][number]["type"] }> | undefined;
@@ -37,6 +46,7 @@ function createOutboundProcessor(
       }));
       const dispatchResult = await dispatchPreparedOutboundGroupDirectly(group, {
         startCommandIndex: progress.nextCommandIndex,
+        outboundConnectionResolver: options.outboundConnectionResolver,
         onCommandSuccess: async (nextCommandIndex) => {
           await job.updateProgress({ schemaVersion: 1, nextCommandIndex });
         },
@@ -49,7 +59,11 @@ function createOutboundProcessor(
           index,
           type: group.commands[index]?.type || commandResults[failedOffset].type,
         };
-        throw new WhatsAppOutboundError("outbound_transport_failed");
+        throw new WhatsAppOutboundError(
+          isPermanentTransportFailure(commandResults[failedOffset].error)
+            ? "outbound_transport_permanent_failed"
+            : "outbound_transport_failed",
+        );
       }
       return {
         ok: true,
@@ -67,12 +81,19 @@ function createOutboundProcessor(
 
 export function createWhatsAppOutboundWorker(
   connectionManager: QueueConnectionManager,
-  options: Readonly<{ concurrency?: number; dlqPublisher?: WhatsAppDlqPublisher }> = {},
+  options: Readonly<{
+    concurrency?: number;
+    dlqPublisher?: WhatsAppDlqPublisher;
+    outboundConnectionResolver: WhatsAppOutboundConnectionResolver;
+  }>,
   queueDefinition: QueueDefinition<WhatsAppOutboundJobName, WhatsAppOutboundJobData, WhatsAppOutboundJobResult> = whatsappOutboundQueueDefinition,
 ): ManagedQueueWorker {
   return createManagedQueueWorker(
     queueDefinition,
-    createOutboundProcessor({ dlqPublisher: options.dlqPublisher }),
+    createOutboundProcessor({
+      dlqPublisher: options.dlqPublisher,
+      outboundConnectionResolver: options.outboundConnectionResolver,
+    }),
     connectionManager,
     options,
   );

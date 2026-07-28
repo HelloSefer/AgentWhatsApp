@@ -3,7 +3,7 @@ import type { WhatsAppOutboundResponseGroup } from "./whatsapp-outbound-job.type
 import { WHATSAPP_OUTBOUND_MAX_COMMANDS, WHATSAPP_OUTBOUND_SCHEMA_VERSION } from "./whatsapp-outbound-job.types";
 import { WhatsAppOutboundError } from "./whatsapp-outbound.errors";
 
-const FORBIDDEN_KEY_PATTERN = /token|secret|credential|password|authorization|bearer|valkey|postgres|databaseurl/i;
+const FORBIDDEN_KEY_PATTERN = /token|secret|credential|password|authorization|bearer|valkey|postgres|databaseurl|phoneNumberId|phone_number_id|wabaId|waba_id/i;
 
 function assertSafeObjectKeys(value: unknown): void {
   if (!value || typeof value !== "object") return;
@@ -29,13 +29,13 @@ function validateCommand(command: unknown): WhatsAppOutboundCommand {
   }
   const record = command as Record<string, unknown>;
   if (record.type === "agent_reply") {
-    if (!requiredString(record.to) || !requiredString(record.phoneNumberId) || !requiredString(record.replyText)) {
+    if (!requiredString(record.to) || !requiredString(record.replyText)) {
       throw new WhatsAppOutboundError("invalid_outbound_group");
     }
     return command as WhatsAppOutboundCommand;
   }
   if (record.type === "confirmed_order_receipt") {
-    if (!requiredString(record.to) || !requiredString(record.phoneNumberId) || !requiredString(record.confirmedOrderId)) {
+    if (!requiredString(record.to) || !requiredString(record.confirmedOrderId)) {
       throw new WhatsAppOutboundError("invalid_outbound_group");
     }
     return command as WhatsAppOutboundCommand;
@@ -44,7 +44,6 @@ function validateCommand(command: unknown): WhatsAppOutboundCommand {
     const runtimeDispatch = record.runtimeDispatch as Record<string, unknown> | undefined;
     if (
       !requiredString(record.to) ||
-      !requiredString(record.phoneNumberId) ||
       !requiredString(record.filePath) ||
       !requiredString(record.filename) ||
       !requiredString(record.caption) ||
@@ -73,15 +72,12 @@ export function validateWhatsAppOutboundResponseGroup(data: unknown): WhatsAppOu
     throw new WhatsAppOutboundError("unsupported_outbound_schema");
   }
   const recipient = record.recipient as Record<string, unknown> | undefined;
-  const sender = record.sender as Record<string, unknown> | undefined;
   const source = record.source as Record<string, unknown> | undefined;
   if (
     !requiredString(record.sellerId) ||
     !requiredString(record.conversationKey) ||
     !recipient ||
     !requiredString(recipient.waId) ||
-    !sender ||
-    !requiredString(sender.phoneNumberId) ||
     !source ||
     !requiredString(source.type) ||
     !requiredString(source.id) ||

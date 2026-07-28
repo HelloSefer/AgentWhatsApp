@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import { QueueEvents } from "bullmq";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { env } from "../../../config/env";
@@ -43,6 +43,7 @@ import {
 import {
   receiveWhatsAppCloudWebhook,
   setCloudWebhookProcessorForTesting,
+  setWhatsAppActiveConnectionResolverForTesting,
   setWhatsAppInboundProducerProviderForTesting,
 } from "../../../modules/whatsapp/cloud/whatsapp-cloud.controller";
 import {
@@ -67,6 +68,15 @@ dotenv.config();
 type TestCase = Readonly<{ name: string; passed: boolean; detail?: string }>;
 const cases: TestCase[] = [];
 const sellerIds: string[] = [];
+
+const phase8gOutboundConnectionResolver = Object.freeze({
+  resolveForTrustedSeller: async (sellerId: string) => ({
+    sellerId,
+    connectionId: "conn_phase8g",
+    phoneNumberId: "123456789012345",
+    accessToken: "token_phase8g",
+  }),
+});
 
 function add(name: string, passed: boolean, detail?: string): void {
   cases.push({ name, passed, ...(detail ? { detail } : {}) });
@@ -150,7 +160,6 @@ function group(sellerId: string, orderId: string, commandCount = 1): WhatsAppOut
     sellerId,
     conversationKey: `${sellerId}:212600088888`,
     recipient: { waId: "212600088888" },
-    sender: { phoneNumberId: "phone_phase8g" },
     source: { type: "confirmed_order_receipt", id: orderId },
     responseGroupId: `confirmed_order_receipt.${orderId}.confirmed_order_receipt`,
     responseGroupRole: "confirmed_order_receipt",
@@ -158,7 +167,6 @@ function group(sellerId: string, orderId: string, commandCount = 1): WhatsAppOut
     commands: Array.from({ length: commandCount }, () => ({
       type: "confirmed_order_receipt" as const,
       to: "212600088888",
-      phoneNumberId: "phone_phase8g",
       confirmedOrderId: orderId,
     })),
   };
@@ -286,6 +294,10 @@ async function runFlagAndReadinessChecks(): Promise<void> {
     whatsappTransactionalOutboxEnabled: true,
     whatsappCloudDryRun: true,
     whatsappCloudPhoneNumberId: env.whatsappCloudPhoneNumberId || "phone_phase8g",
+    whatsappConnectionTokenActiveKeyVersion: "phase8g",
+    whatsappConnectionTokenEncryptionKeysJson: JSON.stringify({
+      phase8g: randomBytes(32).toString("base64"),
+    }),
   }, async () => {
     const readiness = await buildWhatsAppPhase8RuntimeReadiness();
     add("27. readiness reports complete runtime correctly", readiness.effectiveFlags.completeQueuedRuntime === true);
@@ -309,6 +321,18 @@ async function runFlagAndReadinessChecks(): Promise<void> {
 }
 
 async function runWebhookQueueChecks(): Promise<void> {
+  setWhatsAppActiveConnectionResolverForTesting(async (phoneNumberId) => ({
+    sellerId: "seller_phase8g_controller",
+    connection: {
+      connectionId: "conn_phase8g_controller",
+      sellerId: "seller_phase8g_controller",
+      provider: "META_WHATSAPP_CLOUD_API",
+      status: "ACTIVE",
+      phoneNumberId,
+      createdAt: new Date("2026-07-26T00:00:00.000Z"),
+      updatedAt: new Date("2026-07-26T00:00:00.000Z"),
+    },
+  }));
   const manager = new QueueConnectionManager();
   const registry = new QueueRegistry(manager);
   registry.register(whatsappInboundQueueDefinition);
@@ -361,7 +385,7 @@ async function runWebhookQueueChecks(): Promise<void> {
       await worker.start();
       const messageId = `phase8g-http-${randomUUID()}`;
       const response = await invokeWebhook(webhookBody(messageId));
-      const jobId = buildWhatsAppInboundJobId("seller_demo_sandals", messageId);
+      const jobId = buildWhatsAppInboundJobId("seller_phase8g_controller", messageId);
       add("4. HTTP webhook returns fast 200 after inbound enqueue", response.statusCode === 200);
       add("5. HTTP does not await Agent processing", Boolean(await queue.getJob(jobId)) && !processed.includes(messageId));
       add("6. HTTP does not await outbound Cloud delivery", true);
@@ -414,6 +438,7 @@ async function runWebhookQueueChecks(): Promise<void> {
   } finally {
     allowHttpProbe();
     allowFirst();
+    setWhatsAppActiveConnectionResolverForTesting(undefined);
     setWhatsAppInboundProducerProviderForTesting(undefined);
     setCloudWebhookProcessorForTesting(undefined);
     await worker.close();
@@ -503,6 +528,7 @@ async function runOutboxAndOutboundChecks(): Promise<void> {
     });
     const persistedOnlyResult = await dispatchPreparedOutboundGroupDirectly(
       group(sellerId, persistedOnlyOrder),
+      { outboundConnectionResolver: phase8gOutboundConnectionResolver },
     );
     add("31. PostgreSQL snapshot fallback works when memory lookup misses",
       persistedOnlyResult.accepted === true &&
@@ -516,6 +542,7 @@ async function runOutboxAndOutboundChecks(): Promise<void> {
 
     const missingPersistedResult = await dispatchPreparedOutboundGroupDirectly(
       group(sellerId, unique("order_phase8g_missing_persisted")),
+      { outboundConnectionResolver: phase8gOutboundConnectionResolver },
     );
     add("33. failed outbox receipt delivery does not enqueue a fallback receipt",
       missingPersistedResult.commandResults.length === 1 &&

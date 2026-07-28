@@ -12,9 +12,6 @@ export type WhatsAppOutboundResponseGroup = Readonly<{
   recipient: Readonly<{
     waId: string;
   }>;
-  sender: Readonly<{
-    phoneNumberId: string;
-  }>;
   source: Readonly<{
     type: "inbound_message" | "confirmed_order_receipt" | "runtime_receipt";
     id: string;

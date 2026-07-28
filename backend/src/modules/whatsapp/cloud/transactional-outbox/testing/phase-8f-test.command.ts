@@ -83,12 +83,11 @@ function group(sellerId: string, orderId: string): WhatsAppOutboundResponseGroup
     sellerId,
     conversationKey: `${sellerId}:212600088888`,
     recipient: { waId: "212600088888" },
-    sender: { phoneNumberId: "phone_phase8f" },
     source: { type: "confirmed_order_receipt", id: orderId },
     responseGroupId: `confirmed_order_receipt.${orderId}.confirmed_order_receipt`,
     responseGroupRole: "confirmed_order_receipt",
     createdAt: "2026-07-26T00:00:00.000Z",
-    commands: [{ type: "confirmed_order_receipt", to: "212600088888", phoneNumberId: "phone_phase8f", confirmedOrderId: orderId }],
+    commands: [{ type: "confirmed_order_receipt", to: "212600088888", confirmedOrderId: orderId }],
   };
 }
 

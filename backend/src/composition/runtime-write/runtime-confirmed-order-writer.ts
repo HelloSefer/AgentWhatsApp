@@ -68,7 +68,6 @@ export class RuntimeConfirmedOrderWriter {
           snapshot: input.snapshot,
           conversationKey: input.durableReceiptOutbox.conversationKey,
           customerPhone: input.durableReceiptOutbox.customerPhone,
-          phoneNumberId: input.durableReceiptOutbox.phoneNumberId,
         })
         : undefined;
       const order = await this.confirmedOrderPersistenceService.persistConfirmedOrder(tenant, {
@@ -93,14 +92,12 @@ function buildConfirmedOrderReceiptGroup(input: Readonly<{
   snapshot: ConfirmedOrderSnapshot;
   conversationKey: string;
   customerPhone: string;
-  phoneNumberId: string;
 }>): WhatsAppOutboundResponseGroup {
   const group: WhatsAppOutboundResponseGroup = {
     schemaVersion: WHATSAPP_OUTBOUND_SCHEMA_VERSION,
     sellerId: input.sellerId,
     conversationKey: input.conversationKey,
     recipient: { waId: input.customerPhone },
-    sender: { phoneNumberId: input.phoneNumberId },
     source: { type: "confirmed_order_receipt", id: input.snapshot.id },
     responseGroupId: `confirmed_order_receipt.${input.snapshot.id}.confirmed_order_receipt`,
     responseGroupRole: "confirmed_order_receipt",
@@ -109,7 +106,6 @@ function buildConfirmedOrderReceiptGroup(input: Readonly<{
       {
         type: "confirmed_order_receipt",
         to: input.customerPhone,
-        phoneNumberId: input.phoneNumberId,
         confirmedOrderId: input.snapshot.id,
       },
     ],

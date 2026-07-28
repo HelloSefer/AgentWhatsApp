@@ -162,7 +162,6 @@ function group(input: {
     sellerId,
     conversationKey: `${sellerId}:212600000001`,
     recipient: { waId: "212600000001" },
-    sender: { phoneNumberId: "phone_phase8d" },
     source: { type: "inbound_message", id: sourceId },
     responseGroupId: `inbound_message.${sourceId}.${input.role || "agent_reply.main"}`,
     responseGroupRole: input.role || "agent_reply.main",
@@ -170,7 +169,6 @@ function group(input: {
     commands: commandTexts.map((text) => ({
       type: "agent_reply" as const,
       to: "212600000001",
-      phoneNumberId: "phone_phase8d",
       replyText: text,
       forceDryRun: true,
       cloudDryRunOverride: true,
@@ -178,6 +176,15 @@ function group(input: {
     })),
   };
 }
+
+const phase8dConnectionResolver = Object.freeze({
+  resolveForTrustedSeller: async (sellerId: string) => ({
+    sellerId,
+    connectionId: "conn_phase8d",
+    phoneNumberId: "123456789012345",
+    accessToken: "token_phase8d",
+  }),
+});
 
 async function expectsOutboundFailure(callback: () => Promise<unknown> | unknown, category: string): Promise<boolean> {
   try {
@@ -236,7 +243,7 @@ async function runArchitectureChecks(): Promise<void> {
   add("23. Inbound raw webhook body is absent", !/rawBody|entry|changes|messages/.test(producerSource + workerSource));
   add("24. Access tokens and credentials are absent", !/AccessToken|Bearer|credential|appSecret|verifyToken|VALKEY_URL|POSTGRES/i.test(producerSource + workerSource + await source("src/modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-command.types.ts")));
   add("25. Binary/base64 media payloads are absent", !/Buffer|base64|bytes/.test(await source("src/modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-command.types.ts")));
-  add("26. Required tenant, recipient, sender-routing, and source identity exist", /sellerId[\s\S]*recipient[\s\S]*sender[\s\S]*source/.test(await source("src/modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-job.types.ts")));
+  add("26. Required tenant, recipient, and source identity exist without sender routing", /sellerId[\s\S]*recipient[\s\S]*source/.test(await source("src/modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-job.types.ts")) && !/sender/.test(await source("src/modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-job.types.ts")));
   add("27. Job validation rejects unsupported schema", await expectsOutboundFailure(() => validateWhatsAppOutboundResponseGroup({ ...group(), schemaVersion: 2 }), "unsupported_outbound_schema"));
   add("28. Job validation rejects unsupported command types", await expectsOutboundFailure(() => validateWhatsAppOutboundResponseGroup({ ...group(), commands: [{ type: "bad" }] }), "unsupported_command"));
   add("29. Safe errors expose no credentials or full phone", new WhatsAppOutboundError("outbound_enqueue_failed").message === "WhatsApp outbound queue error: outbound_enqueue_failed");
@@ -266,7 +273,7 @@ async function runArchitectureChecks(): Promise<void> {
   add("53. Worker performs no rendering", !/buildCloudInteractiveFallbackText|generateAgentResult|replyText:/.test(workerSource));
   add("54. Worker performs no Agent/session/order mutation", !/generateAgentResult|updateConversation|runtimeStage|confirmedOrderWriter/.test(workerSource));
   add("55. Worker resolves credentials outside job data", /sendCloudText|postCloudMessage|sendDocument/.test(cloudSource) && !/AccessToken|Bearer/.test(workerSource));
-  add("56. Worker failure remains visible as failed BullMQ job", /throw new WhatsAppOutboundError\("outbound_transport_failed"\)/.test(workerSource));
+  add("56. Worker failure remains visible as failed BullMQ job", /outbound_transport_failed/.test(workerSource) && /outbound_transport_permanent_failed/.test(workerSource));
   add("57. No custom retry/backoff exists", whatsappOutboundJobOptions().attempts === 1);
   add("58. DLQ is Phase 8E-gated and has no Phase 8D worker", /whatsappQueueRetriesDlqEnabled === true/.test(compositionSource) && !/createManagedQueueWorker\([^)]*dlq/i.test(compositionSource));
   add("59. Worker closes gracefully", /close: \(\) => Promise/.test(await source("src/infrastructure/queue/lifecycle/worker-lifecycle.ts")));
@@ -357,7 +364,10 @@ async function runQueueRuntimeChecks(): Promise<void> {
     await blockingWorker.close();
 
     const completedGroup = group({ sourceId: `${suffix}.completed` });
-    const completedWorker = createWhatsAppOutboundWorker(manager, { concurrency: 4 }, definition);
+    const completedWorker = createWhatsAppOutboundWorker(manager, {
+      concurrency: 4,
+      outboundConnectionResolver: phase8dConnectionResolver,
+    }, definition);
     await completedWorker.start();
     const completed = await producer.dispatchOutboundGroup(completedGroup);
     await events.waitUntilReady();
@@ -388,7 +398,10 @@ async function runQueueRuntimeChecks(): Promise<void> {
     const registry2 = new QueueRegistry(manager2);
     registry2.register(failingDefinition);
     const producer2 = new WhatsAppOutboundProducerService(registry2, failingDefinition);
-    const failWorker = createWhatsAppOutboundWorker(manager2, { concurrency: 4 }, failingDefinition);
+    const failWorker = createWhatsAppOutboundWorker(manager2, {
+      concurrency: 4,
+      outboundConnectionResolver: phase8dConnectionResolver,
+    }, failingDefinition);
     const failQueue = registry2.getQueue<WhatsAppOutboundJobData, WhatsAppOutboundJobResult, WhatsAppOutboundJobName>(failingDefinition.name);
     await failWorker.start();
     await producer2.dispatchOutboundGroup({
@@ -396,7 +409,6 @@ async function runQueueRuntimeChecks(): Promise<void> {
       commands: [{
         type: "confirmed_order_receipt",
         to: "212600000001",
-        phoneNumberId: "phone_phase8d",
         confirmedOrderId: "missing_order_phase8d",
       }],
     });

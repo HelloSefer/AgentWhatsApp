@@ -55,10 +55,21 @@ export function classifyOutboundFailure(error: unknown): WhatsAppQueueFailureDec
     if (error.category === "outbound_transport_failed") {
       return { classification: "retryable", category: "temporary_cloud_failure", summary: error.category };
     }
+    if (error.category === "outbound_transport_permanent_failed") {
+      return { classification: "permanent", category: "permanent_recipient_or_payload_rejection", summary: error.category };
+    }
     if (error.category === "outbound_queue_unavailable" || error.category === "outbound_enqueue_failed") {
       return { classification: "retryable", category: "temporary_queue_failure", summary: error.category };
     }
     if (error.category === "missing_transport_routing_identity") {
+      return { classification: "permanent", category: "missing_routing_configuration", summary: error.category };
+    }
+    if (
+      error.category === "missing_active_connection" ||
+      error.category === "missing_connection_credentials" ||
+      error.category === "credential_decryption_failed" ||
+      error.category === "malformed_persisted_phone_number_id"
+    ) {
       return { classification: "permanent", category: "missing_routing_configuration", summary: error.category };
     }
     if (error.category === "unsupported_command" || error.category === "unsupported_outbound_schema") {

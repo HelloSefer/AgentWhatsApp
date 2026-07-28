@@ -9,7 +9,6 @@ export type WhatsAppOutboundCommandType =
 export type WhatsAppOutboundAgentReplyCommand = Readonly<{
   type: "agent_reply";
   to: string;
-  phoneNumberId: string;
   replyText: string;
   whatsappInteractivePreview?: WhatsAppInteractivePreview | null;
   interactiveSendDecision?: InteractiveSendDecision | null;
@@ -22,14 +21,12 @@ export type WhatsAppOutboundAgentReplyCommand = Readonly<{
 export type WhatsAppOutboundConfirmedOrderReceiptCommand = Readonly<{
   type: "confirmed_order_receipt";
   to: string;
-  phoneNumberId: string;
   confirmedOrderId: string;
 }>;
 
 export type WhatsAppOutboundRuntimeReceiptDocumentCommand = Readonly<{
   type: "runtime_receipt_document";
   to: string;
-  phoneNumberId: string;
   filePath: string;
   filename: string;
   caption: string;

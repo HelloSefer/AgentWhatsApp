@@ -14,6 +14,13 @@ import { whatsappOutboundDlqDefinition } from "../../modules/whatsapp/cloud/outb
 import { WhatsAppOutboundProducerService } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-producer.service";
 import { createWhatsAppOutboundWorker } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-worker.service";
 import { WhatsAppTransactionalOutboxPublisher, WhatsAppTransactionalOutboxRepository } from "../../modules/whatsapp/cloud/transactional-outbox";
+import { PersistentWhatsAppOutboundConnectionResolver } from "../../modules/whatsapp/cloud/outbound-connection/whatsapp-outbound-connection-resolver";
+import {
+  postgreSqlWhatsAppConnectionRepository,
+  WhatsAppConnectionCredentialEncryptionService,
+  WhatsAppConnectionCredentialService,
+} from "../../modules/whatsapp-connection";
+import { getWhatsAppConnectionCredentialEncryptionConfiguration } from "../../modules/whatsapp-connection/application/whatsapp-connection-credential-encryption.config";
 import { ValkeyConversationOrderingAdapter } from "../../modules/agent/conversation-ordering";
 import { WhatsAppDlqPublisher } from "../../modules/whatsapp/cloud/queue-reliability/whatsapp-dlq.publisher";
 import { isWhatsAppTransactionalOutboxEffective } from "../runtime-write/runtime-write-composition.runtime";
@@ -33,6 +40,7 @@ let outboxPublisher: WhatsAppTransactionalOutboxPublisher | undefined;
 let orderingCoordinator: ValkeyConversationOrderingAdapter | undefined;
 let inboundDlqPublisher: WhatsAppDlqPublisher | undefined;
 let outboundDlqPublisher: WhatsAppDlqPublisher | undefined;
+let outboundConnectionResolver: PersistentWhatsAppOutboundConnectionResolver | undefined;
 let started = false;
 let starting: Promise<void> | undefined;
 const lifecycleEvents: string[] = [];
@@ -115,8 +123,23 @@ export async function startWhatsAppInboundQueue(): Promise<void> {
     outboundProducer = env.whatsappOutboundQueueEnabled === true && effectiveFlags.outboundQueue
       ? new WhatsAppOutboundProducerService(registry)
       : undefined;
+    outboundConnectionResolver = env.whatsappOutboundQueueEnabled === true && effectiveFlags.outboundQueue
+      ? new PersistentWhatsAppOutboundConnectionResolver(
+          postgreSqlWhatsAppConnectionRepository,
+          new WhatsAppConnectionCredentialService(
+            postgreSqlWhatsAppConnectionRepository,
+            new WhatsAppConnectionCredentialEncryptionService(
+              getWhatsAppConnectionCredentialEncryptionConfiguration(),
+            ),
+          ),
+        )
+      : undefined;
     outboundWorker = env.whatsappOutboundQueueEnabled === true && effectiveFlags.outboundQueue
-      ? createWhatsAppOutboundWorker(connectionManager, { concurrency: 4, dlqPublisher: outboundDlqPublisher })
+      ? createWhatsAppOutboundWorker(connectionManager, {
+          concurrency: 4,
+          dlqPublisher: outboundDlqPublisher,
+          outboundConnectionResolver: outboundConnectionResolver!,
+        })
       : undefined;
     worker = createWhatsAppInboundWorker(connectionManager, orderingCoordinator, {
       concurrency: effectiveFlags.conversationOrdering ? 8 : undefined,
@@ -183,6 +206,7 @@ export async function shutdownWhatsAppInboundQueue(): Promise<void> {
   outboundProducer = undefined;
   inboundDlqPublisher = undefined;
   outboundDlqPublisher = undefined;
+  outboundConnectionResolver = undefined;
   orderingCoordinator = undefined;
   started = false;
 }
