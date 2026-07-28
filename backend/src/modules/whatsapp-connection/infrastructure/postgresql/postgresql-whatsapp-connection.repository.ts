@@ -179,6 +179,37 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
     }
   }
 
+  async findByPhoneNumberIdForSeller(tenant: TenantContext, phoneNumberId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
+    const normalizedPhoneNumberId = normalizeMetaId(phoneNumberId);
+    if (!normalizedPhoneNumberId) return null;
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `SELECT ${CONNECTION_COLUMNS} FROM whatsapp_connections WHERE seller_id = $1 AND phone_number_id = $2 ORDER BY created_at DESC LIMIT 1`,
+        values: [tenant.sellerId, normalizedPhoneNumberId],
+      });
+      return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
+    } catch (error) {
+      mapReadError(error);
+    }
+  }
+
+  async resolveByPhoneNumberId(phoneNumberId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<ActiveWhatsAppConnectionResolution | null> {
+    const normalizedPhoneNumberId = normalizeMetaId(phoneNumberId);
+    if (!normalizedPhoneNumberId) return null;
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `SELECT ${CONNECTION_COLUMNS} FROM whatsapp_connections WHERE phone_number_id = $1 LIMIT 1`,
+        values: [normalizedPhoneNumberId],
+      });
+      const row = result.rows[0];
+      if (!row) return null;
+      const connection = mapWhatsAppConnection(row);
+      return { sellerId: connection.sellerId, connection };
+    } catch (error) {
+      mapReadError(error);
+    }
+  }
+
   async resolveActiveByPhoneNumberId(phoneNumberId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<ActiveWhatsAppConnectionResolution | null> {
     const normalizedPhoneNumberId = normalizeMetaId(phoneNumberId);
     if (!normalizedPhoneNumberId) return null;

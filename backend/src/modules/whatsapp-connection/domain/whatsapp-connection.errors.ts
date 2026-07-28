@@ -45,3 +45,45 @@ export class WhatsAppConnectionCredentialEncryptionError extends Error {
     this.cause = cause;
   }
 }
+
+export class WhatsAppConnectionMetaConfigurationError extends Error {
+  constructor() {
+    super("Meta Embedded Signup configuration is unavailable.");
+    this.name = "WhatsAppConnectionMetaConfigurationError";
+  }
+}
+
+export class WhatsAppConnectionMetaTransportError extends Error {
+  constructor(readonly code: "configuration" | "auth" | "not_found" | "validation" | "unavailable") {
+    super("Meta Embedded Signup transport failed.");
+    this.name = "WhatsAppConnectionMetaTransportError";
+  }
+}
+
+export class WhatsAppConnectionCompletionValidationError extends Error {
+  constructor() {
+    super("WhatsApp Embedded Signup completion input is invalid.");
+    this.name = "WhatsAppConnectionCompletionValidationError";
+  }
+}
+
+export class WhatsAppConnectionCompletionAccessDeniedError extends Error {
+  constructor() {
+    super("WhatsApp Embedded Signup completion is not authorized.");
+    this.name = "WhatsAppConnectionCompletionAccessDeniedError";
+  }
+}
+
+export class WhatsAppConnectionCompletionConflictError extends Error {
+  constructor() {
+    super("WhatsApp Embedded Signup completion conflicts with existing state.");
+    this.name = "WhatsAppConnectionCompletionConflictError";
+  }
+}
+
+export class WhatsAppConnectionCompletionVerificationError extends Error {
+  constructor() {
+    super("WhatsApp Embedded Signup completion could not be verified.");
+    this.name = "WhatsAppConnectionCompletionVerificationError";
+  }
+}

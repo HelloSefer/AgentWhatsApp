@@ -15,6 +15,12 @@ export type {
 export {
   WhatsAppConnectionActiveAlreadyExistsError,
   WhatsAppConnectionCredentialEncryptionError,
+  WhatsAppConnectionCompletionAccessDeniedError,
+  WhatsAppConnectionCompletionConflictError,
+  WhatsAppConnectionCompletionValidationError,
+  WhatsAppConnectionCompletionVerificationError,
+  WhatsAppConnectionMetaConfigurationError,
+  WhatsAppConnectionMetaTransportError,
   WhatsAppConnectionPersistenceError,
   WhatsAppConnectionPhoneNumberAlreadyAssignedError,
   WhatsAppConnectionSellerNotFoundError,
