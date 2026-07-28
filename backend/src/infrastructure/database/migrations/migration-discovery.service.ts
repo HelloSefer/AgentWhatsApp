@@ -9,7 +9,7 @@ const MIGRATION_FILENAME = /^(\d{4,})[_-]([a-z0-9][a-z0-9_-]*)\.sql$/iu;
 export function getDefaultMigrationDirectory(): string {
   const compiledDirectory = path.resolve(__dirname, "sql");
   const sourceDirectory = path.resolve(process.cwd(), "src", "infrastructure", "database", "migrations", "sql");
-  return existsSync(compiledDirectory) ? compiledDirectory : sourceDirectory;
+  return existsSync(sourceDirectory) ? sourceDirectory : compiledDirectory;
 }
 
 export async function discoverDatabaseMigrations(directory = getDefaultMigrationDirectory()): Promise<readonly DatabaseMigration[]> {
