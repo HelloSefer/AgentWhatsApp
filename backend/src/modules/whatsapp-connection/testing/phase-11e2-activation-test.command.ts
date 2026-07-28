@@ -474,7 +474,7 @@ async function main(): Promise<void> {
   ) && isolation.transport.inspectCalls === 0);
 
   const requestBoundary = await fixture();
-  const controller = new WhatsAppConnectionController({} as never, requestBoundary.service);
+  const controller = new WhatsAppConnectionController({} as never, undefined, requestBoundary.service);
   const req = {
     tenant: requestBoundary.tenant,
     params: { connectionId: requestBoundary.candidate.connectionId },

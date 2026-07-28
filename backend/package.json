@@ -47,7 +47,8 @@
     "test:phase-11e2-activation": "node dist/modules/whatsapp-connection/testing/phase-11e2-activation-test.command.js",
     "test:phase-11f-dynamic-inbound-routing": "node dist/modules/whatsapp/cloud/inbound-queue/testing/phase-11f-dynamic-inbound-routing-test.command.js",
     "test:phase-11g-dynamic-outbound-connection": "node dist/modules/whatsapp/cloud/outbound-queue/testing/phase-11g-dynamic-outbound-connection-test.command.js",
-    "test:phase-11h-replacement-disconnect": "node dist/modules/whatsapp-connection/testing/phase-11h-replacement-disconnect-test.command.js"
+    "test:phase-11h-replacement-disconnect": "node dist/modules/whatsapp-connection/testing/phase-11h-replacement-disconnect-test.command.js",
+    "test:phase-11i-management-api": "node dist/modules/whatsapp-connection/testing/phase-11i-management-api-test.command.js"
   },
   "keywords": [],
   "author": "",

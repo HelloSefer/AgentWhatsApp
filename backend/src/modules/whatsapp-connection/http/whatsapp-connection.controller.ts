@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import type { AuthorizedRequest } from "../../auth/http/auth-request.types";
 import type { EmbeddedSignupCompletionService } from "../application/embedded-signup-completion.service";
+import type { WhatsAppConnectionCurrentService } from "../application/whatsapp-connection-current.service";
 import type { WhatsAppConnectionDisconnectService } from "../application/whatsapp-connection-disconnect.service";
 import type { WhatsAppConnectionFinalizationService } from "../application/whatsapp-connection-finalization.service";
 import { WhatsAppConnectionCompletionValidationError, WhatsAppConnectionDisconnectValidationError } from "../domain/whatsapp-connection.errors";
@@ -26,9 +27,21 @@ function strictCompletionBody(req: Request): Record<string, unknown> {
 export class WhatsAppConnectionController {
   constructor(
     private readonly completionService: EmbeddedSignupCompletionService,
+    private readonly currentService?: WhatsAppConnectionCurrentService,
     private readonly finalizationService?: WhatsAppConnectionFinalizationService,
     private readonly disconnectService?: WhatsAppConnectionDisconnectService,
   ) {}
+
+  getCurrentConnection = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      if (!this.currentService) throw new WhatsAppConnectionCompletionValidationError();
+      const authorized = req as AuthorizedRequest;
+      const result = await this.currentService.getCurrent(authorized.tenant);
+      return res.status(200).json(result);
+    } catch (error) {
+      return sendWhatsappConnectionError(res, error);
+    }
+  };
 
   completeEmbeddedSignup = async (req: Request, res: Response): Promise<Response> => {
     try {

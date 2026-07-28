@@ -24,6 +24,7 @@ export type EmbeddedSignupUiStatus =
 type UseMetaEmbeddedSignupInput = Readonly<{
   configState: MetaEmbeddedSignupConfigState;
   completionService?: EmbeddedSignupCompletionService;
+  onCompleted?: () => void | Promise<void>;
 }>;
 
 type PendingCompletion = Readonly<{
@@ -45,6 +46,7 @@ function sameAssets(left: EmbeddedSignupCompletionAssets | null, right: Embedded
 export function useMetaEmbeddedSignup({
   configState,
   completionService = httpEmbeddedSignupCompletionService,
+  onCompleted,
 }: UseMetaEmbeddedSignupInput) {
   const [status, setStatus] = useState<EmbeddedSignupUiStatus>(configState.isConfigured ? "idle" : "not_configured");
   const [message, setMessage] = useState<string | null>(null);
@@ -77,6 +79,7 @@ export function useMetaEmbeddedSignup({
       if (response.success) {
         setStatus("verified");
         setMessage("WhatsApp connection verified.");
+        await onCompleted?.();
         return;
       }
 
@@ -89,7 +92,7 @@ export function useMetaEmbeddedSignup({
       setStatus("error");
       setMessage(whatsappConnectionErrorMessage(error));
     }
-  }, [completionService]);
+  }, [completionService, onCompleted]);
 
   const handleLoginResponse = useCallback(
     (response: FacebookLoginResponse) => {

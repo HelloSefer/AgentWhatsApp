@@ -9,6 +9,8 @@ export const AUTH_PERMISSIONS = [
   "orders.manage",
   "conversation_config.read",
   "conversation_config.manage",
+  "whatsapp_connection.read",
+  "whatsapp_connection.manage",
   "memberships.read",
   "memberships.manage",
   "analytics.read",
@@ -28,6 +30,8 @@ export const ROLE_PERMISSIONS: Readonly<Record<AuthRole, readonly AuthPermission
     "orders.manage",
     "conversation_config.read",
     "conversation_config.manage",
+    "whatsapp_connection.read",
+    "whatsapp_connection.manage",
     "memberships.read",
     "analytics.read",
   ],
@@ -38,6 +42,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<AuthRole, readonly AuthPermission
     "orders.manage",
     "conversation_config.read",
     "analytics.read",
+    "whatsapp_connection.read",
   ],
   VIEWER: [
     "seller.read",
@@ -45,6 +50,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<AuthRole, readonly AuthPermission
     "orders.read",
     "conversation_config.read",
     "analytics.read",
+    "whatsapp_connection.read",
   ],
 });
 

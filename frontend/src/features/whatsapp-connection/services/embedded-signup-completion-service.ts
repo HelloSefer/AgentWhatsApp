@@ -8,6 +8,39 @@ export type EmbeddedSignupCompletionResponse = Readonly<{
   success: boolean;
 }>;
 
+export type WhatsAppConnectionStatus =
+  | "PENDING"
+  | "VERIFYING"
+  | "ACTIVE"
+  | "REPLACEMENT_PENDING"
+  | "ERROR"
+  | "DISCONNECTED"
+  | "REVOKED";
+
+export type CurrentWhatsAppConnection = Readonly<{
+  connectionId: string;
+  status: WhatsAppConnectionStatus;
+  maskedPhoneNumber: string | null;
+  verifiedName: string | null;
+  connectedAt: string | null;
+  lastVerifiedAt: string | null;
+  disconnectedAt: string | null;
+  isReplacement: boolean;
+}>;
+
+export type CurrentWhatsAppConnectionResponse = Readonly<{
+  connection: CurrentWhatsAppConnection | null;
+}>;
+
+export type DisconnectWhatsAppConnectionResponse = Readonly<{
+  disconnected: true;
+  connection: Readonly<{
+    connectionId: string;
+    status: "DISCONNECTED";
+    disconnectedAt: string | null;
+  }>;
+}>;
+
 export type WhatsappConnectionErrorCode =
   | "invalid_request"
   | "unauthenticated"
@@ -45,6 +78,8 @@ export class EmbeddedSignupCompletionServiceError extends Error implements SafeW
 
 export type EmbeddedSignupCompletionService = Readonly<{
   complete(input: CompleteEmbeddedSignupInput): Promise<EmbeddedSignupCompletionResponse>;
+  loadCurrent(): Promise<CurrentWhatsAppConnectionResponse>;
+  disconnect(connectionId: string): Promise<DisconnectWhatsAppConnectionResponse>;
 }>;
 
 function errorForStatus(response: Response): SafeWhatsappConnectionError {
@@ -91,10 +126,23 @@ async function requestJson<TResponse>(path: string, init: RequestInit): Promise<
 }
 
 export const httpEmbeddedSignupCompletionService: EmbeddedSignupCompletionService = {
-  complete(input) {
-    return requestJson<EmbeddedSignupCompletionResponse>("/api/whatsapp-connections/embedded-signup/complete", {
+  async complete(input) {
+    const response = await requestJson<{ verified?: unknown }>("/api/whatsapp-connections/embedded-signup/complete", {
       method: "POST",
       body: JSON.stringify(input),
+    });
+    return { success: response.verified === true };
+  },
+  loadCurrent() {
+    return requestJson<CurrentWhatsAppConnectionResponse>("/api/whatsapp-connections/current", {
+      method: "GET",
+      body: undefined,
+    });
+  },
+  disconnect(connectionId) {
+    return requestJson<DisconnectWhatsAppConnectionResponse>(`/api/whatsapp-connections/${encodeURIComponent(connectionId)}/disconnect`, {
+      method: "POST",
+      body: JSON.stringify({}),
     });
   },
 };

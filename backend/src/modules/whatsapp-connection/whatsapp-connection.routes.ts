@@ -5,6 +5,7 @@ import { requireAuthenticatedPrincipal, requirePermission } from "../auth/http/a
 import { rateLimitAuth } from "../auth/http/auth-rate-limit.middleware";
 import { getMetaEmbeddedSignupConfiguration } from "./application/meta-embedded-signup.config";
 import { EmbeddedSignupCompletionService } from "./application/embedded-signup-completion.service";
+import { WhatsAppConnectionCurrentService } from "./application/whatsapp-connection-current.service";
 import { WhatsAppConnectionFinalizationService } from "./application/whatsapp-connection-finalization.service";
 import { WhatsAppConnectionDisconnectService } from "./application/whatsapp-connection-disconnect.service";
 import { WhatsAppConnectionCredentialEncryptionService } from "./application/whatsapp-connection-credential-encryption.service";
@@ -39,7 +40,8 @@ export function createWhatsAppConnectionRoutes(
 ): Router {
   const router = Router();
   const authenticate = requireAuthenticatedPrincipal(authComposition.sessionAuthService);
-  const authorize = requirePermission(authComposition.authorizationService, "seller.manage");
+  const authorizeRead = requirePermission(authComposition.authorizationService, "whatsapp_connection.read");
+  const authorizeManage = requirePermission(authComposition.authorizationService, "whatsapp_connection.manage");
   const userIdentifier = (req: Request) => (req as Partial<{ auth?: { userId?: string } }>).auth?.userId ?? req.ip;
 
   const metaConfiguration = safeMetaConfiguration();
@@ -67,14 +69,22 @@ export function createWhatsAppConnectionRoutes(
     credentialService,
     metaTransport,
   );
+  const currentService = new WhatsAppConnectionCurrentService(postgreSqlWhatsAppConnectionRepository);
   const disconnectService = new WhatsAppConnectionDisconnectService(postgreSqlWhatsAppConnectionRepository);
-  const controller = new WhatsAppConnectionController(completionService, finalizationService, disconnectService);
+  const controller = new WhatsAppConnectionController(completionService, currentService, finalizationService, disconnectService);
+
+  router.get(
+    "/current",
+    authenticate,
+    authorizeRead,
+    controller.getCurrentConnection,
+  );
 
   router.post(
     "/embedded-signup/complete",
     authenticate,
     rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
-    authorize,
+    authorizeManage,
     controller.completeEmbeddedSignup,
   );
 
@@ -82,7 +92,7 @@ export function createWhatsAppConnectionRoutes(
     "/:connectionId/finalize",
     authenticate,
     rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
-    authorize,
+    authorizeManage,
     controller.finalizeConnection,
   );
 
@@ -90,7 +100,7 @@ export function createWhatsAppConnectionRoutes(
     "/:connectionId/disconnect",
     authenticate,
     rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
-    authorize,
+    authorizeManage,
     controller.disconnectConnection,
   );
 

@@ -1,73 +1,312 @@
 "use client";
 
-import { CheckCircle2, Loader2, MessageCircle, PlugZap, ShieldAlert } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, CheckCircle2, Loader2, MessageCircle, PlugZap, RefreshCw, ShieldAlert, Unplug } from "lucide-react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useAuthSession } from "@/features/auth/hooks/use-auth-session";
 import { getMetaEmbeddedSignupConfig } from "../config/meta-embedded-signup-config";
 import { useMetaEmbeddedSignup } from "../hooks/use-meta-embedded-signup";
+import {
+  httpEmbeddedSignupCompletionService,
+  type CurrentWhatsAppConnection,
+  type WhatsAppConnectionStatus,
+} from "../services/embedded-signup-completion-service";
+import { whatsappConnectionErrorMessage } from "../utils/whatsapp-connection-error-message";
 
-function statusCopy(status: ReturnType<typeof useMetaEmbeddedSignup>["status"], message: string | null): string {
-  if (message) return message;
-  if (status === "verified") return "WhatsApp connection verified.";
-  if (status === "cancelled") return "WhatsApp connection was cancelled.";
-  if (status === "error") return "WhatsApp connection could not be completed.";
-  return "Not connected.";
+const whatsappConnectionQueryKey = ["whatsapp-connection", "current"] as const;
+
+type ConfirmationKind = "replace" | "disconnect" | null;
+
+const STATUS_LABELS: Record<WhatsAppConnectionStatus, string> = {
+  PENDING: "Setup pending",
+  VERIFYING: "Verifying",
+  ACTIVE: "Connected",
+  REPLACEMENT_PENDING: "Replacement pending",
+  ERROR: "Needs retry",
+  DISCONNECTED: "Disconnected",
+  REVOKED: "Revoked",
+};
+
+function canManageWhatsApp(role: string | undefined): boolean {
+  return role === "OWNER" || role === "ADMIN";
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "Not available";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not available";
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function statusTone(status: WhatsAppConnectionStatus | null): "default" | "secondary" | "outline" | "destructive" {
+  if (status === "ACTIVE") return "default";
+  if (status === "ERROR" || status === "REVOKED") return "destructive";
+  if (status === "DISCONNECTED" || status === null) return "outline";
+  return "secondary";
+}
+
+function stateCopy(connection: CurrentWhatsAppConnection | null): { title: string; description: string } {
+  if (!connection) {
+    return {
+      title: "No WhatsApp connection",
+      description: "Connect a WhatsApp Business number through Meta Embedded Signup. AgentWhatsApp will use it only after backend verification.",
+    };
+  }
+
+  if (connection.status === "ACTIVE") {
+    return {
+      title: "WhatsApp is connected",
+      description: "Outbound replies and incoming messages use this verified active connection.",
+    };
+  }
+
+  if (connection.status === "REPLACEMENT_PENDING") {
+    return {
+      title: "Replacement setup is in progress",
+      description: "The current number remains active until the replacement is fully verified by the backend.",
+    };
+  }
+
+  if (connection.status === "PENDING" || connection.status === "VERIFYING") {
+    return {
+      title: "Setup is in progress",
+      description: "Refresh this page after backend verification completes. A duplicate connection launch is disabled while setup is active.",
+    };
+  }
+
+  if (connection.status === "ERROR") {
+    return {
+      title: "Connection needs attention",
+      description: "Retry the connection flow. Detailed Meta errors are kept out of the dashboard.",
+    };
+  }
+
+  return {
+    title: connection.status === "REVOKED" ? "Connection was revoked" : "Connection is disconnected",
+    description: "Connect again with a fresh verification flow when you are ready.",
+  };
+}
+
+function connectionDetails(connection: CurrentWhatsAppConnection): Array<{ label: string; value: string }> {
+  return [
+    { label: "Phone", value: connection.maskedPhoneNumber ?? "Not available" },
+    { label: "Business name", value: connection.verifiedName ?? "Not available" },
+    { label: "Connected", value: formatDate(connection.connectedAt) },
+    { label: "Last verified", value: formatDate(connection.lastVerifiedAt) },
+    ...(connection.disconnectedAt ? [{ label: "Disconnected", value: formatDate(connection.disconnectedAt) }] : []),
+  ];
 }
 
 export function WhatsappConnectionCard() {
+  const queryClient = useQueryClient();
+  const { memberships } = useAuthSession();
+  const currentRole = memberships[0]?.role;
+  const hasManagePermission = canManageWhatsApp(currentRole);
   const configState = getMetaEmbeddedSignupConfig();
-  const signup = useMetaEmbeddedSignup({ configState });
-  const isNotConfigured = !configState.isConfigured;
-  const buttonDisabled = isNotConfigured || !signup.canLaunch;
-  const isSuccess = signup.status === "verified";
-  const isError = signup.status === "error" || signup.status === "cancelled" || signup.status === "not_configured";
+  const [confirmation, setConfirmation] = useState<ConfirmationKind>(null);
+
+  const currentQuery = useQuery({
+    queryKey: whatsappConnectionQueryKey,
+    queryFn: () => httpEmbeddedSignupCompletionService.loadCurrent(),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const refreshCurrent = async () => {
+    await queryClient.invalidateQueries({ queryKey: whatsappConnectionQueryKey });
+  };
+
+  const signup = useMetaEmbeddedSignup({
+    configState,
+    onCompleted: refreshCurrent,
+  });
+
+  const disconnectMutation = useMutation({
+    mutationFn: (connectionId: string) => httpEmbeddedSignupCompletionService.disconnect(connectionId),
+    onSuccess: async () => {
+      setConfirmation(null);
+      await refreshCurrent();
+      toast.success("WhatsApp connection disconnected.");
+    },
+    onError: (error) => {
+      toast.error(whatsappConnectionErrorMessage(error));
+    },
+  });
+
+  const connection = currentQuery.data?.connection ?? null;
+  const copy = stateCopy(connection);
+  const isLoading = currentQuery.isLoading || (currentQuery.isFetching && !currentQuery.data);
+  const isSetupInProgress = connection?.status === "PENDING" || connection?.status === "VERIFYING" || connection?.status === "REPLACEMENT_PENDING";
+  const canLaunch = hasManagePermission && !isSetupInProgress && signup.canLaunch && !disconnectMutation.isPending;
+  const canDisconnect = hasManagePermission && connection?.status === "ACTIVE" && !signup.isBusy && !disconnectMutation.isPending;
+  const showConnect = !connection || connection.status === "DISCONNECTED" || connection.status === "REVOKED" || connection.status === "ERROR";
+
+  const statusMessage = useMemo(() => {
+    if (signup.isBusy || signup.message) return signup.message;
+    if (currentQuery.error) return "Connection status could not be loaded.";
+    if (!hasManagePermission) return "You can view this connection, but only workspace owners and admins can manage it.";
+    return null;
+  }, [currentQuery.error, hasManagePermission, signup.isBusy, signup.message]);
+
+  const launchSignup = () => {
+    if (!canLaunch) return;
+    void signup.launch();
+  };
+
+  const confirmReplace = () => {
+    setConfirmation(null);
+    launchSignup();
+  };
+
+  const confirmDisconnect = () => {
+    if (!connection || connection.status !== "ACTIVE") return;
+    disconnectMutation.mutate(connection.connectionId);
+  };
 
   return (
-    <Card className="rounded-2xl border-marketing-border bg-marketing-surface shadow-[0_18px_36px_-30px_oklch(0.2_0.04_155/0.35)]">
+    <Card className="rounded-lg border-marketing-border bg-marketing-surface shadow-[0_18px_36px_-30px_oklch(0.2_0.04_155/0.35)]">
       <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-semibold tracking-[0.1em] text-marketing-primary uppercase">Settings</p>
           <CardTitle className="mt-2 text-2xl font-semibold text-foreground">WhatsApp connection</CardTitle>
           <CardDescription className="mt-2 max-w-2xl leading-6">
-            Connect a WhatsApp Business account through Meta Embedded Signup. AgentWhatsApp will mark the setup complete only after backend verification.
+            Manage the WhatsApp Business number used by AgentWhatsApp. Connection state is always loaded from the backend.
           </CardDescription>
         </div>
-        <div aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-marketing-subtle text-marketing-primary ring-1 ring-marketing-border">
+        <div aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-marketing-subtle text-marketing-primary ring-1 ring-marketing-border">
           <MessageCircle className="size-5" />
         </div>
       </CardHeader>
+
       <CardContent className="space-y-5">
-        <div className="rounded-xl border border-marketing-border bg-marketing-canvas p-4">
-          <div className="flex items-start gap-3">
-            {isSuccess ? (
-              <CheckCircle2 aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-marketing-primary" />
-            ) : isError ? (
-              <ShieldAlert aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-destructive" />
-            ) : (
-              <PlugZap aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-            )}
-            <div className="min-w-0">
-              <p className="font-semibold text-foreground">{isSuccess ? "Verified" : isNotConfigured ? "Not configured" : "Disconnected"}</p>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">{statusCopy(signup.status, signup.message)}</p>
-              {isNotConfigured ? (
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                  Missing public Meta configuration: {configState.missingKeys.join(", ")}.
-                </p>
+        <div className="rounded-lg border border-marketing-border bg-marketing-canvas p-4">
+          {isLoading ? (
+            <div className="flex min-h-28 items-center gap-3" role="status">
+              <Loader2 aria-hidden="true" className="size-5 animate-spin text-muted-foreground motion-reduce:animate-none" />
+              <p className="text-sm text-muted-foreground">Loading WhatsApp connection status.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {connection?.status === "ACTIVE" ? (
+                      <CheckCircle2 aria-hidden="true" className="size-5 text-marketing-primary" />
+                    ) : connection?.status === "ERROR" || connection?.status === "REVOKED" ? (
+                      <ShieldAlert aria-hidden="true" className="size-5 text-destructive" />
+                    ) : (
+                      <PlugZap aria-hidden="true" className="size-5 text-muted-foreground" />
+                    )}
+                    <p className="font-semibold text-foreground">{copy.title}</p>
+                    <Badge variant={statusTone(connection?.status ?? null)}>{connection ? STATUS_LABELS[connection.status] : "Not connected"}</Badge>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">{copy.description}</p>
+                </div>
+                <Button className="min-h-11 w-full sm:w-auto" onClick={() => void refreshCurrent()} type="button" variant="outline">
+                  <RefreshCw aria-hidden="true" />
+                  Refresh
+                </Button>
+              </div>
+
+              {connection ? (
+                <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                  {connectionDetails(connection).map((item) => (
+                    <div className="min-w-0 rounded-lg border border-marketing-border bg-background px-3 py-2.5" key={item.label}>
+                      <dt className="text-xs font-medium text-muted-foreground">{item.label}</dt>
+                      <dd className="mt-1 break-words font-semibold text-foreground">{item.value}</dd>
+                    </div>
+                  ))}
+                </dl>
               ) : null}
             </div>
-          </div>
+          )}
         </div>
 
-        <Button
-          aria-busy={signup.isBusy}
-          className="min-h-11 w-full whitespace-normal text-center sm:w-auto"
-          disabled={buttonDisabled}
-          onClick={signup.launch}
-          type="button"
-        >
-          {signup.isBusy ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <PlugZap aria-hidden="true" />}
-          {signup.status === "finalizing" ? "Verifying..." : signup.isBusy ? "Connecting..." : "Connect WhatsApp"}
-        </Button>
+        {statusMessage ? (
+          <p className="rounded-lg border border-marketing-border bg-background px-3 py-2.5 text-sm leading-6 text-muted-foreground" role={currentQuery.error ? "alert" : "status"}>
+            {statusMessage}
+          </p>
+        ) : null}
+
+        {!configState.isConfigured ? (
+          <p className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm leading-6 text-foreground" role="alert">
+            WhatsApp Embedded Signup is not configured for this environment.
+          </p>
+        ) : null}
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          {showConnect ? (
+            <Button aria-busy={signup.isBusy} className="min-h-11 w-full sm:w-auto" disabled={!canLaunch} onClick={launchSignup} type="button">
+              {signup.isBusy ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <PlugZap aria-hidden="true" />}
+              {connection?.status === "ERROR" ? "Retry connection" : "Connect WhatsApp"}
+            </Button>
+          ) : null}
+
+          {connection?.status === "ACTIVE" ? (
+            <>
+              <Button className="min-h-11 w-full sm:w-auto" disabled={!canLaunch} onClick={() => setConfirmation("replace")} type="button" variant="outline">
+                <PlugZap aria-hidden="true" />
+                Replace number
+              </Button>
+              <Button className="min-h-11 w-full sm:w-auto" disabled={!canDisconnect} onClick={() => setConfirmation("disconnect")} type="button" variant="destructive">
+                {disconnectMutation.isPending ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <Unplug aria-hidden="true" />}
+                Disconnect
+              </Button>
+            </>
+          ) : null}
+        </div>
+
+        <Dialog open={confirmation === "replace"} onOpenChange={(open) => setConfirmation(open ? "replace" : null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Replace WhatsApp number?</DialogTitle>
+              <DialogDescription>
+                The current number remains active until the replacement is verified and activated by the backend.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose render={<Button className="min-h-11" type="button" variant="outline" />}>Cancel</DialogClose>
+              <Button className="min-h-11" disabled={!canLaunch} onClick={confirmReplace} type="button">
+                Start replacement
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={confirmation === "disconnect"} onOpenChange={(open) => setConfirmation(open ? "disconnect" : null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Disconnect WhatsApp?</DialogTitle>
+              <DialogDescription>
+                AgentWhatsApp will stop using this connection for new inbound or outbound runtime resolution. Existing conversations, orders, and history remain available.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm leading-6 text-foreground">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-destructive" />
+              <p>Reconnect later through a fresh verification flow.</p>
+            </div>
+            <DialogFooter>
+              <DialogClose render={<Button className="min-h-11" type="button" variant="outline" />}>Cancel</DialogClose>
+              <Button className="min-h-11" disabled={!canDisconnect} onClick={confirmDisconnect} type="button" variant="destructive">
+                {disconnectMutation.isPending ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <Unplug aria-hidden="true" />}
+                Disconnect
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );

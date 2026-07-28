@@ -386,7 +386,7 @@ async function main(): Promise<void> {
   add("Persisted identifiers are used for Meta operations", happy.transport.registeredPhoneIds[0] === happy.candidate.phoneNumberId && happy.transport.subscribedWabaIds[0] === happy.candidate.wabaId);
 
   const controllerFixture = await fixture();
-  const controller = new WhatsAppConnectionController({} as never, controllerFixture.service);
+  const controller = new WhatsAppConnectionController({} as never, undefined, controllerFixture.service);
   const req = {
     tenant: controllerFixture.tenant,
     params: { connectionId: controllerFixture.candidate.connectionId },

@@ -161,9 +161,9 @@ async function main(): Promise<void> {
     await cleanup(prefix, sellerIds);
 
     add("OWNER permission matrix", matrixMatches("OWNER", AUTH_PERMISSIONS));
-    add("ADMIN permission matrix", matrixMatches("ADMIN", ["seller.read", "catalog.read", "catalog.manage", "orders.read", "orders.manage", "conversation_config.read", "conversation_config.manage", "memberships.read", "analytics.read"]));
-    add("AGENT permission matrix", matrixMatches("AGENT", ["seller.read", "catalog.read", "orders.read", "orders.manage", "conversation_config.read", "analytics.read"]));
-    add("VIEWER permission matrix", matrixMatches("VIEWER", ["seller.read", "catalog.read", "orders.read", "conversation_config.read", "analytics.read"]));
+    add("ADMIN permission matrix", matrixMatches("ADMIN", ["seller.read", "catalog.read", "catalog.manage", "orders.read", "orders.manage", "conversation_config.read", "conversation_config.manage", "whatsapp_connection.read", "whatsapp_connection.manage", "memberships.read", "analytics.read"]));
+    add("AGENT permission matrix", matrixMatches("AGENT", ["seller.read", "catalog.read", "orders.read", "orders.manage", "conversation_config.read", "analytics.read", "whatsapp_connection.read"]));
+    add("VIEWER permission matrix", matrixMatches("VIEWER", ["seller.read", "catalog.read", "orders.read", "conversation_config.read", "analytics.read", "whatsapp_connection.read"]));
     add("Deny-by-default behavior", !roleHasPermission("ADMIN", "seller.manage") && !roleHasPermission("ADMIN", "memberships.manage"));
 
     const owner = await createUser(repository, prefix, "owner");
@@ -220,7 +220,7 @@ async function main(): Promise<void> {
     add("ADMIN denied memberships.manage", await expectsError(() => authorizationService.authorize({ principal: adminPrincipal, requestedSellerId: sellerA, permission: "memberships.manage" }), AuthorizationInsufficientPermissionError));
     add("AGENT denied catalog.manage", await expectsError(() => authorizationService.authorize({ principal: agentPrincipal, requestedSellerId: sellerA, permission: "catalog.manage" }), AuthorizationInsufficientPermissionError));
     add("AGENT allowed orders.manage", (await authorizationService.authorize({ principal: agentPrincipal, requestedSellerId: sellerA, permission: "orders.manage" })).tenant.sellerId === sellerA);
-    add("VIEWER denied all write permissions", await Promise.all(["seller.manage", "catalog.manage", "orders.manage", "conversation_config.manage", "memberships.manage"].map((permission) => expectsError(() => authorizationService.authorize({ principal: viewerPrincipal, requestedSellerId: sellerA, permission: permission as AuthPermission }), AuthorizationInsufficientPermissionError))).then((results) => results.every(Boolean)));
+    add("VIEWER denied all write permissions", await Promise.all(["seller.manage", "catalog.manage", "orders.manage", "conversation_config.manage", "whatsapp_connection.manage", "memberships.manage"].map((permission) => expectsError(() => authorizationService.authorize({ principal: viewerPrincipal, requestedSellerId: sellerA, permission: permission as AuthPermission }), AuthorizationInsufficientPermissionError))).then((results) => results.every(Boolean)));
 
     const revokedUser = await createUser(repository, prefix, "revoked");
     await repository.createSellerMembership({ sellerId: sellerB, userId: revokedUser.userId, role: "OWNER", status: "active" });
