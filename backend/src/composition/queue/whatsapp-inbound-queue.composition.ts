@@ -87,6 +87,7 @@ export async function startWhatsAppInboundQueue(): Promise<void> {
     const readiness = await buildWhatsAppPhase8RuntimeReadiness();
     const startupReady =
       readiness.dependencyIssues.length === 0 &&
+      readiness.checks.postgres.ok &&
       readiness.checks.valkey.ok &&
       readiness.checks.inboundQueue.ok &&
       readiness.checks.cloudRouting.ok &&
@@ -123,29 +124,26 @@ export async function startWhatsAppInboundQueue(): Promise<void> {
     outboundProducer = env.whatsappOutboundQueueEnabled === true && effectiveFlags.outboundQueue
       ? new WhatsAppOutboundProducerService(registry)
       : undefined;
-    outboundConnectionResolver = env.whatsappOutboundQueueEnabled === true && effectiveFlags.outboundQueue
-        ? (() => {
-          const encryptionService = new WhatsAppConnectionCredentialEncryptionService(
-            getWhatsAppConnectionCredentialEncryptionConfiguration(),
-          );
-          return new PersistentWhatsAppOutboundConnectionResolver(
-            postgreSqlWhatsAppConnectionRepository,
-            new WhatsAppConnectionCredentialService(
-              postgreSqlWhatsAppConnectionRepository,
-              encryptionService,
-            ),
-            encryptionService,
-          );
-        })()
-      : undefined;
+    const encryptionService = new WhatsAppConnectionCredentialEncryptionService(
+      getWhatsAppConnectionCredentialEncryptionConfiguration(),
+    );
+    outboundConnectionResolver = new PersistentWhatsAppOutboundConnectionResolver(
+      postgreSqlWhatsAppConnectionRepository,
+      new WhatsAppConnectionCredentialService(
+        postgreSqlWhatsAppConnectionRepository,
+        encryptionService,
+      ),
+      encryptionService,
+    );
     outboundWorker = env.whatsappOutboundQueueEnabled === true && effectiveFlags.outboundQueue
       ? createWhatsAppOutboundWorker(connectionManager, {
           concurrency: 4,
           dlqPublisher: outboundDlqPublisher,
-          outboundConnectionResolver: outboundConnectionResolver!,
+          outboundConnectionResolver,
         })
       : undefined;
     worker = createWhatsAppInboundWorker(connectionManager, orderingCoordinator, {
+      connectionResolver: outboundConnectionResolver,
       concurrency: effectiveFlags.conversationOrdering ? 8 : undefined,
       groupDispatcher: outboundProducer,
       dlqPublisher: inboundDlqPublisher,

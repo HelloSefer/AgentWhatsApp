@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, ArrowLeft, CheckCircle2, Circle, Loader2, ShieldCheck } from "lucide-react";
+import { AlertCircle, CheckCircle2, Circle, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FinalizeStage, SelectedConnectionSummary } from "./customer-owned-meta-app-wizard-types";
 import { CONNECTION_PROGRESS_ITEMS } from "./customer-owned-meta-app-wizard-view-models";
@@ -10,17 +10,17 @@ export function CustomerOwnedMetaAppConnectionStep({
   connectionSummary,
   error,
   stage,
-  onBack,
   onDone,
   onRetry,
+  onUpdateCredentials,
 }: Readonly<{
   connectionLabel: string;
   connectionSummary: SelectedConnectionSummary;
   error: string | null;
   stage: FinalizeStage;
-  onBack: () => void;
   onDone: () => void;
   onRetry: () => void;
+  onUpdateCredentials: () => void;
 }>) {
   const configured = stage === "configured" || stage === "finalizing" || stage === "done";
   const finalized = stage === "done";
@@ -118,9 +118,9 @@ export function CustomerOwnedMetaAppConnectionStep({
 
       <div className="flex flex-col justify-between gap-2 border-t border-marketing-border pt-4 sm:flex-row">
         {stage !== "done" ? (
-          <Button className="min-h-11 w-full sm:w-auto" disabled={isBusy} onClick={onBack} type="button" variant="outline">
-            <ArrowLeft aria-hidden="true" />
-            Back
+          <Button className="min-h-11 w-full sm:w-auto" disabled={isBusy} onClick={onUpdateCredentials} type="button" variant="outline">
+            <KeyRound aria-hidden="true" />
+            Update Meta credentials
           </Button>
         ) : <span aria-hidden="true" />}
         {stage === "done" ? (

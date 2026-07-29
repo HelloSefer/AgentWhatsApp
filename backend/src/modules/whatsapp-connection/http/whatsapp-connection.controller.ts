@@ -106,6 +106,23 @@ export class WhatsAppConnectionController {
     }
   };
 
+  replaceManualCredentials = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      if (!this.manualSetupService) throw new WhatsAppConnectionCredentialEncryptionError();
+      const authorized = req as AuthorizedRequest;
+      const connectionId = typeof req.params.connectionId === "string" ? req.params.connectionId : "";
+      const body = strictManualSetupBody(req);
+      const result = await this.manualSetupService.replaceCredentials(authorized.tenant, connectionId, {
+        appId: body.appId as string,
+        appSecret: body.appSecret as string,
+        systemUserAccessToken: body.systemUserAccessToken as string,
+      });
+      return res.status(200).json(result);
+    } catch (error) {
+      return sendWhatsappConnectionError(res, error);
+    }
+  };
+
   discoverManualAssets = async (req: Request, res: Response): Promise<Response> => {
     try {
       if (!this.manualAssetsService) throw new WhatsAppConnectionCredentialEncryptionError();

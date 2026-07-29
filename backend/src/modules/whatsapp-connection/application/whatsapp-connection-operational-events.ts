@@ -1,3 +1,8 @@
+import type {
+  ManualConnectionValidationIssueCode,
+  WhatsAppConnectionMetaOperation,
+} from "../domain/whatsapp-connection.errors";
+
 export type WhatsAppConnectionAuditEventName =
   | "whatsapp_connection.signup_completed"
   | "whatsapp_connection.verification_failed"
@@ -19,7 +24,10 @@ export type WhatsAppConnectionAuditEventName =
   | "whatsapp_connection.manual_readiness_failed"
   | "whatsapp_connection.manual_phone_registration_confirmed"
   | "whatsapp_connection.manual_connection_activated"
-  | "whatsapp_connection.manual_replacement_completed";
+  | "whatsapp_connection.manual_replacement_completed"
+  | "whatsapp_connection.manual_setup_failed"
+  | "whatsapp_connection.manual_token_source_resolved"
+  | "whatsapp_connection.manual_meta_graph_failed";
 
 export type WhatsAppConnectionMetricName =
   | "whatsapp_connections_active_total"
@@ -45,11 +53,39 @@ export type SafeWhatsAppConnectionReason =
   | "missing_connection_credentials"
   | "malformed_persisted_phone_number_id";
 
+export type ManualConnectionSetupOperationStage =
+  | "encryption_service_initialization"
+  | "input_validation"
+  | "credential_verification"
+  | "verify_token_generation"
+  | "app_secret_encryption"
+  | "system_user_access_token_encryption"
+  | "webhook_verify_token_encryption"
+  | "existing_draft_lookup"
+  | "draft_create"
+  | "credential_persistence"
+  | "transaction_commit"
+  | "safe_response_mapping";
+
+export type ManualConnectionSetupErrorCode =
+  | "WHATSAPP_CREDENTIAL_ENCRYPTION_UNAVAILABLE"
+  | "MANUAL_CONNECTION_SETUP_FAILED";
+
 export type WhatsAppConnectionOperationalPayload = Readonly<{
   sellerId?: string;
   connectionId?: string;
   status?: string;
   reason?: SafeWhatsAppConnectionReason;
+  connectionMethod?: "CUSTOMER_OWNED_META_APP";
+  operationStage?: ManualConnectionSetupOperationStage;
+  errorCode?: ManualConnectionSetupErrorCode;
+  draftMode?: "create" | "reuse" | "unknown";
+  metaOperation?: WhatsAppConnectionMetaOperation;
+  httpStatus?: number | null;
+  metaErrorCode?: number | null;
+  metaErrorSubcode?: number | null;
+  issueCode?: ManualConnectionValidationIssueCode;
+  tokenSource?: "encrypted_connection_token" | "legacy_global_token";
   timestamp: string;
 }>;
 
@@ -65,10 +101,19 @@ function timestamp(): string {
 
 function safePayload(payload: Omit<WhatsAppConnectionOperationalPayload, "timestamp">): WhatsAppConnectionOperationalPayload {
   return {
-    ...(payload.sellerId ? { sellerId: payload.sellerId } : {}),
     ...(payload.connectionId ? { connectionId: payload.connectionId } : {}),
     ...(payload.status ? { status: payload.status } : {}),
     ...(payload.reason ? { reason: payload.reason } : {}),
+    ...(payload.connectionMethod ? { connectionMethod: payload.connectionMethod } : {}),
+    ...(payload.operationStage ? { operationStage: payload.operationStage } : {}),
+    ...(payload.errorCode ? { errorCode: payload.errorCode } : {}),
+    ...(payload.draftMode ? { draftMode: payload.draftMode } : {}),
+    ...(payload.metaOperation ? { metaOperation: payload.metaOperation } : {}),
+    ...(payload.httpStatus !== undefined ? { httpStatus: payload.httpStatus } : {}),
+    ...(payload.metaErrorCode !== undefined ? { metaErrorCode: payload.metaErrorCode } : {}),
+    ...(payload.metaErrorSubcode !== undefined ? { metaErrorSubcode: payload.metaErrorSubcode } : {}),
+    ...(payload.issueCode ? { issueCode: payload.issueCode } : {}),
+    ...(payload.tokenSource ? { tokenSource: payload.tokenSource } : {}),
     timestamp: timestamp(),
   };
 }

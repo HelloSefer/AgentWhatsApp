@@ -8,7 +8,12 @@ export type AuthRateLimitAction =
   | "password_forgot_request"
   | "google_start"
   | "onboarding_workspace_create"
-  | "onboarding_logo_mutation";
+  | "onboarding_logo_mutation"
+  | "manual_whatsapp_setup"
+  | "manual_whatsapp_discover"
+  | "manual_whatsapp_select_assets"
+  | "manual_whatsapp_configure_webhook"
+  | "manual_whatsapp_finalize";
 
 export type AuthRateLimitDecision = Readonly<{
   allowed: boolean;
@@ -35,6 +40,11 @@ const POLICY: Readonly<Record<AuthRateLimitAction, Readonly<{ limit: number; win
   google_start: { limit: 20, windowSeconds: 10 * 60 },
   onboarding_workspace_create: { limit: 5, windowSeconds: 15 * 60 },
   onboarding_logo_mutation: { limit: 5, windowSeconds: 15 * 60 },
+  manual_whatsapp_setup: { limit: 5, windowSeconds: 15 * 60 },
+  manual_whatsapp_discover: { limit: 20, windowSeconds: 15 * 60 },
+  manual_whatsapp_select_assets: { limit: 20, windowSeconds: 15 * 60 },
+  manual_whatsapp_configure_webhook: { limit: 10, windowSeconds: 15 * 60 },
+  manual_whatsapp_finalize: { limit: 10, windowSeconds: 15 * 60 },
 });
 
 function sha256(value: string): string {

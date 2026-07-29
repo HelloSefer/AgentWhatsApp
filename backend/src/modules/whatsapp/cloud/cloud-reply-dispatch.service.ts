@@ -29,6 +29,7 @@ export class CloudReplyDispatchService {
     to: string;
     phoneNumberId?: string;
     accessToken?: string;
+    allowGlobalCredentialFallback?: boolean;
     replyText: string;
     whatsappInteractivePreview?: WhatsAppInteractivePreview | null;
     interactiveSendDecision?: InteractiveSendDecision | null;
@@ -58,6 +59,7 @@ export class CloudReplyDispatchService {
         to: input.to,
         phoneNumberId: input.phoneNumberId,
         accessToken: input.accessToken,
+        allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
         text: input.replyText,
         forceDryRun: effectiveForceDryRun,
       });
@@ -96,6 +98,7 @@ export class CloudReplyDispatchService {
         to: input.to,
         phoneNumberId: input.phoneNumberId,
         accessToken: input.accessToken,
+        allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
         text: input.replyText,
       });
       const result: CloudReplyDispatchResult = {
@@ -136,6 +139,7 @@ export class CloudReplyDispatchService {
         to: input.to,
         phoneNumberId: input.phoneNumberId,
         accessToken: input.accessToken,
+        allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
         text: input.replyText,
         forceDryRun: true,
       });
@@ -172,6 +176,7 @@ export class CloudReplyDispatchService {
       to: input.to,
       phoneNumberId: input.phoneNumberId,
       accessToken: input.accessToken,
+      allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
       interactivePreview: input.whatsappInteractivePreview as WhatsAppInteractivePreview,
       forceDryRun: effectiveForceDryRun,
     });
@@ -205,6 +210,7 @@ export class CloudReplyDispatchService {
       to: input.to,
       phoneNumberId: input.phoneNumberId,
       accessToken: input.accessToken,
+      allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
       text: input.replyText,
       forceDryRun: effectiveForceDryRun,
     });

@@ -39,7 +39,6 @@ function createOutboundProcessor(
       console.log(JSON.stringify({
         event: "whatsapp.outbound_queue.dispatch_started",
         jobId: job.id,
-        sellerId: group.sellerId,
         recipient: maskRecipient(group.recipient.waId),
         commandCount: group.commands.length,
         startCommandIndex: progress.nextCommandIndex,

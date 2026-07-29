@@ -1,14 +1,20 @@
 import type { Request, Response } from "express";
 import { env } from "../../config/env";
 import { conversationKeyService } from "../agent/identity/conversation-key.service";
-import { sellerResolverService } from "../agent/identity/seller-resolver.service";
 import { updateConversationOrderState } from "../agent/session/conversation-session.service";
+import {
+  postgreSqlWhatsAppConnectionRepository,
+  WhatsAppConnectionCredentialEncryptionService,
+  WhatsAppConnectionCredentialService,
+} from "../whatsapp-connection";
+import { getWhatsAppConnectionCredentialEncryptionConfiguration } from "../whatsapp-connection/application/whatsapp-connection-credential-encryption.config";
 import {
   recordOrderFormOpened,
   recordOrderFormSubmitted,
   recordOrderFormTokenInvalid,
   sendCloudText,
 } from "../whatsapp/cloud/whatsapp-cloud.service";
+import { PersistentWhatsAppOutboundConnectionResolver } from "../whatsapp/cloud/outbound-connection/whatsapp-outbound-connection-resolver";
 import {
   buildOrderFormConfirmationSummary,
   createOrderFormToken,
@@ -95,9 +101,48 @@ export async function submitOrderForm(req: Request, res: Response) {
     });
   }
 
-  const sellerId = sellerResolverService.resolveSellerIdByPhoneNumberId(
-    tokenResult.payload.phoneNumberId,
-  );
+  const activeConnection =
+    await postgreSqlWhatsAppConnectionRepository.resolveActiveByPhoneNumberId(
+      tokenResult.payload.phoneNumberId,
+    );
+  if (!activeConnection) {
+    return res.status(409).json({
+      ok: false,
+      message: "WhatsApp connection is unavailable.",
+    });
+  }
+  let resolvedConnection: Awaited<
+    ReturnType<PersistentWhatsAppOutboundConnectionResolver["resolveForTrustedSeller"]>
+  >;
+  try {
+    const encryptionService = new WhatsAppConnectionCredentialEncryptionService(
+      getWhatsAppConnectionCredentialEncryptionConfiguration(),
+    );
+    resolvedConnection =
+      await new PersistentWhatsAppOutboundConnectionResolver(
+        postgreSqlWhatsAppConnectionRepository,
+        new WhatsAppConnectionCredentialService(
+          postgreSqlWhatsAppConnectionRepository,
+          encryptionService,
+        ),
+        encryptionService,
+      ).resolveForTrustedSeller(activeConnection.sellerId);
+  } catch {
+    return res.status(409).json({
+      ok: false,
+      message: "WhatsApp connection is unavailable.",
+    });
+  }
+  if (
+    resolvedConnection.phoneNumberId !== tokenResult.payload.phoneNumberId
+    || resolvedConnection.tokenSource !== "encrypted_connection_token"
+  ) {
+    return res.status(409).json({
+      ok: false,
+      message: "WhatsApp connection is unavailable.",
+    });
+  }
+  const sellerId = resolvedConnection.sellerId;
   const customerPhone = tokenResult.payload.waId;
   const conversationKey = conversationKeyService.buildConversationKey(
     sellerId,
@@ -126,7 +171,9 @@ export async function submitOrderForm(req: Request, res: Response) {
   const summary = buildOrderFormConfirmationSummary(order);
   const sendResult = await sendCloudText({
     to: tokenResult.payload.waId,
-    phoneNumberId: tokenResult.payload.phoneNumberId,
+    phoneNumberId: resolvedConnection.phoneNumberId,
+    accessToken: resolvedConnection.accessToken,
+    allowGlobalCredentialFallback: false,
     text: summary,
   });
 

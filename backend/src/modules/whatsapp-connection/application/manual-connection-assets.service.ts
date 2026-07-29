@@ -3,16 +3,20 @@ import { withTransaction } from "../../../infrastructure/database";
 import type { ManualWhatsAppConnectionRepository } from "../contracts/whatsapp-connection.repository";
 import {
   ManualConnectionValidationError,
+  manualMetaTransportIssueCode,
   WhatsAppConnectionCompletionConflictError,
   WhatsAppConnectionCredentialEncryptionError,
+  type WhatsAppConnectionMetaOperation,
   WhatsAppConnectionMetaTransportError,
   WhatsAppConnectionPersistenceError,
   WhatsAppConnectionPhoneNumberAlreadyAssignedError,
   WhatsAppConnectionValidationError,
 } from "../domain/whatsapp-connection.errors";
 import type { WhatsAppConnection } from "../domain/whatsapp-connection.types";
-import { normalizeConnectionId, normalizeMetaId } from "../domain/whatsapp-connection.validation";
+import { normalizeConnectionId } from "../domain/whatsapp-connection.validation";
 import type { ManualMetaAppTransport, ManualMetaPhoneNumber, ManualMetaWaba } from "../infrastructure/meta/manual-meta-app.transport";
+import { missingManualSystemUserRequiredScope } from "./manual-system-user-token-validation";
+import { recordWhatsAppConnectionAudit } from "./whatsapp-connection-operational-events";
 import type { WhatsAppConnectionCredentialEncryptionService } from "./whatsapp-connection-credential-encryption.service";
 
 export type ManualConnectionDiscoveryResult = Readonly<{
@@ -56,8 +60,16 @@ export type ManualConnectionSelectAssetsResult = Readonly<{
 }>;
 
 type TransactionRunner = <Result>(callback: (transaction: DatabaseTransactionExecutor) => Promise<Result>) => Promise<Result>;
+const META_ASSET_ID_MAX_LENGTH = 32;
 
-const REQUIRED_SCOPES = ["business_management", "whatsapp_business_management", "whatsapp_business_messaging"] as const;
+function normalizeManualAssetId(value: unknown): string {
+  if (typeof value !== "string") throw new WhatsAppConnectionValidationError();
+  const normalized = value.trim();
+  if (!normalized || normalized.length > META_ASSET_ID_MAX_LENGTH || !/^[0-9]+$/u.test(normalized)) {
+    throw new WhatsAppConnectionValidationError();
+  }
+  return normalized;
+}
 
 function maskPhoneNumber(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -72,14 +84,40 @@ function assertManualDraft(connection: WhatsAppConnection | null): WhatsAppConne
   return connection;
 }
 
+async function withMetaOperation<Result>(
+  operation: WhatsAppConnectionMetaOperation,
+  callback: () => Promise<Result>,
+): Promise<Result> {
+  try {
+    return await callback();
+  } catch (error) {
+    if (error instanceof WhatsAppConnectionMetaTransportError && !error.operation) {
+      throw new WhatsAppConnectionMetaTransportError(error.code, {
+        operation,
+        httpStatus: error.httpStatus,
+        metaErrorCode: error.metaErrorCode,
+      });
+    }
+    throw error;
+  }
+}
+
 function classifyTransport(error: unknown): never {
   if (error instanceof ManualConnectionValidationError) throw error;
   if (error instanceof WhatsAppConnectionCredentialEncryptionError) throw new ManualConnectionValidationError("META_APP_CREDENTIALS_INVALID");
   if (error instanceof WhatsAppConnectionPhoneNumberAlreadyAssignedError) throw new WhatsAppConnectionCompletionConflictError();
   if (error instanceof WhatsAppConnectionMetaTransportError) {
-    if (error.code === "auth") throw new ManualConnectionValidationError("META_TOKEN_INVALID");
-    if (error.code === "validation") throw new ManualConnectionValidationError("META_ASSET_DISCOVERY_FAILED");
-    throw new ManualConnectionValidationError("META_ASSET_DISCOVERY_FAILED");
+    const issueCode = manualMetaTransportIssueCode(error);
+    if (error.operation) {
+      recordWhatsAppConnectionAudit("whatsapp_connection.manual_meta_graph_failed", {
+        metaOperation: error.operation,
+        httpStatus: error.httpStatus,
+        metaErrorCode: error.metaErrorCode,
+        metaErrorSubcode: error.metaErrorSubcode,
+        issueCode,
+      });
+    }
+    throw new ManualConnectionValidationError(issueCode);
   }
   if (error instanceof WhatsAppConnectionCompletionConflictError || error instanceof WhatsAppConnectionValidationError) throw error;
   throw new WhatsAppConnectionPersistenceError(error);
@@ -112,7 +150,15 @@ export class ManualConnectionAssetsService {
     const connection = assertManualDraft(await this.repository.findByConnectionId(tenant, normalizeConnectionId(connectionId)));
     try {
       const context = await this.validateStoredCredentials(tenant, connection);
-      const { wabas, phonesByWaba } = await this.discoverAssets(context.systemUserId, context.systemUserAccessToken);
+      const { wabas, phonesByWaba } = await this.discoverAssets(
+        context.systemUserId,
+        context.systemUserAccessToken,
+        context.assignedWabaIds,
+      );
+      const current = assertManualDraft(await this.repository.findByConnectionId(tenant, connection.connectionId));
+      if (current.updatedAt.getTime() !== connection.updatedAt.getTime()) {
+        throw new WhatsAppConnectionCompletionConflictError();
+      }
       return {
         connectionId: connection.connectionId,
         validation: { valid: true, tokenType: "SYSTEM_USER", expiresAt: context.expiresAt ? context.expiresAt.toISOString() : null },
@@ -124,14 +170,16 @@ export class ManualConnectionAssetsService {
   }
 
   async selectAssets(tenant: TenantContext, connectionId: string, rawInput: ManualConnectionSelectAssetsInput): Promise<ManualConnectionSelectAssetsResult> {
-    const wabaId = normalizeMetaId(rawInput.wabaId);
-    const phoneNumberId = normalizeMetaId(rawInput.phoneNumberId);
-    if (!wabaId || !phoneNumberId) throw new WhatsAppConnectionValidationError();
+    const wabaId = normalizeManualAssetId(rawInput.wabaId);
+    const phoneNumberId = normalizeManualAssetId(rawInput.phoneNumberId);
     const connection = assertManualDraft(await this.repository.findByConnectionId(tenant, normalizeConnectionId(connectionId)));
     try {
       const selected = await this.validateSelection(tenant, connection, wabaId, phoneNumberId);
       const updated = await this.transactionRunner(async (executor) => {
         const current = assertManualDraft(await this.repository.findByConnectionId(tenant, connection.connectionId, { executor }));
+        if (current.updatedAt.getTime() !== connection.updatedAt.getTime()) {
+          throw new WhatsAppConnectionCompletionConflictError();
+        }
         const withMetadata = await this.repository.persistVerifiedMetadata(tenant, current.connectionId, {
           wabaId,
           phoneNumberId,
@@ -164,14 +212,49 @@ export class ManualConnectionAssetsService {
     const assigned = await this.repository.resolveByPhoneNumberId(phoneNumberId);
     if (assigned && assigned.sellerId !== tenant.sellerId) throw new WhatsAppConnectionPhoneNumberAlreadyAssignedError();
     const context = await this.validateStoredCredentials(tenant, connection);
-    const { wabas, phonesByWaba } = await this.discoverAssets(context.systemUserId, context.systemUserAccessToken);
-    if (!wabas.some((waba) => waba.id === wabaId)) throw new ManualConnectionValidationError("META_WABA_ACCESS_MISSING");
-    const selected = (phonesByWaba.get(wabaId) ?? []).find((phone) => phone.id === phoneNumberId);
-    if (!selected) throw new ManualConnectionValidationError("META_ASSET_DISCOVERY_FAILED");
-    return selected;
+    if (!this.metaTransport.readWaba) throw new ManualConnectionValidationError("META_GRAPH_REQUEST_REJECTED");
+    const waba = await withMetaOperation(
+      "read_waba",
+      () => this.metaTransport.readWaba!(wabaId, context.systemUserAccessToken),
+    );
+    if (waba.id !== wabaId) throw new ManualConnectionValidationError("META_WABA_NOT_FOUND");
+    if (!this.metaTransport.readPhoneNumber) throw new ManualConnectionValidationError("META_GRAPH_REQUEST_REJECTED");
+    const selected = await withMetaOperation(
+      "read_phone_number",
+      () => this.metaTransport.readPhoneNumber!(phoneNumberId, context.systemUserAccessToken),
+    );
+    if (selected.id !== phoneNumberId) throw new ManualConnectionValidationError("META_PHONE_NOT_FOUND");
+    const wabaPhones = await withMetaOperation(
+      "list_waba_phone_numbers",
+      () => this.metaTransport.listPhoneNumbers(wabaId, context.systemUserAccessToken),
+    );
+    const member = wabaPhones.find((phone) => phone.id === phoneNumberId && phone.wabaId === wabaId);
+    if (!member) throw new ManualConnectionValidationError("META_PHONE_WABA_MISMATCH");
+    if (
+      selected.displayPhoneNumber
+      && member.displayPhoneNumber
+      && selected.displayPhoneNumber !== member.displayPhoneNumber
+    ) {
+      throw new ManualConnectionValidationError("META_GRAPH_REQUEST_REJECTED");
+    }
+    if (
+      selected.verifiedName
+      && member.verifiedName
+      && selected.verifiedName !== member.verifiedName
+    ) {
+      throw new ManualConnectionValidationError("META_GRAPH_REQUEST_REJECTED");
+    }
+    return {
+      ...selected,
+      wabaId,
+      displayPhoneNumber: selected.displayPhoneNumber ?? member.displayPhoneNumber,
+      verifiedName: selected.verifiedName ?? member.verifiedName,
+      qualityRating: selected.qualityRating ?? member.qualityRating,
+      status: selected.status ?? member.status,
+    };
   }
 
-  private async validateStoredCredentials(tenant: TenantContext, connection: WhatsAppConnection): Promise<{ systemUserId: string; systemUserAccessToken: string; expiresAt: Date | null }> {
+  private async validateStoredCredentials(tenant: TenantContext, connection: WhatsAppConnection): Promise<{ systemUserId: string; systemUserAccessToken: string; expiresAt: Date | null; assignedWabaIds: readonly string[] }> {
     if (!this.encryptionService || !connection.metaAppId) throw new ManualConnectionValidationError("META_APP_CREDENTIALS_INVALID");
     const storage = await this.repository.findManualCredentialStorage(tenant, connection.connectionId);
     if (!storage) throw new ManualConnectionValidationError("META_APP_CREDENTIALS_INVALID");
@@ -183,28 +266,72 @@ export class ManualConnectionAssetsService {
     } catch {
       throw new ManualConnectionValidationError("META_APP_CREDENTIALS_INVALID");
     }
-    const inspection = await this.metaTransport.inspectSystemUserToken(connection.metaAppId, appSecret, systemUserAccessToken);
+    recordWhatsAppConnectionAudit("whatsapp_connection.manual_token_source_resolved", {
+      tokenSource: "encrypted_connection_token",
+    });
+    const inspection = await withMetaOperation(
+      "inspect_system_user_token",
+      () => this.metaTransport.inspectSystemUserToken(connection.metaAppId!, appSecret, systemUserAccessToken),
+    );
     if (!inspection.valid) throw new ManualConnectionValidationError("META_TOKEN_INVALID");
     if (inspection.appId !== connection.metaAppId) throw new ManualConnectionValidationError("META_TOKEN_APP_MISMATCH");
     if (inspection.expiresAt && inspection.expiresAt.getTime() <= Date.now()) throw new ManualConnectionValidationError("META_TOKEN_EXPIRED");
     const type = (inspection.type ?? "").toUpperCase();
     if (type !== "SYSTEM_USER") throw new ManualConnectionValidationError("META_TOKEN_TYPE_UNSUPPORTED");
-    for (const scope of REQUIRED_SCOPES) {
-      if (!inspection.scopes.includes(scope)) throw new ManualConnectionValidationError("META_PERMISSION_MISSING");
+    if (missingManualSystemUserRequiredScope(inspection.scopes)) {
+      throw new ManualConnectionValidationError("META_REQUIRED_PERMISSION_MISSING");
     }
     if (!inspection.systemUserId) throw new ManualConnectionValidationError("META_TOKEN_TYPE_UNSUPPORTED");
-    return { systemUserId: inspection.systemUserId, systemUserAccessToken, expiresAt: inspection.expiresAt ?? null };
+    return {
+      systemUserId: inspection.systemUserId,
+      systemUserAccessToken,
+      expiresAt: inspection.expiresAt ?? null,
+      assignedWabaIds: inspection.assignedWabaIds ?? [],
+    };
   }
 
-  private async discoverAssets(systemUserId: string, systemUserAccessToken: string): Promise<{ wabas: readonly ManualMetaWaba[]; phonesByWaba: ReadonlyMap<string, readonly ManualMetaPhoneNumber[]> }> {
-    const wabas = await this.metaTransport.listAssignedWabas(systemUserId, systemUserAccessToken);
-    if (!wabas.length) throw new ManualConnectionValidationError("META_WABA_ACCESS_MISSING");
+  private async discoverAssets(systemUserId: string, systemUserAccessToken: string, assignedWabaIds: readonly string[]): Promise<{ wabas: readonly ManualMetaWaba[]; phonesByWaba: ReadonlyMap<string, readonly ManualMetaPhoneNumber[]> }> {
+    let wabas: readonly ManualMetaWaba[];
+    let directlyVerified = false;
+    if (assignedWabaIds.length > 0 && this.metaTransport.readWaba) {
+      wabas = await Promise.all(assignedWabaIds.map((wabaId) => withMetaOperation(
+        "read_waba",
+        () => this.metaTransport.readWaba!(wabaId, systemUserAccessToken),
+      )));
+      directlyVerified = true;
+    } else {
+      wabas = await withMetaOperation(
+        "list_assigned_wabas",
+        () => this.metaTransport.listAssignedWabas(systemUserId, systemUserAccessToken),
+      );
+    }
+    if (!wabas.length) {
+      throw new ManualConnectionValidationError(
+        directlyVerified ? "META_WABA_ACCESS_MISSING" : "META_ASSET_DISCOVERY_FAILED",
+      );
+    }
+    if (!this.metaTransport.readWaba) throw new ManualConnectionValidationError("META_GRAPH_REQUEST_REJECTED");
     const phonesByWaba = new Map<string, readonly ManualMetaPhoneNumber[]>();
     for (const waba of wabas) {
-      const phones = await this.metaTransport.listPhoneNumbers(waba.id, systemUserAccessToken);
-      phonesByWaba.set(waba.id, phones);
+      const verifiedWaba = directlyVerified
+        ? waba
+        : await withMetaOperation(
+          "read_waba",
+          () => this.metaTransport.readWaba!(waba.id, systemUserAccessToken),
+        );
+      if (verifiedWaba.id !== waba.id) throw new ManualConnectionValidationError("META_WABA_NOT_FOUND");
+      const phones = await withMetaOperation(
+        "list_waba_phone_numbers",
+        () => this.metaTransport.listPhoneNumbers(verifiedWaba.id, systemUserAccessToken),
+      );
+      if (phones.some((phone) => !phone.id || phone.wabaId !== verifiedWaba.id)) {
+        throw new ManualConnectionValidationError("META_GRAPH_REQUEST_REJECTED");
+      }
+      phonesByWaba.set(verifiedWaba.id, phones);
     }
-    if (![...phonesByWaba.values()].some((phones) => phones.length > 0)) throw new ManualConnectionValidationError("META_ASSET_DISCOVERY_FAILED");
+    if (![...phonesByWaba.values()].some((phones) => phones.length > 0)) {
+      throw new ManualConnectionValidationError("META_PHONE_NOT_FOUND");
+    }
     return { wabas, phonesByWaba };
   }
 }

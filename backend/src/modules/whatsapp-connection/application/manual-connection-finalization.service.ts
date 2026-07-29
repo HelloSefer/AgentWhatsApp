@@ -13,9 +13,14 @@ import {
 } from "../domain/whatsapp-connection.errors";
 import type { WhatsAppConnection } from "../domain/whatsapp-connection.types";
 import { normalizeConnectionId } from "../domain/whatsapp-connection.validation";
-import type { ManualMetaWebhookTransport } from "../infrastructure/meta/manual-meta-app.transport";
+import type {
+  ManualMetaPhoneNumber,
+  ManualMetaWaba,
+  ManualMetaWebhookTransport,
+} from "../infrastructure/meta/manual-meta-app.transport";
 import type { WhatsAppConnectionCredentialEncryptionService } from "./whatsapp-connection-credential-encryption.service";
 import { buildManualWebhookCallbackUrl } from "./manual-webhook-url.service";
+import { missingManualSystemUserRequiredScope } from "./manual-system-user-token-validation";
 import { incrementWhatsAppConnectionMetric, recordWhatsAppConnectionAudit } from "./whatsapp-connection-operational-events";
 
 export type ManualConnectionFinalizeResult = Readonly<{
@@ -32,8 +37,6 @@ export type ManualConnectionFinalizeResult = Readonly<{
 }>;
 
 type TransactionRunner = <Result>(callback: (transaction: DatabaseTransactionExecutor) => Promise<Result>) => Promise<Result>;
-
-const REQUIRED_SCOPES = ["business_management", "whatsapp_business_management", "whatsapp_business_messaging"] as const;
 
 function maskPhoneNumber(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -111,6 +114,10 @@ export class ManualConnectionFinalizationService {
     } catch {
       throw new ManualFinalizationError("MANUAL_CONNECTION_NOT_READY");
     }
+    recordWhatsAppConnectionAudit("whatsapp_connection.manual_token_source_resolved", {
+      connectionId: connection.connectionId,
+      tokenSource: "encrypted_connection_token",
+    });
     if (!verifyToken) throw new ManualFinalizationError("MANUAL_CONNECTION_NOT_READY");
     const callbackUrl = buildManualWebhookCallbackUrl(connection.publicWebhookId, this.publicBaseUrl);
     const inspection = await this.metaTransport.inspectSystemUserToken(connection.metaAppId, appSecret, systemUserToken);
@@ -118,17 +125,64 @@ export class ManualConnectionFinalizationService {
     if (inspection.expiresAt && inspection.expiresAt.getTime() <= Date.now()) throw new ManualFinalizationError("META_TOKEN_EXPIRED");
     if (inspection.appId !== connection.metaAppId) throw new ManualFinalizationError("META_TOKEN_APP_MISMATCH");
     if ((inspection.type ?? "").toUpperCase() !== "SYSTEM_USER" || !inspection.systemUserId) throw new ManualFinalizationError("META_TOKEN_INVALID");
-    for (const scope of REQUIRED_SCOPES) {
-      if (!inspection.scopes.includes(scope)) throw new ManualFinalizationError("META_PERMISSION_MISSING");
+    if (missingManualSystemUserRequiredScope(inspection.scopes)) throw new ManualFinalizationError("META_PERMISSION_MISSING");
+    if (!this.metaTransport.readWaba) throw new ManualFinalizationError("META_WABA_ACCESS_MISSING");
+    let verifiedWaba: ManualMetaWaba;
+    try {
+      verifiedWaba = await this.metaTransport.readWaba(connection.wabaId, systemUserToken);
+    } catch (error) {
+      if (error instanceof WhatsAppConnectionMetaTransportError && error.code !== "unavailable") {
+        throw new ManualFinalizationError("META_WABA_ACCESS_MISSING");
+      }
+      throw error;
     }
-    const wabas = await this.metaTransport.listAssignedWabas(inspection.systemUserId, systemUserToken);
-    if (!wabas.some((waba) => waba.id === connection.wabaId)) throw new ManualFinalizationError("META_WABA_ACCESS_MISSING");
-    const phones = await this.metaTransport.listPhoneNumbers(connection.wabaId, systemUserToken);
-    const selectedPhone = phones.find((phone) => phone.id === connection.phoneNumberId && phone.wabaId === connection.wabaId);
-    if (!selectedPhone) throw new ManualFinalizationError("META_PHONE_ACCESS_MISSING");
+    if (verifiedWaba.id !== connection.wabaId) throw new ManualFinalizationError("META_WABA_ACCESS_MISSING");
+
+    let wabaPhones: readonly ManualMetaPhoneNumber[];
+    try {
+      wabaPhones = await this.metaTransport.listPhoneNumbers(connection.wabaId, systemUserToken);
+    } catch (error) {
+      if (error instanceof WhatsAppConnectionMetaTransportError && error.code !== "unavailable") {
+        throw new ManualFinalizationError("META_PHONE_ACCESS_MISSING");
+      }
+      throw error;
+    }
+    const member = wabaPhones.find(
+      (phone) => phone.id === connection.phoneNumberId && phone.wabaId === connection.wabaId,
+    );
+    if (!member) throw new ManualFinalizationError("META_PHONE_ACCESS_MISSING");
+
+    if (!this.metaTransport.readPhoneNumber) throw new ManualFinalizationError("META_PHONE_ACCESS_MISSING");
+    let verifiedPhone: ManualMetaPhoneNumber;
+    try {
+      verifiedPhone = await this.metaTransport.readPhoneNumber(connection.phoneNumberId, systemUserToken);
+    } catch (error) {
+      if (error instanceof WhatsAppConnectionMetaTransportError && error.code !== "unavailable") {
+        throw new ManualFinalizationError("META_PHONE_ACCESS_MISSING");
+      }
+      throw error;
+    }
+    if (
+      verifiedPhone.id !== connection.phoneNumberId
+      || (
+        verifiedPhone.displayPhoneNumber
+        && member.displayPhoneNumber
+        && verifiedPhone.displayPhoneNumber !== member.displayPhoneNumber
+      )
+      || (
+        verifiedPhone.verifiedName
+        && member.verifiedName
+        && verifiedPhone.verifiedName !== member.verifiedName
+      )
+    ) {
+      throw new ManualFinalizationError("META_PHONE_ACCESS_MISSING");
+    }
     await this.ensurePhoneRegistered(tenant, connection, systemUserToken);
     const subscriptions = await this.metaTransport.listWabaSubscriptions(connection.wabaId, systemUserToken);
-    const confirmed = subscriptions.some((subscription) => subscription.appId === connection.metaAppId && (!subscription.callbackUrl || subscription.callbackUrl === callbackUrl));
+    const confirmed = subscriptions.some((subscription) =>
+      subscription.appId === connection.metaAppId
+      && subscription.callbackUrl === callbackUrl
+    );
     if (!confirmed) throw new ManualFinalizationError("WEBHOOK_SUBSCRIPTION_UNCONFIRMED");
     recordWhatsAppConnectionAudit("whatsapp_connection.manual_readiness_passed", { sellerId: tenant.sellerId, connectionId: connection.connectionId });
   }
@@ -145,13 +199,34 @@ export class ManualConnectionFinalizationService {
     try {
       await this.metaTransport.registerPhoneNumber(connection.phoneNumberId, pin, systemUserToken);
     } catch (error) {
-      if (!(error instanceof WhatsAppConnectionMetaTransportError) || error.code !== "unavailable") throw new ManualFinalizationError("META_PHONE_REGISTRATION_FAILED");
-      const afterTimeout = await this.metaTransport.readPhoneRegistrationStatus(connection.phoneNumberId, systemUserToken);
-      if (afterTimeout.id === connection.phoneNumberId && afterTimeout.registered) {
-        await this.markPhoneRegistration(tenant, connection);
-        return;
+      if (
+        error instanceof WhatsAppConnectionMetaTransportError
+        && error.metaErrorCode === 133005
+        && this.metaTransport.setPhoneTwoStepVerificationPin
+      ) {
+        try {
+          await this.metaTransport.setPhoneTwoStepVerificationPin(
+            connection.phoneNumberId,
+            pin,
+            systemUserToken,
+          );
+          await this.metaTransport.registerPhoneNumber(
+            connection.phoneNumberId,
+            pin,
+            systemUserToken,
+          );
+        } catch {
+          throw new ManualFinalizationError("META_PHONE_REGISTRATION_FAILED");
+        }
+      } else {
+        if (!(error instanceof WhatsAppConnectionMetaTransportError) || error.code !== "unavailable") throw new ManualFinalizationError("META_PHONE_REGISTRATION_FAILED");
+        const afterTimeout = await this.metaTransport.readPhoneRegistrationStatus(connection.phoneNumberId, systemUserToken);
+        if (afterTimeout.id === connection.phoneNumberId && afterTimeout.registered) {
+          await this.markPhoneRegistration(tenant, connection);
+          return;
+        }
+        throw new ManualFinalizationError("META_TRANSIENT_FAILURE");
       }
-      throw new ManualFinalizationError("META_TRANSIENT_FAILURE");
     }
     const confirmed = await this.metaTransport.readPhoneRegistrationStatus(connection.phoneNumberId, systemUserToken);
     if (confirmed.id !== connection.phoneNumberId || !confirmed.registered) throw new ManualFinalizationError("META_PHONE_REGISTRATION_FAILED");

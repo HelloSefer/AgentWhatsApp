@@ -20,7 +20,7 @@ export async function activateTypingIndicator(input: { messageId?: string; phone
     return { attempted: false, displayed: false, dryRun: true, skippedReason: "dry_run", durationMs: 0 };
   }
   const payload = { messaging_product: "whatsapp", status: "read", message_id: input.messageId, typing_indicator: { type: "text" } };
-  log({ event: "whatsapp.cloud.typing.requested", sellerId: input.sellerId, messageId: shortId(input.messageId), messageType: input.messageType, dryRun: Boolean(input.dryRun || env.whatsappCloudDryRun) });
+  log({ event: "whatsapp.cloud.typing.requested", messageId: shortId(input.messageId), messageType: input.messageType, dryRun: Boolean(input.dryRun || env.whatsappCloudDryRun) });
   try {
     const result = await Promise.race([input.transport(input.phoneNumberId, payload), new Promise<TransportResult>((_, reject) => setTimeout(() => reject(new Error("Typing indicator request timed out")), env.whatsappTypingRequestTimeoutMs))]);
     const durationMs = Date.now() - startedAt;

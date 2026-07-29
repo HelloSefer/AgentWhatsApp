@@ -46,6 +46,18 @@ export class WhatsAppConnectionCredentialEncryptionError extends Error {
   }
 }
 
+/**
+ * The manual setup route was composed without a usable credential-encryption
+ * dependency.  This is deliberately distinct from a cryptographic operation
+ * failure so the HTTP boundary can return a bounded, actionable-safe code.
+ */
+export class ManualConnectionSetupEncryptionUnavailableError extends WhatsAppConnectionCredentialEncryptionError {
+  constructor() {
+    super();
+    this.name = "ManualConnectionSetupEncryptionUnavailableError";
+  }
+}
+
 export class WhatsAppConnectionMetaConfigurationError extends Error {
   constructor() {
     super("Meta Embedded Signup configuration is unavailable.");
@@ -53,10 +65,64 @@ export class WhatsAppConnectionMetaConfigurationError extends Error {
   }
 }
 
+export type WhatsAppConnectionMetaTransportCode =
+  | "configuration"
+  | "auth"
+  | "not_found"
+  | "validation"
+  | "unavailable";
+
+export type WhatsAppConnectionMetaOperation =
+  | "acquire_app_access_token"
+  | "inspect_system_user_token"
+  | "list_assigned_wabas"
+  | "read_waba"
+  | "list_waba_phone_numbers"
+  | "read_phone_number"
+  | "subscribe_waba"
+  | "list_waba_subscriptions"
+  | "set_phone_two_step_verification_pin"
+  | "register_phone_number"
+  | "read_phone_registration_status";
+
+export type WhatsAppConnectionMetaTransportDiagnostics = Readonly<{
+  operation?: WhatsAppConnectionMetaOperation;
+  httpStatus?: number | null;
+  metaErrorCode?: number | null;
+  metaErrorSubcode?: number | null;
+}>;
+
 export class WhatsAppConnectionMetaTransportError extends Error {
-  constructor(readonly code: "configuration" | "auth" | "not_found" | "validation" | "unavailable") {
+  readonly operation: WhatsAppConnectionMetaOperation | null;
+  readonly httpStatus: number | null;
+  readonly metaErrorCode: number | null;
+  readonly metaErrorSubcode: number | null;
+
+  constructor(
+    readonly code: WhatsAppConnectionMetaTransportCode,
+    diagnostics: WhatsAppConnectionMetaTransportDiagnostics = {},
+  ) {
     super("Meta Embedded Signup transport failed.");
     this.name = "WhatsAppConnectionMetaTransportError";
+    this.operation = diagnostics.operation ?? null;
+    this.httpStatus = typeof diagnostics.httpStatus === "number"
+      && Number.isInteger(diagnostics.httpStatus)
+      && diagnostics.httpStatus >= 100
+      && diagnostics.httpStatus <= 599
+      ? diagnostics.httpStatus
+      : null;
+    this.metaErrorCode = typeof diagnostics.metaErrorCode === "number"
+      && Number.isSafeInteger(diagnostics.metaErrorCode)
+      && diagnostics.metaErrorCode >= 0
+      && diagnostics.metaErrorCode <= 2_147_483_647
+      ? diagnostics.metaErrorCode
+      : null;
+    this.metaErrorSubcode = typeof diagnostics.metaErrorSubcode === "number"
+      && Number.isSafeInteger(diagnostics.metaErrorSubcode)
+      && diagnostics.metaErrorSubcode >= 0
+      && diagnostics.metaErrorSubcode <= 2_147_483_647
+      ? diagnostics.metaErrorSubcode
+      : null;
   }
 }
 
@@ -78,6 +144,15 @@ export class WhatsAppConnectionCompletionConflictError extends Error {
   constructor() {
     super("WhatsApp Embedded Signup completion conflicts with existing state.");
     this.name = "WhatsAppConnectionCompletionConflictError";
+  }
+}
+
+export class ManualConnectionCredentialReplacementForbiddenError extends Error {
+  readonly issueCode = "MANUAL_CONNECTION_CREDENTIAL_REPLACEMENT_FORBIDDEN" as const;
+
+  constructor() {
+    super("Active manual WhatsApp connection credentials cannot be replaced.");
+    this.name = "ManualConnectionCredentialReplacementForbiddenError";
   }
 }
 
@@ -146,12 +221,23 @@ export class WhatsAppConnectionDisconnectAccessDeniedError extends Error {
 
 export type ManualConnectionValidationIssueCode =
   | "META_APP_CREDENTIALS_INVALID"
+  | "META_APP_SECRET_INVALID"
+  | "META_APP_ACCESS_TOKEN_INVALID"
+  | "META_APP_CREDENTIAL_MISMATCH"
   | "META_TOKEN_INVALID"
   | "META_TOKEN_EXPIRED"
   | "META_TOKEN_APP_MISMATCH"
   | "META_TOKEN_TYPE_UNSUPPORTED"
+  | "META_TOKEN_TYPE_INVALID"
   | "META_PERMISSION_MISSING"
+  | "META_REQUIRED_PERMISSION_MISSING"
   | "META_WABA_ACCESS_MISSING"
+  | "META_WABA_ACCESS_DENIED"
+  | "META_WABA_NOT_FOUND"
+  | "META_PHONE_ACCESS_DENIED"
+  | "META_PHONE_NOT_FOUND"
+  | "META_PHONE_WABA_MISMATCH"
+  | "META_GRAPH_REQUEST_REJECTED"
   | "META_ASSET_DISCOVERY_FAILED";
 
 export type ManualWebhookIssueCode =
@@ -185,6 +271,43 @@ export class ManualConnectionValidationError extends Error {
     super("Manual WhatsApp connection validation failed.");
     this.name = "ManualConnectionValidationError";
   }
+}
+
+export function manualMetaTransportIssueCode(
+  error: WhatsAppConnectionMetaTransportError,
+  operationHint?: WhatsAppConnectionMetaOperation,
+): ManualConnectionValidationIssueCode {
+  const operation = error.operation ?? operationHint;
+  if (operation === "acquire_app_access_token") {
+    if (error.code === "auth" || error.code === "validation") return "META_APP_SECRET_INVALID";
+    if (error.code === "configuration") return "META_APP_ACCESS_TOKEN_INVALID";
+    return "META_GRAPH_REQUEST_REJECTED";
+  }
+  if (operation === "inspect_system_user_token") {
+    if (
+      error.metaErrorCode === 190 ||
+      error.httpStatus === 401 ||
+      error.httpStatus === 403 ||
+      error.code === "auth"
+    ) {
+      return "META_APP_ACCESS_TOKEN_INVALID";
+    }
+    return "META_GRAPH_REQUEST_REJECTED";
+  }
+  if (error.metaErrorCode === 190 || error.httpStatus === 401) return "META_TOKEN_INVALID";
+  const permissionDenied = error.metaErrorCode === 10 || error.metaErrorCode === 200;
+  if (operation === "list_assigned_wabas") return "META_ASSET_DISCOVERY_FAILED";
+  if (operation === "read_waba") {
+    if (error.code === "not_found" || error.httpStatus === 404) return "META_WABA_NOT_FOUND";
+    if (permissionDenied || error.code === "auth" || error.httpStatus === 403) return "META_WABA_ACCESS_DENIED";
+    return "META_GRAPH_REQUEST_REJECTED";
+  }
+  if (operation === "list_waba_phone_numbers" || operation === "read_phone_number") {
+    if (error.code === "not_found" || error.httpStatus === 404) return "META_PHONE_NOT_FOUND";
+    if (permissionDenied || error.code === "auth" || error.httpStatus === 403) return "META_PHONE_ACCESS_DENIED";
+    return "META_GRAPH_REQUEST_REJECTED";
+  }
+  return error.code === "auth" ? "META_TOKEN_INVALID" : "META_GRAPH_REQUEST_REJECTED";
 }
 
 export class ManualWebhookConfigurationError extends Error {

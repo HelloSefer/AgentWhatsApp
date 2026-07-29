@@ -9,7 +9,12 @@ export type ResolvedWhatsAppOutboundConnection = Readonly<{
   connectionId: string;
   phoneNumberId: string;
   accessToken: string;
+  tokenSource?: "encrypted_connection_token";
 }>;
+
+type PersistedResolvedWhatsAppOutboundConnection =
+  ResolvedWhatsAppOutboundConnection &
+  Readonly<{ tokenSource: "encrypted_connection_token" }>;
 
 export type WhatsAppOutboundConnectionResolver = Readonly<{
   resolveForTrustedSeller: (
@@ -32,7 +37,7 @@ export class PersistentWhatsAppOutboundConnectionResolver implements WhatsAppOut
     private readonly manualCredentialEncryptionService?: WhatsAppConnectionCredentialEncryptionService,
   ) {}
 
-  async resolveForTrustedSeller(sellerId: string): Promise<ResolvedWhatsAppOutboundConnection> {
+  async resolveForTrustedSeller(sellerId: string): Promise<PersistedResolvedWhatsAppOutboundConnection> {
     const tenant = createTenantContext(sellerId);
     const connection = await this.repository.findActiveBySeller(tenant);
     if (!connection) {
@@ -78,11 +83,18 @@ export class PersistentWhatsAppOutboundConnectionResolver implements WhatsAppOut
       throw new WhatsAppOutboundError("missing_connection_credentials");
     }
 
+    if (connection.connectionMethod === "CUSTOMER_OWNED_META_APP") {
+      recordWhatsAppConnectionAudit("whatsapp_connection.manual_token_source_resolved", {
+        connectionId: connection.connectionId,
+        tokenSource: "encrypted_connection_token",
+      });
+    }
     return {
       sellerId: tenant.sellerId,
       connectionId: connection.connectionId,
       phoneNumberId,
       accessToken,
+      tokenSource: "encrypted_connection_token",
     };
   }
 }

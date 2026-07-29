@@ -55,3 +55,22 @@ export function normalizeMetaAppId(value: unknown): string {
 export function normalizeManualSecret(value: unknown): string {
   return normalizeRequired(value, MANUAL_SECRET_MAX_LENGTH);
 }
+
+export function normalizeManualMetaAppSecret(value: unknown): string {
+  if (typeof value !== "string" || value.length > MANUAL_SECRET_MAX_LENGTH || /[\r\n]/u.test(value)) {
+    throw new WhatsAppConnectionValidationError();
+  }
+  const trimmed = value.trim();
+  if (!trimmed || /^(?:["'`“”‘’])|(?:["'`“”‘’])$/u.test(trimmed)) {
+    throw new WhatsAppConnectionValidationError();
+  }
+  return trimmed;
+}
+
+export function normalizeManualSystemUserAccessToken(value: unknown): string {
+  if (typeof value !== "string" || !value || value.length > MANUAL_SECRET_MAX_LENGTH) {
+    throw new WhatsAppConnectionValidationError();
+  }
+  if (value.trim() !== value || /[\s"'`“”‘’]/u.test(value)) throw new WhatsAppConnectionValidationError();
+  return value;
+}

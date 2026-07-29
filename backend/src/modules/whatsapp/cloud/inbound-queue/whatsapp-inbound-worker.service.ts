@@ -18,8 +18,23 @@ import {
 } from "./whatsapp-inbound-reliability";
 import { WhatsAppQueueReliabilityError } from "../queue-reliability/whatsapp-queue-reliability.types";
 import type { WhatsAppDlqPublisher } from "../queue-reliability/whatsapp-dlq.publisher";
-import { processNormalizedCloudMessage, buildCloudAgentIdentity, type CloudPreparedResponseGroupDispatcher } from "../whatsapp-cloud.service";
+import {
+  processNormalizedCloudMessage,
+  buildCloudAgentIdentity,
+  type CloudPreparedResponseGroupDispatcher,
+  type ConnectionScopedCloudRuntime,
+} from "../whatsapp-cloud.service";
 import type { WhatsAppCloudIncomingMessage } from "../whatsapp-cloud.types";
+
+type WhatsAppInboundConnectionResolver = Readonly<{
+  resolveForTrustedSeller: (sellerId: string) => Promise<Readonly<{
+    sellerId: string;
+    connectionId: string;
+    phoneNumberId: string;
+    accessToken: string;
+    tokenSource?: "encrypted_connection_token";
+  }>>;
+}>;
 
 function validateInboundJobData(data: unknown): WhatsAppInboundJobData {
   if (!data || typeof data !== "object") {
@@ -97,21 +112,54 @@ function startLeaseRenewal(
 
 async function processValidatedJob(
   data: WhatsAppInboundJobData,
-  options: Readonly<{ groupDispatcher?: CloudPreparedResponseGroupDispatcher }> = {},
+  options: Readonly<{
+    connectionResolver: WhatsAppInboundConnectionResolver;
+    groupDispatcher?: CloudPreparedResponseGroupDispatcher;
+  }>,
 ): Promise<WhatsAppInboundJobResult> {
+  const connectionScopedRuntime = await resolveConnectionScopedRuntime(
+    data,
+    options.connectionResolver,
+  );
   const message = jobDataToNormalizedMessage(data);
   const identity = buildCloudAgentIdentity({
-    phoneNumberId: data.phoneNumberId,
+    phoneNumberId: connectionScopedRuntime.phoneNumberId,
     waId: data.customerPhone,
-    sellerId: data.sellerId,
+    sellerId: connectionScopedRuntime.sellerId,
   });
   const result = await processNormalizedCloudMessage(message, identity, {
     preparedResponseGroupDispatcher: options.groupDispatcher,
+    connectionScopedRuntime,
   });
 
   return {
     ok: result.ok,
     handled: result.handled,
+  };
+}
+
+async function resolveConnectionScopedRuntime(
+  data: WhatsAppInboundJobData,
+  resolver: WhatsAppInboundConnectionResolver,
+): Promise<ConnectionScopedCloudRuntime> {
+  const resolved = await resolver.resolveForTrustedSeller(data.sellerId);
+  if (
+    resolved.sellerId !== data.sellerId ||
+    resolved.phoneNumberId !== data.phoneNumberId ||
+    resolved.tokenSource !== "encrypted_connection_token" ||
+    typeof resolved.connectionId !== "string" ||
+    !resolved.connectionId.trim() ||
+    typeof resolved.accessToken !== "string" ||
+    !resolved.accessToken.trim()
+  ) {
+    throw new WhatsAppInboundJobValidationError("invalid_payload");
+  }
+  return {
+    sellerId: resolved.sellerId,
+    connectionId: resolved.connectionId,
+    phoneNumberId: resolved.phoneNumberId,
+    accessToken: resolved.accessToken,
+    tokenSource: resolved.tokenSource,
   };
 }
 
@@ -121,12 +169,13 @@ async function deferAheadOfTurnJob(job: Job<WhatsAppInboundJobData, WhatsAppInbo
 }
 
 function createInboundProcessor(
-  orderingCoordinator?: ConversationOrderingCoordinator,
+  orderingCoordinator: ConversationOrderingCoordinator | undefined,
   options: Readonly<{
+    connectionResolver: WhatsAppInboundConnectionResolver;
     groupDispatcher?: CloudPreparedResponseGroupDispatcher;
     dlqPublisher?: WhatsAppDlqPublisher;
     maxAttempts?: number;
-  }> = {},
+  }>,
 ): QueueJobProcessor<WhatsAppInboundJobData, WhatsAppInboundJobResult> {
   return async (job): Promise<WhatsAppInboundJobResult> => {
     let data: WhatsAppInboundJobData;
@@ -212,18 +261,20 @@ function createInboundProcessor(
 
 export function createWhatsAppInboundWorker(
   connectionManager: QueueConnectionManager,
-  orderingCoordinator?: ConversationOrderingCoordinator,
+  orderingCoordinator: ConversationOrderingCoordinator | undefined,
   options: Readonly<{
+    connectionResolver: WhatsAppInboundConnectionResolver;
     concurrency?: number;
     groupDispatcher?: CloudPreparedResponseGroupDispatcher;
     dlqPublisher?: WhatsAppDlqPublisher;
     maxAttempts?: number;
-  }> = {},
+  }>,
   queueDefinition: QueueDefinition<"whatsapp-inbound.process", WhatsAppInboundJobData, WhatsAppInboundJobResult> = whatsappInboundQueueDefinition,
 ): ManagedQueueWorker {
   return createManagedQueueWorker(
     queueDefinition,
     createInboundProcessor(orderingCoordinator, {
+      connectionResolver: options.connectionResolver,
       groupDispatcher: options.groupDispatcher,
       dlqPublisher: options.dlqPublisher,
       maxAttempts: options.maxAttempts,
@@ -232,3 +283,7 @@ export function createWhatsAppInboundWorker(
     options,
   );
 }
+
+export const __phase11kInboundConnectionScopedTesting = {
+  resolveConnectionScopedRuntime,
+};

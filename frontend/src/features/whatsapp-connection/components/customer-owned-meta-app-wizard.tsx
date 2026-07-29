@@ -1,9 +1,7 @@
 "use client";
 
-import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { manualConnectionIssueMessage } from "../services/embedded-signup-completion-service";
 import { CustomerOwnedMetaAppConnectionStep } from "./customer-owned-meta-app-connection-step";
 import { CustomerOwnedMetaAppCredentialsStep } from "./customer-owned-meta-app-credentials-step";
 import { CustomerOwnedMetaAppNumberStep } from "./customer-owned-meta-app-number-step";
@@ -25,18 +23,13 @@ export function CustomerOwnedMetaAppWizard({
   const wizard = useCustomerOwnedMetaAppWizard({ initialConnection, mode, selectedPhoneFromStatus });
   const isClosingDisabled =
     wizard.setupMutation.isPending ||
+    wizard.discoverMutation.isPending ||
     wizard.selectMutation.isPending ||
     wizard.finalizeStage === "configuring" ||
     wizard.finalizeStage === "finalizing";
-  const canGoBack =
-    !isClosingDisabled &&
-    wizard.finalizeStage !== "done" &&
-    (wizard.currentStep === "credentials" || wizard.currentStep === "number" || wizard.currentStep === "connection");
-  const goBack = () => {
-    if (!canGoBack) return;
-    if (wizard.currentStep === "credentials") wizard.setCurrentStep("prepare");
-    if (wizard.currentStep === "number") wizard.setCurrentStep("credentials");
-    if (wizard.currentStep === "connection") wizard.setCurrentStep("number");
+  const goBackToPrepare = () => {
+    if (isClosingDisabled || wizard.currentStep !== "credentials") return;
+    wizard.setCurrentStep("prepare");
   };
 
   return (
@@ -68,9 +61,9 @@ export function CustomerOwnedMetaAppWizard({
             </p>
           ) : null}
 
-          {initialConnection?.status === "ACTION_REQUIRED" || initialConnection?.status === "ERROR" ? (
+          {wizard.currentStep === "prepare" && wizard.stepError ? (
             <p className="mb-4 rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm leading-6 text-muted-foreground">
-              {manualConnectionIssueMessage(initialConnection.issueCode)}
+              {wizard.stepError}
             </p>
           ) : null}
 
@@ -79,35 +72,24 @@ export function CustomerOwnedMetaAppWizard({
           {wizard.currentStep === "credentials" ? (
             <CustomerOwnedMetaAppCredentialsStep
               error={wizard.stepError}
-              isSubmitting={wizard.setupMutation.isPending || wizard.discoverMutation.isPending}
-              onBack={goBack}
+              isSubmitting={wizard.setupMutation.isPending}
+              onBack={goBackToPrepare}
               onSubmit={(input) => wizard.setupMutation.mutate(input)}
             />
           ) : null}
 
           {wizard.currentStep === "number" ? (
-            <div className="space-y-4">
-              {!wizard.discovery && wizard.connectionId ? (
-                <div className="rounded-xl border border-border bg-muted/30 p-4">
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    Credentials are already stored securely. Resume setup by finding the WhatsApp accounts available to this Meta App.
-                  </p>
-                  <Button className="mt-3 min-h-11 w-full bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto" disabled={wizard.discoverMutation.isPending} onClick={wizard.resumeDiscovery} type="button">
-                    {wizard.discoverMutation.isPending ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <RefreshCw aria-hidden="true" />}
-                    Resume setup
-                  </Button>
-                </div>
-              ) : null}
-              <CustomerOwnedMetaAppNumberStep
-                discovery={wizard.discovery}
-                error={wizard.stepError}
-                isLoading={wizard.discoverMutation.isPending}
-                isSelecting={wizard.selectMutation.isPending}
-                onBack={goBack}
-                onRefresh={wizard.resumeDiscovery}
-                onSelect={(phone) => wizard.selectMutation.mutate(phone)}
-              />
-            </div>
+            <CustomerOwnedMetaAppNumberStep
+              discovery={wizard.discovery}
+              error={wizard.stepError}
+              isLoading={wizard.discoverMutation.isPending}
+              isSelecting={wizard.selectMutation.isPending}
+              onRefresh={wizard.resumeDiscovery}
+              onSelect={wizard.selectAssets}
+              onUpdateCredentials={wizard.beginCredentialUpdate}
+              onVerifyManual={wizard.selectAssets}
+              requiresManualAssetEntry={wizard.requiresManualAssetEntry}
+            />
           ) : null}
 
           {wizard.currentStep === "connection" ? (
@@ -115,9 +97,9 @@ export function CustomerOwnedMetaAppWizard({
               connectionLabel={wizard.selectedConnectionLabel}
               connectionSummary={wizard.selectedConnectionSummary}
               error={wizard.stepError}
-              onBack={goBack}
               onDone={() => void onDone()}
               onRetry={() => void wizard.runActivation()}
+              onUpdateCredentials={wizard.beginCredentialUpdate}
               stage={wizard.finalizeStage}
             />
           ) : null}

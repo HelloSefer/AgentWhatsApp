@@ -292,8 +292,9 @@ async function runFlagAndReadinessChecks(): Promise<void> {
     whatsappOutboundQueueEnabled: true,
     whatsappQueueRetriesDlqEnabled: true,
     whatsappTransactionalOutboxEnabled: true,
-    whatsappCloudDryRun: true,
-    whatsappCloudPhoneNumberId: env.whatsappCloudPhoneNumberId || "phone_phase8g",
+    whatsappCloudDryRun: false,
+    whatsappCloudPhoneNumberId: "",
+    whatsappCloudAccessToken: "",
     whatsappConnectionTokenActiveKeyVersion: "phase8g",
     whatsappConnectionTokenEncryptionKeysJson: JSON.stringify({
       phase8g: randomBytes(32).toString("base64"),
@@ -301,6 +302,7 @@ async function runFlagAndReadinessChecks(): Promise<void> {
   }, async () => {
     const readiness = await buildWhatsAppPhase8RuntimeReadiness();
     add("27. readiness reports complete runtime correctly", readiness.effectiveFlags.completeQueuedRuntime === true);
+    add("27a. queued runtime readiness uses encrypted connection routing without global Cloud credentials", readiness.checks.cloudRouting.ok && readiness.checks.cloudRouting.category === "connection_scoped_cloud_api_configured");
     add("28. readiness exposes no secrets", !/token|secret|postgres:\/\/|redis:\/\/|212600088888/i.test(JSON.stringify(readiness)));
     clearWhatsAppRuntimeLifecycleEventsForTesting();
     try {

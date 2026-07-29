@@ -183,7 +183,15 @@ type ProcessCloudWebhookResult = {
   }>;
 };
 
-type ProcessCloudWebhookOptions = {
+export type ConnectionScopedCloudRuntime = Readonly<{
+  sellerId: string;
+  connectionId: string;
+  phoneNumberId: string;
+  accessToken: string;
+  tokenSource: "encrypted_connection_token";
+}>;
+
+export type ProcessCloudWebhookOptions = {
   publicBaseUrl?: string;
   allowUnknownPhoneNumberId?: boolean;
   /** Internal evaluator transport guard. This is not exposed by an HTTP request. */
@@ -194,6 +202,8 @@ type ProcessCloudWebhookOptions = {
   outboundGroupDispatcher?: WhatsAppOutboundGroupDispatcher;
   /** Neutral alias used by inbound processing to avoid importing queue semantics. */
   preparedResponseGroupDispatcher?: CloudPreparedResponseGroupDispatcher;
+  /** Server-resolved credentials for a specific persisted WhatsApp connection. */
+  connectionScopedRuntime?: ConnectionScopedCloudRuntime;
 };
 
 type ReplyButtonPreset = "order_confirmation" | "color_choice" | "after_price";
@@ -309,22 +319,9 @@ function maskConversationKey(conversationKey: string | undefined): string | unde
     return maskPhone(conversationKey);
   }
 
-  const sellerId = conversationKey.slice(0, separatorIndex);
   const customerPhone = conversationKey.slice(separatorIndex + 1);
 
-  return `${sellerId}:${maskPhone(customerPhone) || "***"}`;
-}
-
-function previewToken(token: string): string | null {
-  if (!token) {
-    return null;
-  }
-
-  if (token.length <= 7) {
-    return "***";
-  }
-
-  return `${token.slice(0, 3)}...${token.slice(-4)}`;
+  return `***:${maskPhone(customerPhone) || "***"}`;
 }
 
 function logJson(payload: Record<string, unknown>) {
@@ -389,7 +386,6 @@ export function getCloudDiagnostics() {
     phoneNumberIdPresent: Boolean(env.whatsappCloudPhoneNumberId),
     businessAccountIdPresent: Boolean(env.whatsappCloudBusinessAccountId),
     accessTokenPresent: Boolean(env.whatsappCloudAccessToken),
-    accessTokenPreview: previewToken(env.whatsappCloudAccessToken),
     verifyTokenPresent: Boolean(env.whatsappCloudVerifyToken),
     signatureVerifyEnabled: env.whatsappCloudWebhookSignatureVerify,
     orderFlowIdPresent: Boolean(env.whatsappCloudOrderFlowId),
@@ -945,7 +941,10 @@ export function verifyWebhookSignature(input: {
 export async function postCloudMessage(
   phoneNumberId: string,
   payload: unknown,
-  options: Readonly<{ accessToken?: string }> = {},
+  options: Readonly<{
+    accessToken?: string;
+    allowGlobalCredentialFallback?: boolean;
+  }> = {},
 ): Promise<WhatsAppCloudSendResult> {
   if (env.whatsappCloudDryRun) {
     return {
@@ -956,7 +955,8 @@ export async function postCloudMessage(
     };
   }
 
-  const accessToken = options.accessToken || env.whatsappCloudAccessToken;
+  const accessToken = options.accessToken
+    || (options.allowGlobalCredentialFallback === false ? "" : env.whatsappCloudAccessToken);
 
   if (!accessToken) {
     pushDiagnosticError("send_cloud_message", "WHATSAPP_CLOUD_ACCESS_TOKEN is required");
@@ -997,13 +997,16 @@ export async function postCloudMessage(
         ?.details === "string"
         ? ((graphError?.error_data as Record<string, unknown>).details as string)
         : undefined;
-    const errorMessage = [
-      `Cloud API returned ${response.status}`,
-      graphMessage,
-      graphDetails,
-    ]
-      .filter(Boolean)
-      .join(": ");
+    const scopedCredential = options.allowGlobalCredentialFallback === false;
+    const errorMessage = scopedCredential
+      ? `Cloud API returned ${response.status}`
+      : [
+          `Cloud API returned ${response.status}`,
+          graphMessage,
+          graphDetails,
+        ]
+          .filter(Boolean)
+          .join(": ");
 
     pushDiagnosticError(
       "send_cloud_message",
@@ -1013,10 +1016,10 @@ export async function postCloudMessage(
       success: false,
       dryRun: false,
       payload,
-      response: responseBody,
+      ...(scopedCredential ? {} : { response: responseBody }),
       errorMessage,
       graphCode,
-      graphDetails,
+      ...(scopedCredential ? {} : { graphDetails }),
     };
   }
 
@@ -1024,7 +1027,9 @@ export async function postCloudMessage(
     success: true,
     dryRun: false,
     payload,
-    response: responseBody,
+    ...(options.allowGlobalCredentialFallback === false
+      ? {}
+      : { response: responseBody }),
   };
 }
 
@@ -1110,6 +1115,7 @@ export async function sendCloudText(input: {
   to: string;
   phoneNumberId?: string;
   accessToken?: string;
+  allowGlobalCredentialFallback?: boolean;
   text: string;
   forceDryRun?: boolean;
 }): Promise<WhatsAppCloudSendResult> {
@@ -1145,6 +1151,7 @@ export async function sendCloudText(input: {
 
   const result = await postCloudMessage(phoneNumberId, payload, {
     accessToken: input.accessToken,
+    allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
   });
 
   logJson({
@@ -1274,6 +1281,7 @@ export async function sendCloudInteractiveMessage(input: {
   to: string;
   phoneNumberId?: string;
   accessToken?: string;
+  allowGlobalCredentialFallback?: boolean;
   interactivePreview: WhatsAppInteractivePreview;
   forceDryRun?: boolean;
 }): Promise<WhatsAppCloudSendResult> {
@@ -1329,6 +1337,7 @@ export async function sendCloudInteractiveMessage(input: {
 
   const result = await postCloudMessage(phoneNumberId, payload, {
     accessToken: input.accessToken,
+    allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
   });
 
   logJson({
@@ -1348,6 +1357,7 @@ export async function sendCloudInteractiveMessage(input: {
 export async function uploadMedia(input: {
   phoneNumberId?: string;
   accessToken?: string;
+  allowGlobalCredentialFallback?: boolean;
   filePath: string;
   mimeType: string;
   forceDryRun?: boolean;
@@ -1369,7 +1379,8 @@ export async function uploadMedia(input: {
     };
   }
 
-  const accessToken = input.accessToken || env.whatsappCloudAccessToken;
+  const accessToken = input.accessToken
+    || (input.allowGlobalCredentialFallback === false ? "" : env.whatsappCloudAccessToken);
 
   if (!accessToken) {
     const errorMessage = "WHATSAPP_CLOUD_ACCESS_TOKEN is required";
@@ -1430,13 +1441,16 @@ export async function uploadMedia(input: {
           ?.details === "string"
           ? ((graphError?.error_data as Record<string, unknown>).details as string)
           : undefined;
-      const errorMessage = [
-        `Cloud media upload returned ${response.status}`,
-        graphMessage,
-        graphDetails,
-      ]
-        .filter(Boolean)
-        .join(": ");
+      const scopedCredential = input.allowGlobalCredentialFallback === false;
+      const errorMessage = scopedCredential
+        ? `Cloud media upload returned ${response.status}`
+        : [
+            `Cloud media upload returned ${response.status}`,
+            graphMessage,
+            graphDetails,
+          ]
+            .filter(Boolean)
+            .join(": ");
 
       pushDiagnosticError("upload_media", errorMessage);
       return {
@@ -1446,10 +1460,10 @@ export async function uploadMedia(input: {
           filePath: input.filePath,
           mimeType: input.mimeType,
         },
-        response: responseBody,
+        ...(scopedCredential ? {} : { response: responseBody }),
         errorMessage,
         graphCode,
-        graphDetails,
+        ...(scopedCredential ? {} : { graphDetails }),
       };
     }
 
@@ -1466,7 +1480,9 @@ export async function uploadMedia(input: {
         filePath: input.filePath,
         mimeType: input.mimeType,
       },
-      response: responseBody,
+      ...(input.allowGlobalCredentialFallback === false
+        ? {}
+        : { response: responseBody }),
       mediaId,
     };
   } catch (error) {
@@ -1489,6 +1505,7 @@ export async function sendDocument(input: {
   to: string;
   phoneNumberId?: string;
   accessToken?: string;
+  allowGlobalCredentialFallback?: boolean;
   filePath: string;
   filename: string;
   caption?: string;
@@ -1500,6 +1517,7 @@ export async function sendDocument(input: {
   const uploadResult = await uploadMedia({
     phoneNumberId,
     accessToken: input.accessToken,
+    allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
     filePath: input.filePath,
     mimeType: "application/pdf",
     forceDryRun: input.forceDryRun,
@@ -1518,6 +1536,7 @@ export async function sendDocument(input: {
         to: input.to,
         phoneNumberId,
         accessToken: input.accessToken,
+        allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
         text: "تم تأكيد الطلب ✅ وغادي نرسل لك وصل الطلب بعد قليل.",
         forceDryRun: input.forceDryRun,
       });
@@ -1552,6 +1571,7 @@ export async function sendDocument(input: {
   }
   const result = await postCloudMessage(phoneNumberId, payload, {
     accessToken: input.accessToken,
+    allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
   });
 
   logJson({
@@ -1767,6 +1787,7 @@ async function sendPersistedConfirmedOrderReceiptDocument(input: {
   to: string;
   phoneNumberId: string;
   accessToken?: string;
+  allowGlobalCredentialFallback?: boolean;
   confirmedOrderId: string;
 }): Promise<WhatsAppCloudSendResult> {
   const tenant = createTenantContext(input.sellerId);
@@ -1855,6 +1876,7 @@ async function sendPersistedConfirmedOrderReceiptDocument(input: {
       to: input.to,
       phoneNumberId: input.phoneNumberId,
       accessToken: input.accessToken,
+      allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
       filePath,
       filename: safeFilename,
       caption: `هذا وصل الطلب ديالك ✅\nرقم الطلب: ${snapshot.id}`,
@@ -1906,6 +1928,7 @@ export async function sendOrderReceiptDocumentForOrder(input: {
   to: string;
   phoneNumberId?: string;
   accessToken?: string;
+  allowGlobalCredentialFallback?: boolean;
   order: ConfirmedOrder;
   allowDuplicate?: boolean;
 }): Promise<
@@ -2051,6 +2074,7 @@ export async function sendOrderReceiptDocumentForOrder(input: {
     to: input.to,
     phoneNumberId: input.phoneNumberId,
     accessToken: input.accessToken,
+    allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
     filePath: pdfResult.pdfPath,
     filename: `recu-commande-${input.order.publicOrderCode}.pdf`,
     caption: [
@@ -2142,6 +2166,10 @@ export async function dispatchPreparedOutboundGroupDirectly(
   const connection = options.outboundConnectionResolver
     ? await options.outboundConnectionResolver.resolveForTrustedSeller(group.sellerId)
     : undefined;
+  if (connection && connection.tokenSource !== "encrypted_connection_token") {
+    throw new WhatsAppOutboundError("missing_connection_credentials");
+  }
+  const allowGlobalCredentialFallback = connection ? false : undefined;
   for (let index = startCommandIndex; index < group.commands.length; index += 1) {
     const command = group.commands[index];
     if (command.type === "agent_reply") {
@@ -2149,6 +2177,7 @@ export async function dispatchPreparedOutboundGroupDirectly(
         to: command.to,
         phoneNumberId: connection?.phoneNumberId,
         accessToken: connection?.accessToken,
+        allowGlobalCredentialFallback,
         replyText: command.replyText,
         whatsappInteractivePreview: command.whatsappInteractivePreview,
         interactiveSendDecision: command.interactiveSendDecision,
@@ -2176,6 +2205,7 @@ export async function dispatchPreparedOutboundGroupDirectly(
           to: command.to,
           phoneNumberId: connection?.phoneNumberId,
           accessToken: connection?.accessToken,
+          allowGlobalCredentialFallback,
           order,
         })
         : await sendPersistedConfirmedOrderReceiptDocument({
@@ -2184,6 +2214,7 @@ export async function dispatchPreparedOutboundGroupDirectly(
           to: command.to,
           phoneNumberId: connection?.phoneNumberId || env.whatsappCloudPhoneNumberId || "",
           accessToken: connection?.accessToken,
+          allowGlobalCredentialFallback,
           confirmedOrderId: command.confirmedOrderId,
         });
       commandResults.push({
@@ -2205,6 +2236,7 @@ export async function dispatchPreparedOutboundGroupDirectly(
           to: command.to,
           phoneNumberId: connection?.phoneNumberId,
           accessToken: connection?.accessToken,
+          allowGlobalCredentialFallback,
           filePath: command.filePath,
           filename: command.filename,
           caption: command.caption,
@@ -2263,6 +2295,8 @@ export async function dispatchPreparedOutboundGroupDirectly(
 export async function sendCtaUrl(input: {
   to: string;
   phoneNumberId?: string;
+  accessToken?: string;
+  allowGlobalCredentialFallback?: boolean;
   url: string;
   bodyText?: string;
   buttonText?: string;
@@ -2290,7 +2324,10 @@ export async function sendCtaUrl(input: {
       },
     },
   };
-  const result = await postCloudMessage(phoneNumberId, payload);
+  const result = await postCloudMessage(phoneNumberId, payload, {
+    accessToken: input.accessToken,
+    allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
+  });
 
   logJson({
     event: "order_form.fallback.cta_url_sent",
@@ -2515,7 +2552,12 @@ export async function sendCloudChoiceList(
 
 export async function sendOrderFlow(
   to: string,
-  _options: { customerId?: string } = {},
+  options: {
+    customerId?: string;
+    phoneNumberId?: string;
+    accessToken?: string;
+    allowGlobalCredentialFallback?: boolean;
+  } = {},
 ): Promise<WhatsAppCloudSendResult> {
   if (!env.whatsappCloudOrderFlowId) {
     const errorMessage = "WHATSAPP_CLOUD_ORDER_FLOW_ID is required";
@@ -2586,7 +2628,14 @@ export async function sendOrderFlow(
       },
     },
   };
-  const result = await postCloudMessage(env.whatsappCloudPhoneNumberId, payload);
+  const result = await postCloudMessage(
+    options.phoneNumberId || env.whatsappCloudPhoneNumberId,
+    payload,
+    {
+      accessToken: options.accessToken,
+      allowGlobalCredentialFallback: options.allowGlobalCredentialFallback,
+    },
+  );
 
   if (result.success) {
     webhookDiagnostics.totalFlowsSent += 1;
@@ -2661,6 +2710,8 @@ function getOrderFormPublicBaseUrl(options?: ProcessCloudWebhookOptions): string
 async function sendOrderFormFallbackLink(input: {
   to: string;
   phoneNumberId: string;
+  accessToken?: string;
+  allowGlobalCredentialFallback?: boolean;
   publicBaseUrl?: string;
 }): Promise<WhatsAppCloudSendResult> {
   const publicBaseUrl = getOrderFormPublicBaseUrl({
@@ -2681,6 +2732,8 @@ async function sendOrderFormFallbackLink(input: {
     return sendCloudText({
       to: input.to,
       phoneNumberId: input.phoneNumberId,
+      accessToken: input.accessToken,
+      allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
       text: fallbackText,
     });
   }
@@ -2697,6 +2750,8 @@ async function sendOrderFormFallbackLink(input: {
     return sendCloudText({
       to: input.to,
       phoneNumberId: input.phoneNumberId,
+      accessToken: input.accessToken,
+      allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
       text: fallbackText,
     });
   }
@@ -2721,6 +2776,8 @@ async function sendOrderFormFallbackLink(input: {
     const textResult = await sendCloudText({
       to: input.to,
       phoneNumberId: input.phoneNumberId,
+      accessToken: input.accessToken,
+      allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
       text,
     });
 
@@ -2758,6 +2815,8 @@ async function sendOrderFormFallbackLink(input: {
   const ctaResult = await sendCtaUrl({
     to: input.to,
     phoneNumberId: input.phoneNumberId,
+    accessToken: input.accessToken,
+    allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
     url,
     bodyText: "باش نكملو الطلب بسرعة، ضغط على الزر وعمّر معلوماتك:",
     buttonText: "كمّل معلومات الطلب",
@@ -2976,6 +3035,8 @@ export function buildCloudInteractiveFallbackText(result: AgentResult): string {
 async function sendAgentCloudResult(input: {
   to: string;
   phoneNumberId: string;
+  accessToken?: string;
+  allowGlobalCredentialFallback?: boolean;
   customerId: string;
   userMessage: string;
   result: AgentResult;
@@ -2987,6 +3048,8 @@ async function sendAgentCloudResult(input: {
   const dispatchResult = await cloudReplyDispatchService.dispatchAgentReply({
     to: input.to,
     phoneNumberId: input.phoneNumberId,
+    accessToken: input.accessToken,
+    allowGlobalCredentialFallback: input.allowGlobalCredentialFallback,
     replyText: buildCloudInteractiveFallbackText(input.result),
     whatsappInteractivePreview:
       input.result.meta?.whatsappInteractivePreview ?? null,
@@ -3076,6 +3139,8 @@ export type CloudAgentDispatchFlowResult = {
 export async function dispatchAgentResultThroughCloud(input: {
   to: string;
   phoneNumberId: string;
+  accessToken?: string;
+  allowGlobalCredentialFallback?: boolean;
   customerId: string;
   userMessage: string;
   result: AgentResult;
@@ -3287,6 +3352,22 @@ export async function processNormalizedCloudMessage(
   identity: AgentIdentity,
   options: ProcessCloudWebhookOptions,
 ): Promise<ProcessCloudWebhookResult> {
+  const connectionRuntime = options.connectionScopedRuntime;
+  if (
+    connectionRuntime
+    && (
+      connectionRuntime.tokenSource !== "encrypted_connection_token"
+      || !connectionRuntime.accessToken
+      || connectionRuntime.phoneNumberId !== message.phoneNumberId
+      || connectionRuntime.phoneNumberId !== identity.phoneNumberId
+      || connectionRuntime.sellerId !== identity.sellerId
+    )
+  ) {
+    throw new Error("connection_scoped_runtime_mismatch");
+  }
+  const connectionPhoneNumberId = connectionRuntime?.phoneNumberId ?? message.phoneNumberId;
+  const connectionAccessToken = connectionRuntime?.accessToken;
+  const allowGlobalCredentialFallback = connectionRuntime ? false : undefined;
   const customerId = identity.conversationKey;
   const perMessageResult: ProcessCloudWebhookResult = {
     ok: true,
@@ -3315,7 +3396,6 @@ export async function processNormalizedCloudMessage(
     logJson({
       event: "whatsapp.cloud.webhook.message",
       phoneNumberId: message.phoneNumberId,
-      sellerId: identity.sellerId,
       conversationKey: maskConversationKey(identity.conversationKey),
       waId: maskPhone(message.waId),
       messageId: message.messageId,
@@ -3357,7 +3437,10 @@ export async function processNormalizedCloudMessage(
         sellerId: identity.sellerId,
         dryRun: options.forceDryRun === true || env.whatsappCloudDryRun,
         guardBlocked,
-        transport: postCloudMessage,
+        transport: (phoneNumberId, payload) => postCloudMessage(phoneNumberId, payload, {
+          accessToken: connectionAccessToken,
+          allowGlobalCredentialFallback,
+        }),
       });
       if (options.forceDryRun !== true) {
         await applyReplyPacing({
@@ -3383,6 +3466,8 @@ export async function processNormalizedCloudMessage(
       });
       const liveSmokeModeArmed =
         firstEntryLiveSmoke.readiness.liveEnabled === true;
+      const customerOwnedOrderRuntimeActivation =
+        connectionRuntime?.tokenSource === "encrypted_connection_token";
       const liveSmokeDispatchAllowed =
         liveSmokeModeArmed &&
         (env.whatsappInteractiveEnabled === true || options.forceDryRun === true) &&
@@ -3390,13 +3475,17 @@ export async function processNormalizedCloudMessage(
         firstEntryLiveSmoke.readiness.sellerIdConfigured === true &&
         firstEntryLiveSmoke.readiness.expectedSellerId === identity.sellerId;
       const bypassFirstEntryLiveSmoke =
-        runtimeActionId !== undefined && runtimeActionId !== "first_entry:order_now";
+        customerOwnedOrderRuntimeActivation ||
+        (runtimeActionId !== undefined && runtimeActionId !== "first_entry:order_now");
 
-      if (liveSmokeModeArmed && !liveSmokeDispatchAllowed) {
+      if (
+        liveSmokeModeArmed &&
+        !liveSmokeDispatchAllowed &&
+        !customerOwnedOrderRuntimeActivation
+      ) {
         logJson({
           event: "whatsapp.cloud.live_smoke.scope_blocked",
           customerPhone: maskPhone(identity.customerPhone),
-          sellerId: identity.sellerId,
           conversationKey: maskConversationKey(identity.conversationKey),
           recipientAllowed: firstEntryLiveSmoke.readiness.recipientAllowed,
           sellerIdConfigured: firstEntryLiveSmoke.readiness.sellerIdConfigured,
@@ -3421,7 +3510,6 @@ export async function processNormalizedCloudMessage(
             : "first_entry.live_smoke.blocked",
           reason: routingReason,
           customerPhone: maskPhone(identity.customerPhone),
-          sellerId: identity.sellerId,
           conversationKey: maskConversationKey(identity.conversationKey),
           ready: firstEntryLiveSmoke.readiness.ready,
           firstEntryLiveSmokeEnabled:
@@ -3454,7 +3542,9 @@ export async function processNormalizedCloudMessage(
         const firstSendResult = infoMessage
           ? await sendAgentCloudResult({
               to: message.waId,
-              phoneNumberId: message.phoneNumberId,
+              phoneNumberId: connectionPhoneNumberId,
+              accessToken: connectionAccessToken,
+              allowGlobalCredentialFallback,
               customerId,
               userMessage: message.text,
               result: buildFirstEntryTextOnlyResult(
@@ -3484,7 +3574,9 @@ export async function processNormalizedCloudMessage(
         if (ctaMessage && shouldSendCta) {
           sendResult = await sendAgentCloudResult({
             to: message.waId,
-            phoneNumberId: message.phoneNumberId,
+            phoneNumberId: connectionPhoneNumberId,
+            accessToken: connectionAccessToken,
+            allowGlobalCredentialFallback,
             customerId,
             userMessage: message.text,
             result: {
@@ -3498,7 +3590,9 @@ export async function processNormalizedCloudMessage(
         } else {
           sendResult = await sendAgentCloudResult({
             to: message.waId,
-            phoneNumberId: message.phoneNumberId,
+            phoneNumberId: connectionPhoneNumberId,
+            accessToken: connectionAccessToken,
+            allowGlobalCredentialFallback,
             customerId,
             userMessage: message.text,
             result: firstEntryLiveSmoke.result,
@@ -3527,7 +3621,6 @@ export async function processNormalizedCloudMessage(
             firstEntryLiveSmoke.result.meta?.firstEntryLiveSmoke
               ?.presentationMode,
           customerPhone: maskPhone(identity.customerPhone),
-          sellerId: identity.sellerId,
           conversationKey: maskConversationKey(identity.conversationKey),
           messagePreview: previewText(message.text),
           replyPreview: previewText(firstEntryLiveSmoke.result.reply),
@@ -3546,7 +3639,6 @@ export async function processNormalizedCloudMessage(
           logJson({
             event: "first_entry.live_smoke.cta_send_failed_after_text",
             customerPhone: maskPhone(identity.customerPhone),
-            sellerId: identity.sellerId,
             conversationKey: maskConversationKey(identity.conversationKey),
             reason: sendResult.reason,
             error: sendResult.error,
@@ -3629,7 +3721,9 @@ export async function processNormalizedCloudMessage(
           await prepareReply(fallbackText, 0);
           const sendResult = await sendCloudText({
             to: message.waId,
-            phoneNumberId: message.phoneNumberId,
+            phoneNumberId: connectionPhoneNumberId,
+            accessToken: connectionAccessToken,
+            allowGlobalCredentialFallback,
             text: fallbackText,
           });
 
@@ -3660,7 +3754,9 @@ export async function processNormalizedCloudMessage(
         await prepareReply(reply, 0);
         const sendResult = await sendCloudText({
           to: message.waId,
-          phoneNumberId: message.phoneNumberId,
+          phoneNumberId: connectionPhoneNumberId,
+          accessToken: connectionAccessToken,
+          allowGlobalCredentialFallback,
           text: reply,
         });
 
@@ -3686,12 +3782,19 @@ export async function processNormalizedCloudMessage(
         });
 
         await prepareReply("باش نكملو الطلب بسرعة، عمّر هاد المعلومات:", 0);
-        const flowResult = await sendOrderFlow(message.waId, { customerId });
+        const flowResult = await sendOrderFlow(message.waId, {
+          customerId,
+          phoneNumberId: connectionPhoneNumberId,
+          accessToken: connectionAccessToken,
+          allowGlobalCredentialFallback,
+        });
         const sendResult =
           !flowResult.success && isFlowIntegrityBlocked(flowResult)
-            ? await sendOrderFormFallbackLink({
+              ? await sendOrderFormFallbackLink({
                 to: message.waId,
-                phoneNumberId: message.phoneNumberId,
+                phoneNumberId: connectionPhoneNumberId,
+                accessToken: connectionAccessToken,
+                allowGlobalCredentialFallback,
                 publicBaseUrl: options.publicBaseUrl,
               })
             : flowResult;
@@ -3718,12 +3821,19 @@ export async function processNormalizedCloudMessage(
         });
 
         await prepareReply("باش نكملو الطلب بسرعة، عمّر هاد المعلومات:", 0);
-        const flowResult = await sendOrderFlow(message.waId, { customerId });
+        const flowResult = await sendOrderFlow(message.waId, {
+          customerId,
+          phoneNumberId: connectionPhoneNumberId,
+          accessToken: connectionAccessToken,
+          allowGlobalCredentialFallback,
+        });
         const sendResult =
           !flowResult.success && isFlowIntegrityBlocked(flowResult)
-            ? await sendOrderFormFallbackLink({
+              ? await sendOrderFormFallbackLink({
                 to: message.waId,
-                phoneNumberId: message.phoneNumberId,
+                phoneNumberId: connectionPhoneNumberId,
+                accessToken: connectionAccessToken,
+                allowGlobalCredentialFallback,
                 publicBaseUrl: options.publicBaseUrl,
               })
             : flowResult;
@@ -3742,8 +3852,11 @@ export async function processNormalizedCloudMessage(
       // here only after the existing First Entry smoke guard has verified the
       // configured seller and the exact allowlisted test recipient.
       const guardedRuntimeLiveSmokeActivation =
-        liveSmokeDispatchAllowed &&
-        firstEntryLiveSmoke.readiness.ready === true;
+        customerOwnedOrderRuntimeActivation ||
+        (
+          liveSmokeDispatchAllowed &&
+          firstEntryLiveSmoke.readiness.ready === true
+        );
       const startedAt = Date.now();
       const result = await generateAgentResult(message.text, undefined, {
         customerPhone: identity.customerPhone,
@@ -3770,7 +3883,6 @@ export async function processNormalizedCloudMessage(
         event: "whatsapp.cloud.agent.reply",
         customerId: maskConversationKey(customerId),
         customerPhone: maskPhone(identity.customerPhone),
-        sellerId: identity.sellerId,
         conversationKey: maskConversationKey(identity.conversationKey),
         messagePreview: previewText(message.text),
         replyPreview: previewText(result.reply),
@@ -3783,7 +3895,9 @@ export async function processNormalizedCloudMessage(
 
       const dispatchFlow = await dispatchAgentResultThroughCloud({
         to: message.waId,
-        phoneNumberId: message.phoneNumberId,
+        phoneNumberId: connectionPhoneNumberId,
+        accessToken: connectionAccessToken,
+        allowGlobalCredentialFallback,
         customerId,
         userMessage: message.text,
         result,
@@ -3869,7 +3983,7 @@ export async function processNormalizedCloudMessage(
             const command = await stageRuntimeReceiptArtifactForOutboundQueue({
               artifact: runtimeReceiptArtifact,
               to: message.waId,
-              phoneNumberId: message.phoneNumberId,
+              phoneNumberId: connectionPhoneNumberId,
             });
             if (command) {
               await responseGroupDispatcher.dispatchOutboundGroup(
@@ -3900,9 +4014,16 @@ export async function processNormalizedCloudMessage(
             receiptDispatch = await dispatchRuntimeReceiptArtifact({
               artifact: runtimeReceiptArtifact,
               to: message.waId,
-              phoneNumberId: message.phoneNumberId,
+              phoneNumberId: connectionPhoneNumberId,
               forceDryRun: options.forceDryRun,
-              transport: options.runtimeDocumentTransport,
+              transport: options.runtimeDocumentTransport
+                ?? (connectionRuntime
+                  ? (input) => sendDocument({
+                    ...input,
+                    accessToken: connectionAccessToken,
+                    allowGlobalCredentialFallback: false,
+                  })
+                  : undefined),
             });
           }
           runtimeReceiptSuccess = receiptDispatch.success;
@@ -3974,7 +4095,9 @@ export async function processNormalizedCloudMessage(
             } else {
               sendOrderReceiptDocumentForOrder({
                 to: message.waId,
-                phoneNumberId: message.phoneNumberId,
+                phoneNumberId: connectionPhoneNumberId,
+                accessToken: connectionAccessToken,
+                allowGlobalCredentialFallback,
                 order: confirmedOrder,
               }).catch((error) => {
                 logJson({
@@ -3992,7 +4115,6 @@ export async function processNormalizedCloudMessage(
             logJson({
               event: "order_receipt.skipped_by_seller_config",
               orderId: confirmedOrder.id,
-              sellerId: identity.sellerId,
             });
           }
         }
@@ -4056,6 +4178,7 @@ export async function processCloudWebhookBody(
 
   for (const message of messages) {
     if (
+      !options.connectionScopedRuntime &&
       !options.allowUnknownPhoneNumberId &&
       isUnknownConfiguredPhoneNumberId(message.phoneNumberId)
     ) {
@@ -4091,6 +4214,7 @@ export async function processCloudWebhookBody(
     const identity = buildCloudAgentIdentity({
       phoneNumberId: message.phoneNumberId,
       waId: message.waId,
+      sellerId: options.connectionScopedRuntime?.sellerId,
     });
 
     const messageResult = await processNormalizedCloudMessage(message, identity, options);

@@ -159,12 +159,19 @@ export function WhatsappConnectionCard() {
   const canLaunch = hasManagePermission && !isSetupInProgress && signup.canLaunch && !disconnectMutation.isPending && wizardMode === null;
   const canReplace = hasManagePermission && connection?.status === "ACTIVE" && !disconnectMutation.isPending && !signup.isBusy && wizardMode === null;
   const canDisconnect = hasManagePermission && connection?.status === "ACTIVE" && !signup.isBusy && !disconnectMutation.isPending;
-  const showConnect = !connection || connection.status === "DISCONNECTED" || connection.status === "REVOKED" || connection.status === "ERROR";
-  const canStartGuidedSetup = hasManagePermission && !disconnectMutation.isPending && !signup.isBusy && wizardMode === null;
-  const canResumeCustomerOwnedSetup =
-    hasManagePermission &&
+  const hasResumableCustomerOwnedSetup =
     connection?.connectionMethod === "CUSTOMER_OWNED_META_APP" &&
     (connection.status === "PENDING" || connection.status === "VERIFYING" || connection.status === "ACTION_REQUIRED" || connection.status === "ERROR");
+  const canResumeCustomerOwnedSetup = hasManagePermission && hasResumableCustomerOwnedSetup;
+  const showConnect =
+    (!connection || connection.status === "DISCONNECTED" || connection.status === "REVOKED" || connection.status === "ERROR") &&
+    !hasResumableCustomerOwnedSetup;
+  const canStartGuidedSetup =
+    hasManagePermission &&
+    !hasResumableCustomerOwnedSetup &&
+    !disconnectMutation.isPending &&
+    !signup.isBusy &&
+    wizardMode === null;
 
   const statusMessage = useMemo(() => {
     if (signup.isBusy || signup.message) return signup.message;

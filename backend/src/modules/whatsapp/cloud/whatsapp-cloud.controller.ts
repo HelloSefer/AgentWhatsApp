@@ -24,6 +24,7 @@ import {
   subscribeAppToWaba,
   verifyWebhookSignature,
   isReplyButtonPreset,
+  type ConnectionScopedCloudRuntime,
 } from "./whatsapp-cloud.service";
 import { getWhatsAppInboundProducer } from "../../../composition/queue/whatsapp-inbound-queue.composition";
 import type { WhatsAppInboundJobData } from "./inbound-queue/whatsapp-inbound-job.types";
@@ -160,7 +161,12 @@ export async function receiveWhatsAppCloudWebhook(req: Request, res: Response) {
   return processVerifiedWhatsAppCloudWebhook(req, res, req.body);
 }
 
-export async function processVerifiedWhatsAppCloudWebhook(req: Request, res: Response, body: unknown) {
+export async function processVerifiedWhatsAppCloudWebhook(
+  req: Request,
+  res: Response,
+  body: unknown,
+  connectionScopedRuntime?: ConnectionScopedCloudRuntime,
+) {
   if (env.whatsappInboundQueueEnabled === true) {
     const producer = whatsappInboundProducerProvider();
 
@@ -175,6 +181,7 @@ export async function processVerifiedWhatsAppCloudWebhook(req: Request, res: Res
 
       cloudWebhookProcessor(body, {
         publicBaseUrl: getRequestBaseUrl(req),
+        connectionScopedRuntime,
       }).catch((error) => {
         console.error(
           JSON.stringify({
@@ -229,6 +236,7 @@ export async function processVerifiedWhatsAppCloudWebhook(req: Request, res: Res
 
   cloudWebhookProcessor(body, {
     publicBaseUrl: getRequestBaseUrl(req),
+    connectionScopedRuntime,
   }).catch((error) => {
     console.error(
       JSON.stringify({

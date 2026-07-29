@@ -64,7 +64,20 @@ export class ManualWebhookPublicController {
       if (!verifyMetaSignature(rawBody, appSecret, signature)) throw new ManualWebhookConfigurationError("WEBHOOK_SIGNATURE_INVALID");
       const parsed = parseSignedWebhookBody(rawBody);
       assertManualWebhookPayloadOwnership(connection, parsed);
-      return processVerifiedWhatsAppCloudWebhook(req, res, parsed);
+      const systemUserAccessToken = this.encryptionService.decryptManualSystemUserAccessToken(
+        storage.encryptedSystemUserAccessToken,
+      );
+      recordWhatsAppConnectionAudit("whatsapp_connection.manual_token_source_resolved", {
+        connectionId: connection.connectionId,
+        tokenSource: "encrypted_connection_token",
+      });
+      return processVerifiedWhatsAppCloudWebhook(req, res, parsed, {
+        sellerId: connection.sellerId,
+        connectionId: connection.connectionId,
+        phoneNumberId: connection.phoneNumberId,
+        accessToken: systemUserAccessToken,
+        tokenSource: "encrypted_connection_token",
+      });
     } catch (error) {
       if (error instanceof ManualWebhookConfigurationError && error.issueCode === "WEBHOOK_SIGNATURE_INVALID") {
         recordWhatsAppConnectionAudit("whatsapp_connection.manual_webhook_signature_failed", { ...(connectionId ? { connectionId } : {}), reason: "verification_failed" });
@@ -75,4 +88,3 @@ export class ManualWebhookPublicController {
     }
   };
 }
-

@@ -663,8 +663,16 @@ async function resolveRuntimeProductContext(
   }
 
   try {
-    const sellerConfig = sellerConfigService.getSellerConfig(options.sellerId);
-    const legacyProductContext = productContextService.getActiveProductContext(options.sellerId);
+    const knownSeller = sellerConfigService.hasSellerConfig(options.sellerId);
+    const sellerConfig = knownSeller
+      ? sellerConfigService.getSellerConfig(options.sellerId)
+      : {
+          ...sellerConfigService.getSellerConfig(DEFAULT_DEMO_SELLER_ID),
+          sellerId: options.sellerId,
+        };
+    const legacyProductContext = productContextService.getActiveProductContext(
+      knownSeller ? options.sellerId : DEFAULT_DEMO_SELLER_ID,
+    );
     const catalogResolution = await runtimeReadComposition.catalogReader.resolve({
       sellerId: options.sellerId,
       productId: options.productId?.trim() || legacyProductContext.productId,
@@ -1959,7 +1967,12 @@ export async function generateAgentResult(
       }
     : runtimeProductContext;
   return runWithConversationConfig(resolvedConfig, () =>
-    generateAgentResultInternal(message, configuredProductContext, options, dependencies),
+    generateAgentResultInternal(
+      message,
+      configuredProductContext,
+      { ...options, productId },
+      dependencies,
+    ),
   );
 }
 

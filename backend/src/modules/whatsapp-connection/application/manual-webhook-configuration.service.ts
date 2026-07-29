@@ -60,6 +60,10 @@ export class ManualWebhookConfigurationService {
       if (!storage) throw new ManualWebhookConfigurationError("WEBHOOK_VERIFICATION_FAILED");
       const systemUserToken = this.encryptionService.decryptManualSystemUserAccessToken(storage.encryptedSystemUserAccessToken);
       const verifyToken = this.encryptionService.decryptManualWebhookVerifyToken(storage.encryptedWebhookVerifyToken);
+      recordWhatsAppConnectionAudit("whatsapp_connection.manual_token_source_resolved", {
+        connectionId: connection.connectionId,
+        tokenSource: "encrypted_connection_token",
+      });
       const callbackUrl = buildManualWebhookCallbackUrl(connection.publicWebhookId!, this.publicBaseUrl);
 
       const confirmedBefore = await this.confirmSubscription(connection, callbackUrl, systemUserToken);
@@ -100,7 +104,7 @@ export class ManualWebhookConfigurationService {
     const subscriptions = await this.metaTransport.listWabaSubscriptions(connection.wabaId!, systemUserToken);
     return subscriptions.some((subscription) =>
       subscription.appId === connection.metaAppId &&
-      (!subscription.callbackUrl || subscription.callbackUrl === callbackUrl)
+      subscription.callbackUrl === callbackUrl
     );
   }
 }

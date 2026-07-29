@@ -22,6 +22,11 @@ export type CreateManualWhatsAppConnectionDraftInput = Readonly<{
   publicWebhookId: string;
 }>;
 
+export type ReplaceManualWhatsAppConnectionCredentialsInput =
+  PersistManualWhatsAppConnectionCredentialInput & Readonly<{
+    metaAppId: string;
+  }>;
+
 export type VerifiedWhatsAppConnectionMetadataInput = Readonly<{
   metaBusinessId?: string | null;
   wabaId?: string | null;
@@ -64,5 +69,6 @@ export interface ManualWhatsAppConnectionRepository extends WhatsAppConnectionRe
   findReusableManualDraft(tenant: TenantContext, metaAppId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
   findByPublicWebhookId(publicWebhookId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
   persistManualCredentials(tenant: TenantContext, connectionId: string, credential: PersistManualWhatsAppConnectionCredentialInput, options?: WhatsAppConnectionRepositoryOptions): Promise<ManualWhatsAppConnectionCredentialStorage | null>;
+  replaceManualCredentialsAndResetState(tenant: TenantContext, connectionId: string, credential: ReplaceManualWhatsAppConnectionCredentialsInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
   findManualCredentialStorage(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<ManualWhatsAppConnectionCredentialStorage | null>;
 }

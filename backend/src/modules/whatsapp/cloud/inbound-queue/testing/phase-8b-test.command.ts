@@ -30,7 +30,10 @@ import { buildWhatsAppInboundJobId } from "../whatsapp-inbound-job-id";
 import type { WhatsAppInboundJobData, WhatsAppInboundJobResult } from "../whatsapp-inbound-job.types";
 import { WhatsAppInboundEnqueueError, WhatsAppInboundJobValidationError } from "../whatsapp-inbound.errors";
 import { WhatsAppInboundProducerService } from "../whatsapp-inbound-producer.service";
-import { createWhatsAppInboundWorker } from "../whatsapp-inbound-worker.service";
+import {
+  __phase11kInboundConnectionScopedTesting,
+  createWhatsAppInboundWorker,
+} from "../whatsapp-inbound-worker.service";
 import { env } from "../../../../../config/env";
 import {
   receiveWhatsAppCloudWebhook,
@@ -49,6 +52,15 @@ type TestCase = Readonly<{
 }>;
 
 const cases: TestCase[] = [];
+const phase8bConnectionResolver = Object.freeze({
+  resolveForTrustedSeller: async (sellerId: string) => ({
+    sellerId,
+    connectionId: "conn_phase8b",
+    phoneNumberId: "1168457439687919",
+    accessToken: "phase8b_encrypted_connection_token",
+    tokenSource: "encrypted_connection_token" as const,
+  }),
+});
 
 function add(name: string, passed: boolean, detail?: string, skipped = false): void {
   cases.push({ name, passed, ...(detail ? { detail } : {}), ...(skipped ? { skipped: true } : {}) });
@@ -519,7 +531,9 @@ async function runWorkerAndLifecycleChecks(): Promise<void> {
     const queue = registry.getQueue<WhatsAppInboundJobData>(whatsappInboundQueueDefinition.name);
 
     let processedCount = 0;
-    const worker = createWhatsAppInboundWorker(manager);
+    const worker = createWhatsAppInboundWorker(manager, undefined, {
+      connectionResolver: phase8bConnectionResolver,
+    });
 
     let queueEvents: QueueEvents | undefined;
     try {
@@ -559,7 +573,9 @@ async function runWorkerAndLifecycleChecks(): Promise<void> {
     const registry2 = new QueueRegistry(manager2);
     registry2.register(whatsappInboundQueueDefinition);
     const queue2 = registry2.getQueue<WhatsAppInboundJobData>(whatsappInboundQueueDefinition.name);
-    const worker2 = createWhatsAppInboundWorker(manager2);
+    const worker2 = createWhatsAppInboundWorker(manager2, undefined, {
+      connectionResolver: phase8bConnectionResolver,
+    });
 
     const preJobId = buildWhatsAppInboundJobId("seller_demo_sandals", `msg-pre-${suffix}`);
     const preJobData: WhatsAppInboundJobData = {
@@ -611,7 +627,9 @@ async function runWorkerAndLifecycleChecks(): Promise<void> {
     registry3.register(whatsappInboundQueueDefinition);
     const queue3 = registry3.getQueue<WhatsAppInboundJobData>(whatsappInboundQueueDefinition.name);
     let failWorkerProcessed = false;
-    const failWorker = createWhatsAppInboundWorker(manager3);
+    const failWorker = createWhatsAppInboundWorker(manager3, undefined, {
+      connectionResolver: phase8bConnectionResolver,
+    });
 
     try {
       const failJobId = buildWhatsAppInboundJobId("seller_demo_sandals", `msg-fail-${suffix}`);
@@ -676,7 +694,9 @@ async function runWorkerAndLifecycleChecks(): Promise<void> {
     const manager = new QueueConnectionManager();
     const registry = new QueueRegistry(manager);
     registry.register(whatsappInboundQueueDefinition);
-    const worker = createWhatsAppInboundWorker(manager);
+    const worker = createWhatsAppInboundWorker(manager, undefined, {
+      connectionResolver: phase8bConnectionResolver,
+    });
     await worker.start();
     add("Worker closes gracefully", worker.isStarted());
     await worker.close();
@@ -718,6 +738,53 @@ async function runNormalizedProcessorAndFastAckChecks(): Promise<void> {
 
   add("buildCloudAgentIdentity is exported for both paths",
     /export\s+function\s+buildCloudAgentIdentity/.test(serviceSource));
+
+  const scopedJob: WhatsAppInboundJobData = {
+    schemaVersion: 1,
+    sellerId: "seller_phase8b_scoped",
+    conversationKey: "seller_phase8b_scoped:212600000090",
+    customerPhone: "212600000090",
+    phoneNumberId: "1168457439687919",
+    messageId: "msg_phase8b_scoped",
+    sourceType: "text",
+    text: "scoped",
+  };
+  const scopedRuntime =
+    await __phase11kInboundConnectionScopedTesting.resolveConnectionScopedRuntime(
+      scopedJob,
+      phase8bConnectionResolver,
+    );
+  add("Queued inbound processing resolves encrypted connection credentials",
+    scopedRuntime.tokenSource === "encrypted_connection_token" &&
+    scopedRuntime.phoneNumberId === scopedJob.phoneNumberId);
+  add("Queued inbound processing rejects a persisted phone mismatch",
+    await expectsFailure(
+      () => __phase11kInboundConnectionScopedTesting.resolveConnectionScopedRuntime(
+        scopedJob,
+        {
+          resolveForTrustedSeller: async () => ({
+            ...scopedRuntime,
+            phoneNumberId: "999999999999999",
+          }),
+        },
+      ),
+      (error) => error instanceof WhatsAppInboundJobValidationError,
+    ));
+  add("Queued inbound processing rejects missing encrypted-token provenance",
+    await expectsFailure(
+      () => __phase11kInboundConnectionScopedTesting.resolveConnectionScopedRuntime(
+        scopedJob,
+        {
+          resolveForTrustedSeller: async () => ({
+            sellerId: scopedJob.sellerId,
+            connectionId: "conn_phase8b_missing_source",
+            phoneNumberId: scopedJob.phoneNumberId,
+            accessToken: "phase8b_connection_token",
+          }),
+        },
+      ),
+      (error) => error instanceof WhatsAppInboundJobValidationError,
+    ));
 
   // BLOCKER 3 — Fast ack and enqueue failure behavioral proof
   const controllerSource = await readFile(

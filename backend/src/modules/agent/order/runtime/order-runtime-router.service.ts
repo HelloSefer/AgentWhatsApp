@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { env } from "../../../../config/env";
+import { runtimeReadComposition } from "../../../../composition/runtime-read/runtime-read-composition.runtime";
 import { runtimeWriteComposition } from "../../../../composition/runtime-write/runtime-write-composition.runtime";
 import { getValkeyClient } from "../../../../infrastructure/valkey/valkey.client";
 import { takeConversationPendingOrderSelections } from "../../session/conversation-session.service";
+import { DEFAULT_DEMO_SELLER_ID } from "../../identity/seller-resolver.service";
 import { normalizeSellerConfig } from "../../config/first-entry-config.service";
 import { renderFirstEntryMessage } from "../../config/first-entry-renderer.service";
 import { offerConfigService } from "../../config/offers/offer-config.service";
@@ -48,7 +50,11 @@ import type {
 } from "./order-runtime.types";
 import { orderMessage } from "../../../conversation-engine/adapters/order-conversation.adapter";
 import { getActiveConversationConfig } from "../../../conversation-engine/config/conversation-config-context.service";
-import { applyResolvedConversationProductConfig, withConversationProductDefaults } from "../../../conversation-engine/config/conversation-product-config.service";
+import {
+  applyResolvedConversationProductConfig,
+  resolveConfiguredOptionCanonicalValue,
+  withConversationProductDefaults,
+} from "../../../conversation-engine/config/conversation-product-config.service";
 
 export function isGuardedOrderRuntimeAction(message: string): boolean {
   return /^(?:first_entry:order_now|info:(?:order_now|continue_order)|cart_offer:.+|cart_quantity:.+|cart_item_option:.+|cart_item_previous:(?:same|different)|cart_review:.+|cart_review_item:.+|cart_review_item_edit:.+|order_checkout:.+|order_checkout_field:.+)$/.test(message);
@@ -129,18 +135,28 @@ function createPublicOrderCode(): string {
   return `CMD-${randomBytes(4).toString("hex").toUpperCase()}`;
 }
 
-export async function getOrderRuntimeReadiness(sellerId: string, activationRequested = false): Promise<OrderRuntimeReadiness> {
+export async function getOrderRuntimeReadiness(
+  sellerId: string,
+  activationRequested = false,
+  tenantScopedProductAvailable = false,
+): Promise<OrderRuntimeReadiness> {
   const known = sellerConfigService.hasSellerConfig(sellerId);
   const configured = known ? sellerConfigService.getSellerConfig(sellerId) : undefined;
   const feature = normalizeSellerConfig(configured || sellerConfigService.getSellerConfig("seller_demo_sandals"), undefined).multiItemOrderFlow!;
-  const scoped = known && feature.allowedSellerIds?.includes(sellerId) === true;
+  const persistedTenantRuntimeAllowed =
+    activationRequested &&
+    tenantScopedProductAvailable &&
+    !known;
+  const scoped = known
+    ? feature.allowedSellerIds?.includes(sellerId) === true
+    : persistedTenantRuntimeAllowed;
   let valkeyReady = false;
   try {
     valkeyReady = (await getValkeyClient().ping()) === "PONG";
   } catch (_error) {
     valkeyReady = false;
   }
-  const flowEnabled = known && scoped && feature.runtimeMode !== "disabled" && (feature.enabled || activationRequested);
+  const flowEnabled = (known || persistedTenantRuntimeAllowed) && scoped && feature.runtimeMode !== "disabled" && (feature.enabled || activationRequested);
   return {
     flowEnabled,
     runtimeMode: feature.runtimeMode,
@@ -148,7 +164,13 @@ export async function getOrderRuntimeReadiness(sellerId: string, activationReque
     guardedSellerScope: scoped,
     sellerKnown: known,
     valkeyReady,
-    ...(!known ? { reason: "unknown_seller" } : !scoped ? { reason: "seller_not_allowlisted" } : !feature.enabled && !activationRequested ? { reason: "feature_disabled" } : {}),
+    ...(!known && !persistedTenantRuntimeAllowed
+      ? { reason: "unknown_seller" }
+      : !scoped
+        ? { reason: "seller_not_allowlisted" }
+        : !feature.enabled && !activationRequested
+          ? { reason: "feature_disabled" }
+          : {}),
   };
 }
 
@@ -161,11 +183,53 @@ async function persist(input: OrderRuntimeTurnInput, runtime: OrderRuntimeSessio
  * helpers below are pure preview orchestrators: this boundary owns Valkey I/O.
  */
 export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInput): Promise<OrderRuntimeTurnResult> {
-  const readiness = await getOrderRuntimeReadiness(input.sellerId, input.activationRequested === true);
+  const requestedSellerId = input.sellerId.trim();
+  const requestedProductId = input.productId?.trim();
+  const knownSeller = sellerConfigService.hasSellerConfig(requestedSellerId);
+  const legacyProductContext =
+    (requestedProductId
+      ? productContextService.getProductContextById(requestedProductId)
+      : undefined) ||
+    productContextService.getActiveProductContext(
+      knownSeller ? requestedSellerId : DEFAULT_DEMO_SELLER_ID,
+    );
+  const catalogResolution = await runtimeReadComposition.catalogReader.resolve({
+    sellerId: requestedSellerId,
+    productId: requestedProductId || legacyProductContext.productId,
+    legacyProductContext,
+  });
+  const baseProductContext = catalogResolution.productContext;
+  const productOwnedByTenant =
+    baseProductContext.active === true &&
+    baseProductContext.sellerId.trim() === requestedSellerId &&
+    (!requestedProductId || baseProductContext.productId.trim() === requestedProductId);
+  const persistedTenantProductAvailable =
+    catalogResolution.source === "persistence" &&
+    productOwnedByTenant;
+  const readiness = await getOrderRuntimeReadiness(
+    requestedSellerId,
+    input.activationRequested === true,
+    persistedTenantProductAvailable,
+  );
   if (!readiness.flowEnabled || !readiness.valkeyReady) return { handled: false, warnings: [] };
 
-  const sellerConfig = normalizeSellerConfig(sellerConfigService.getSellerConfig(input.sellerId));
-  const baseProductContext = productContextService.getActiveProductContext(input.sellerId);
+  const sellerConfig = normalizeSellerConfig(
+    knownSeller
+      ? sellerConfigService.getSellerConfig(requestedSellerId)
+      : {
+          ...sellerConfigService.getSellerConfig(DEFAULT_DEMO_SELLER_ID),
+          sellerId: requestedSellerId,
+        },
+  );
+  if (!productOwnedByTenant) {
+    return {
+      handled: true,
+      reply: orderMessage("error.recovery"),
+      stage: "RECOVERY_REQUIRED",
+      warnings: ["tenant_product_scope_mismatch"],
+      failureCode: "PRODUCT_MISMATCH",
+    };
+  }
   const activeConversationConfig = getActiveConversationConfig();
   const productContext = activeConversationConfig
     ? applyResolvedConversationProductConfig(
@@ -174,7 +238,11 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
       )
     : baseProductContext;
   const fields = requiredFieldsService.getOrderFields({ sellerConfig, productContext });
-  const offers = offerConfigService.getConfiguredOffers({ sellerId: input.sellerId, productId: productContext.productId });
+  const offers = offerConfigService.getConfiguredOffers({
+    sellerId: input.sellerId,
+    productId: productContext.productId,
+    productContexts: [productContext],
+  });
   const identity = runtimeIdentity(input, productContext.productId);
   const loaded = await loadOrderRuntimeSession({ ...identity, fields });
   const runtime = loaded.runtime;
@@ -304,10 +372,22 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
           : { handled: false, warnings: [] };
       }
 
+      const selectedField = fields.find(
+        (field) => field.key === selection.action!.fieldKey,
+      );
+      const canonicalValue = selectedField
+        ? resolveConfiguredOptionCanonicalValue(
+            selectedField,
+            selection.action.canonicalValue,
+          )
+        : undefined;
+      if (!canonicalValue) {
+        return asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage });
+      }
       const validation = validateItemCollectionOption({
         fields,
         optionKey: selection.action.fieldKey,
-        value: selection.action.canonicalValue,
+        value: canonicalValue,
       });
       if (!validation.valid) {
         return asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage });

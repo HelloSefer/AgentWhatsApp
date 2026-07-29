@@ -8,6 +8,7 @@ import {
 import type {
   CreateWhatsAppConnectionCandidateInput,
   CreateManualWhatsAppConnectionDraftInput,
+  ReplaceManualWhatsAppConnectionCredentialsInput,
   VerifiedWhatsAppConnectionMetadataInput,
   WhatsAppConnectionFinalizationProgressInput,
   WhatsAppConnectionRepository,
@@ -23,6 +24,7 @@ import type {
 } from "../../domain/whatsapp-connection-credentials.types";
 import {
   WhatsAppConnectionActiveAlreadyExistsError,
+  WhatsAppConnectionCompletionConflictError,
   WhatsAppConnectionPersistenceError,
   WhatsAppConnectionPhoneNumberAlreadyAssignedError,
   WhatsAppConnectionSellerNotFoundError,
@@ -36,6 +38,7 @@ import {
 import {
   normalizeConnectionId,
   normalizeDisplayPhoneNumber,
+  normalizeMetaAppId,
   normalizeMetaId,
   normalizeOptionalWhatsAppConnectionText,
   validateWhatsAppConnectionStatus,
@@ -104,6 +107,7 @@ function mapWriteError(error: unknown): never {
     error instanceof WhatsAppConnectionPersistenceError ||
     error instanceof WhatsAppConnectionSellerNotFoundError ||
     error instanceof WhatsAppConnectionActiveAlreadyExistsError ||
+    error instanceof WhatsAppConnectionCompletionConflictError ||
     error instanceof WhatsAppConnectionPhoneNumberAlreadyAssignedError
   ) throw error;
 
@@ -112,6 +116,7 @@ function mapWriteError(error: unknown): never {
     const constraint = constraintName(error);
     if (constraint === "whatsapp_connections_one_active_per_seller_idx") throw new WhatsAppConnectionActiveAlreadyExistsError();
     if (constraint === "whatsapp_connections_phone_number_id_unique_idx" || constraint === "whatsapp_connections_current_phone_number_id_unique_idx") throw new WhatsAppConnectionPhoneNumberAlreadyAssignedError();
+    if (constraint === "whatsapp_connections_manual_pending_retry_idx") throw new WhatsAppConnectionCompletionConflictError();
   }
   throw new WhatsAppConnectionPersistenceError(error);
 }
@@ -530,6 +535,72 @@ export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectio
         values: [tenant.sellerId, normalizedConnectionId, encryptedMetaAppSecret, metaAppSecretKeyVersion, encryptedSystemUserAccessToken, systemUserAccessTokenKeyVersion, encryptedWebhookVerifyToken, webhookVerifyTokenKeyVersion],
       });
       return result.rows[0] ? mapManualCredentialStorage(result.rows[0]) : null;
+    } catch (error) {
+      mapWriteError(error);
+    }
+  }
+
+  async replaceManualCredentialsAndResetState(tenant: TenantContext, connectionId: string, credential: ReplaceManualWhatsAppConnectionCredentialsInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
+    const normalizedConnectionId = normalizeConnectionId(connectionId);
+    const metaAppId = normalizeMetaAppId(credential.metaAppId);
+    const encryptedMetaAppSecret = normalizeCredentialField(credential.encryptedMetaAppSecret);
+    const metaAppSecretKeyVersion = normalizeCredentialField(credential.metaAppSecretKeyVersion);
+    const encryptedSystemUserAccessToken = normalizeCredentialField(credential.encryptedSystemUserAccessToken);
+    const systemUserAccessTokenKeyVersion = normalizeCredentialField(credential.systemUserAccessTokenKeyVersion);
+    const encryptedWebhookVerifyToken = normalizeCredentialField(credential.encryptedWebhookVerifyToken);
+    const webhookVerifyTokenKeyVersion = normalizeCredentialField(credential.webhookVerifyTokenKeyVersion);
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `
+          UPDATE whatsapp_connections
+          SET
+            meta_app_id = $3,
+            encrypted_meta_app_secret = $4,
+            meta_app_secret_key_version = $5,
+            encrypted_system_user_access_token = $6,
+            system_user_access_token_key_version = $7,
+            encrypted_webhook_verify_token = $8,
+            webhook_verify_token_key_version = $9,
+            encrypted_access_token = NULL,
+            token_key_version = NULL,
+            token_fingerprint = NULL,
+            token_expires_at = NULL,
+            meta_business_id = NULL,
+            waba_id = NULL,
+            phone_number_id = NULL,
+            display_phone_number = NULL,
+            verified_name = NULL,
+            last_verified_at = NULL,
+            encrypted_registration_pin = NULL,
+            registration_pin_key_version = NULL,
+            registration_pin_fingerprint = NULL,
+            phone_registration_completed_at = NULL,
+            waba_subscription_completed_at = NULL,
+            finalization_last_error_code = NULL,
+            finalization_last_error_at = NULL,
+            connected_at = NULL,
+            disconnected_at = NULL,
+            status = 'PENDING',
+            updated_at = NOW()
+          WHERE seller_id = $1
+            AND connection_id = $2
+            AND connection_method = 'CUSTOMER_OWNED_META_APP'
+            AND status IN ('PENDING', 'VERIFYING', 'REPLACEMENT_PENDING', 'ERROR')
+          RETURNING ${CONNECTION_COLUMNS}
+        `,
+        values: [
+          tenant.sellerId,
+          normalizedConnectionId,
+          metaAppId,
+          encryptedMetaAppSecret,
+          metaAppSecretKeyVersion,
+          encryptedSystemUserAccessToken,
+          systemUserAccessTokenKeyVersion,
+          encryptedWebhookVerifyToken,
+          webhookVerifyTokenKeyVersion,
+        ],
+      });
+      return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
     } catch (error) {
       mapWriteError(error);
     }

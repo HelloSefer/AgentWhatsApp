@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Check, CheckCircle2, Loader2, RefreshCw, Smartphone } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Check, CheckCircle2, KeyRound, Loader2, RefreshCw, Smartphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DiscoveredWhatsAppPhone, ManualDiscoveryResult } from "../services/embedded-signup-completion-service";
 import { statusText } from "./customer-owned-meta-app-wizard-view-models";
@@ -13,34 +15,49 @@ export function CustomerOwnedMetaAppNumberStep({
   error,
   isLoading,
   isSelecting,
-  onBack,
   onRefresh,
   onSelect,
+  onUpdateCredentials,
+  onVerifyManual,
+  requiresManualAssetEntry,
 }: Readonly<{
   discovery: ManualDiscoveryResult | null;
   error: string | null;
   isLoading: boolean;
   isSelecting: boolean;
-  onBack: () => void;
   onRefresh: () => void;
   onSelect: (phone: DiscoveredWhatsAppPhone) => void;
+  onUpdateCredentials: () => void;
+  onVerifyManual: (input: Pick<DiscoveredWhatsAppPhone, "wabaId" | "phoneNumberId">) => void;
+  requiresManualAssetEntry: boolean;
 }>) {
   const phones = useMemo(() => discovery?.accounts.flatMap((account) => account.phones) ?? [], [discovery]);
   const [selectedId, setSelectedId] = useState<string>("");
+  const [manualWabaId, setManualWabaId] = useState("");
+  const [manualPhoneNumberId, setManualPhoneNumberId] = useState("");
   const selectedPhone = phones.find((phone) => phone.phoneNumberId === selectedId) ?? null;
+  const normalizedManualWabaId = manualWabaId.trim();
+  const normalizedManualPhoneNumberId = manualPhoneNumberId.trim();
+  const manualIdsValid =
+    /^[0-9]{1,32}$/u.test(normalizedManualWabaId) &&
+    /^[0-9]{1,32}$/u.test(normalizedManualPhoneNumberId);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-foreground">Choose WhatsApp number</h3>
+          <h3 className="text-lg font-semibold text-foreground">
+            {requiresManualAssetEntry ? "Enter your WhatsApp account details" : "Choose WhatsApp number"}
+          </h3>
           <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Choose the WhatsApp number AgentWhatsApp should use.
+            {requiresManualAssetEntry
+              ? "Find both values in Meta WhatsApp API Setup. AgentWhatsApp will verify the account and number directly with Meta."
+              : "Choose the WhatsApp number AgentWhatsApp should use."}
           </p>
         </div>
         <Button className="min-h-11 w-full sm:w-auto" disabled={isLoading || isSelecting} onClick={onRefresh} type="button" variant="outline">
           {isLoading ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <RefreshCw aria-hidden="true" />}
-          Refresh
+          {discovery ? "Refresh" : requiresManualAssetEntry ? "Retry automatic discovery" : "Find WhatsApp accounts"}
         </Button>
       </div>
 
@@ -51,13 +68,13 @@ export function CustomerOwnedMetaAppNumberStep({
         </div>
       ) : null}
 
-      {!isLoading && discovery?.accounts.length === 0 ? (
+      {!isLoading && !requiresManualAssetEntry && discovery?.accounts.length === 0 ? (
         <div className="rounded-xl border border-border bg-background p-4 text-sm leading-6 text-muted-foreground">
           No accessible WhatsApp Business Account was found. Check the System User access in Meta, then refresh.
         </div>
       ) : null}
 
-      <div className="space-y-4">
+      {!requiresManualAssetEntry ? <div className="space-y-4">
         {discovery?.accounts.map((account) => (
           <section className="rounded-xl border border-marketing-border bg-marketing-canvas p-3" key={account.wabaId}>
             <div className="flex flex-wrap items-center gap-2">
@@ -108,7 +125,39 @@ export function CustomerOwnedMetaAppNumberStep({
             )}
           </section>
         ))}
-      </div>
+      </div> : null}
+
+      {requiresManualAssetEntry ? (
+        <div className="grid gap-4 rounded-xl border border-marketing-border bg-marketing-canvas p-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="manual-waba-id">WhatsApp Business Account ID</Label>
+            <Input
+              autoComplete="off"
+              disabled={isSelecting}
+              id="manual-waba-id"
+              inputMode="numeric"
+              onChange={(event) => setManualWabaId(event.target.value)}
+              placeholder="Enter WABA ID"
+              value={manualWabaId}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="manual-phone-number-id">Phone Number ID</Label>
+            <Input
+              autoComplete="off"
+              disabled={isSelecting}
+              id="manual-phone-number-id"
+              inputMode="numeric"
+              onChange={(event) => setManualPhoneNumberId(event.target.value)}
+              placeholder="Enter Phone Number ID"
+              value={manualPhoneNumberId}
+            />
+          </div>
+          <p className="text-sm leading-6 text-muted-foreground sm:col-span-2">
+            In Meta, open your app, choose WhatsApp, then API Setup. Copy the WhatsApp Business Account ID and Phone Number ID shown there.
+          </p>
+        </div>
+      ) : null}
 
       {error ? (
         <p className="rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm leading-6 text-foreground" role="alert">
@@ -117,18 +166,24 @@ export function CustomerOwnedMetaAppNumberStep({
       ) : null}
 
       <div className="flex flex-col justify-between gap-2 border-t border-marketing-border pt-4 sm:flex-row">
-        <Button className="min-h-11 w-full sm:w-auto" disabled={isLoading || isSelecting} onClick={onBack} type="button" variant="outline">
-          <ArrowLeft aria-hidden="true" />
-          Back
+        <Button className="min-h-11 w-full sm:w-auto" disabled={isLoading || isSelecting} onClick={onUpdateCredentials} type="button" variant="outline">
+          <KeyRound aria-hidden="true" />
+          Update Meta credentials
         </Button>
         <Button
           className="min-h-11 w-full bg-emerald-600 text-white hover:bg-emerald-700 sm:w-auto"
-          disabled={!selectedPhone || isSelecting}
-          onClick={() => selectedPhone && onSelect(selectedPhone)}
+          disabled={requiresManualAssetEntry ? !manualIdsValid || isSelecting : !selectedPhone || isSelecting}
+          onClick={() => {
+            if (requiresManualAssetEntry && manualIdsValid) {
+              onVerifyManual({ wabaId: normalizedManualWabaId, phoneNumberId: normalizedManualPhoneNumberId });
+              return;
+            }
+            if (selectedPhone) onSelect(selectedPhone);
+          }}
           type="button"
         >
           {isSelecting ? <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <Check aria-hidden="true" />}
-          Use this WhatsApp number
+          {requiresManualAssetEntry ? "Verify WhatsApp number" : "Use this WhatsApp number"}
         </Button>
       </div>
     </div>

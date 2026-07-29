@@ -9,6 +9,7 @@ import { whatsappOutboundQueueDefinition } from "../../modules/whatsapp/cloud/ou
 import { WHATSAPP_INBOUND_RETRY_ATTEMPTS } from "../../modules/whatsapp/cloud/inbound-queue/whatsapp-inbound-queue.definition";
 import { WHATSAPP_OUTBOUND_RETRY_ATTEMPTS } from "../../modules/whatsapp/cloud/outbound-queue/whatsapp-outbound-queue.definition";
 import { WhatsAppTransactionalOutboxRepository } from "../../modules/whatsapp/cloud/transactional-outbox";
+import { getWhatsAppConnectionCredentialEncryptionConfiguration } from "../../modules/whatsapp-connection/application/whatsapp-connection-credential-encryption.config";
 
 export type WhatsAppPhase8EffectiveFlags = Readonly<{
   inboundQueue: boolean;
@@ -117,11 +118,12 @@ async function queueConstructible(name: "inbound" | "outbound"): Promise<WhatsAp
 
 function cloudRoutingReady(): WhatsAppPhase8ReadinessCheck {
   if (env.whatsappProvider !== "cloud_api") return fail("unsupported_provider");
-  if (!env.whatsappCloudPhoneNumberId.trim()) return fail("phone_number_id_missing");
-  if (!env.whatsappCloudAccessToken.trim() && env.whatsappCloudDryRun !== true) {
-    return fail("access_token_missing");
+  try {
+    getWhatsAppConnectionCredentialEncryptionConfiguration();
+  } catch {
+    return fail("connection_credential_encryption_unavailable");
   }
-  return ok(env.whatsappCloudDryRun ? "dry_run_configured" : "cloud_api_configured");
+  return ok("connection_scoped_cloud_api_configured");
 }
 
 export async function buildWhatsAppPhase8RuntimeReadiness(): Promise<WhatsAppPhase8RuntimeReadiness> {

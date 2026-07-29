@@ -11,8 +11,8 @@ type DashboardAuthGuardProps = Readonly<{
 }>;
 
 function dashboardReturnPath(pathname: string | null): string {
-  if (!pathname || pathname !== "/dashboard") return "/dashboard";
-  return pathname;
+  if (pathname === "/dashboard" || pathname?.startsWith("/dashboard/")) return pathname;
+  return "/dashboard";
 }
 
 export function DashboardAuthGuard({ children }: DashboardAuthGuardProps) {
@@ -22,7 +22,7 @@ export function DashboardAuthGuard({ children }: DashboardAuthGuardProps) {
 
   useEffect(() => {
     if (!auth.isUnauthenticated) return;
-    router.replace(`/login?redirectTo=${dashboardReturnPath(pathname)}`);
+    router.replace(`/login?redirectTo=${encodeURIComponent(dashboardReturnPath(pathname))}`);
   }, [auth.isUnauthenticated, pathname, router]);
 
   useEffect(() => {

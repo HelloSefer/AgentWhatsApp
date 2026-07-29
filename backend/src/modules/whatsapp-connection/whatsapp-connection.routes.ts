@@ -57,27 +57,36 @@ export function createWhatsAppConnectionRoutes(
   const authorizeRead = requirePermission(authComposition.authorizationService, "whatsapp_connection.read");
   const authorizeManage = requirePermission(authComposition.authorizationService, "whatsapp_connection.manage");
   const userIdentifier = (req: Request) => (req as Partial<{ auth?: { userId?: string } }>).auth?.userId ?? req.ip;
+  const manualIdentifier = (req: Request) => {
+    const auth = (req as Partial<{ auth?: { userId?: string } }>).auth?.userId ?? "unknown";
+    const sellerId = (req as Partial<{ tenant?: { sellerId?: string } }>).tenant?.sellerId ?? "unknown";
+    return `${auth}:${sellerId}`;
+  };
+  const manualRateLimitOptions = { issueCode: "RATE_LIMITED" } as const;
 
   const metaConfiguration = safeMetaConfiguration();
   const credentialService = safeCredentialService();
+  const credentialEncryptionService = safeCredentialEncryptionService();
+  const manualMetaTransport = new FetchManualMetaAppTransport(metaConfiguration?.graphApiVersion ?? "v25.0");
   const manualSetupService = new ManualConnectionSetupService(
     postgreSqlWhatsAppConnectionRepository,
-    safeCredentialEncryptionService(),
+    credentialEncryptionService,
+    manualMetaTransport,
   );
   const manualAssetsService = new ManualConnectionAssetsService(
     postgreSqlWhatsAppConnectionRepository,
-    safeCredentialEncryptionService(),
-    new FetchManualMetaAppTransport(metaConfiguration?.graphApiVersion ?? "v25.0"),
+    credentialEncryptionService,
+    manualMetaTransport,
   );
   const manualWebhookConfigurationService = new ManualWebhookConfigurationService(
     postgreSqlWhatsAppConnectionRepository,
-    safeCredentialEncryptionService(),
-    new FetchManualMetaAppTransport(metaConfiguration?.graphApiVersion ?? "v25.0"),
+    credentialEncryptionService,
+    manualMetaTransport,
   );
   const manualFinalizationService = new ManualConnectionFinalizationService(
     postgreSqlWhatsAppConnectionRepository,
-    safeCredentialEncryptionService(),
-    new FetchManualMetaAppTransport(metaConfiguration?.graphApiVersion ?? "v25.0"),
+    credentialEncryptionService,
+    manualMetaTransport,
   );
   const metaTransport = metaConfiguration
     ? new FetchMetaEmbeddedSignupTransport(metaConfiguration)
@@ -116,40 +125,48 @@ export function createWhatsAppConnectionRoutes(
   router.post(
     "/manual/setup",
     authenticate,
-    rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
     authorizeManage,
+    rateLimitAuth(authComposition.authRateLimiter, "manual_whatsapp_setup", manualIdentifier, manualRateLimitOptions),
     controller.setupManualConnection,
   );
 
   router.post(
     "/manual/:connectionId/discover",
     authenticate,
-    rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
     authorizeManage,
+    rateLimitAuth(authComposition.authRateLimiter, "manual_whatsapp_discover", manualIdentifier, manualRateLimitOptions),
     controller.discoverManualAssets,
+  );
+
+  router.post(
+    "/manual/:connectionId/credentials",
+    authenticate,
+    authorizeManage,
+    rateLimitAuth(authComposition.authRateLimiter, "manual_whatsapp_setup", manualIdentifier, manualRateLimitOptions),
+    controller.replaceManualCredentials,
   );
 
   router.post(
     "/manual/:connectionId/select-assets",
     authenticate,
-    rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
     authorizeManage,
+    rateLimitAuth(authComposition.authRateLimiter, "manual_whatsapp_select_assets", manualIdentifier, manualRateLimitOptions),
     controller.selectManualAssets,
   );
 
   router.post(
     "/manual/:connectionId/configure-webhook",
     authenticate,
-    rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
     authorizeManage,
+    rateLimitAuth(authComposition.authRateLimiter, "manual_whatsapp_configure_webhook", manualIdentifier, manualRateLimitOptions),
     controller.configureManualWebhook,
   );
 
   router.post(
     "/manual/:connectionId/finalize",
     authenticate,
-    rateLimitAuth(authComposition.authRateLimiter, "onboarding_workspace_create", userIdentifier),
     authorizeManage,
+    rateLimitAuth(authComposition.authRateLimiter, "manual_whatsapp_finalize", manualIdentifier, manualRateLimitOptions),
     controller.finalizeManualConnection,
   );
 

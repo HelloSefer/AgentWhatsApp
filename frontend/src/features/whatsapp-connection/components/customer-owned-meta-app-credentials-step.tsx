@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { validateManualSetupCredentials } from "../services/embedded-signup-completion-service";
 import { EMPTY_CREDENTIALS, type CredentialsForm } from "./customer-owned-meta-app-wizard-types";
 
 export function CustomerOwnedMetaAppCredentialsStep({
@@ -35,17 +36,14 @@ export function CustomerOwnedMetaAppCredentialsStep({
     event.preventDefault();
     if (isSubmitting) return;
 
-    const appId = values.appId.trim();
-    const appSecret = values.appSecret.trim();
-    const systemUserAccessToken = values.systemUserAccessToken.trim();
-
-    if (!appId || !appSecret || !systemUserAccessToken) {
-      setFormError("Enter the Meta App ID, App Secret, and System User token.");
+    const validation = validateManualSetupCredentials(values);
+    if (!validation.valid) {
+      setFormError(validation.message);
       return;
     }
 
     setFormError(null);
-    onSubmit({ appId, appSecret, systemUserAccessToken });
+    onSubmit(validation.value);
   };
 
   return (
@@ -83,7 +81,10 @@ export function CustomerOwnedMetaAppCredentialsStep({
               className={inputClassName}
               id="manual-app-id"
               inputMode="numeric"
-              onChange={(event) => setValues((current) => ({ ...current, appId: event.target.value }))}
+              onChange={(event) => {
+                setFormError(null);
+                setValues((current) => ({ ...current, appId: event.target.value }));
+              }}
               type="text"
               value={values.appId}
             />
@@ -102,7 +103,10 @@ export function CustomerOwnedMetaAppCredentialsStep({
                 autoComplete="new-password"
                 className={cn(inputClassName, "pr-14")}
                 id="manual-app-secret"
-                onChange={(event) => setValues((current) => ({ ...current, appSecret: event.target.value }))}
+                onChange={(event) => {
+                  setFormError(null);
+                  setValues((current) => ({ ...current, appSecret: event.target.value }));
+                }}
                 type={showSecret ? "text" : "password"}
                 value={values.appSecret}
               />
@@ -139,7 +143,10 @@ export function CustomerOwnedMetaAppCredentialsStep({
                   !showToken && "[text-security:disc] [-webkit-text-security:disc]",
                 )}
                 id="manual-system-user-token"
-                onChange={(event) => setValues((current) => ({ ...current, systemUserAccessToken: event.target.value }))}
+                onChange={(event) => {
+                  setFormError(null);
+                  setValues((current) => ({ ...current, systemUserAccessToken: event.target.value }));
+                }}
                 value={values.systemUserAccessToken}
               />
               <Button

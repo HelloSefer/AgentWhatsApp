@@ -8,14 +8,28 @@ import {
   getDatabaseMigrationStatus,
   getDatabasePoolState,
   runDatabaseMigrations,
+  withTransaction,
+  type DatabaseTransactionExecutor,
 } from "../../../infrastructure/database";
 import { roleHasPermission } from "../../auth";
 import { SellerService } from "../../seller/application/seller.service";
 import { PostgreSqlSellerRepository } from "../../seller/infrastructure/postgresql/postgresql-seller.repository";
 import { ManualConnectionSetupService } from "../application/manual-connection-setup.service";
+import { MANUAL_SYSTEM_USER_REQUIRED_WHATSAPP_SCOPES } from "../application/manual-system-user-token-validation";
 import { WhatsAppConnectionCredentialEncryptionService } from "../application/whatsapp-connection-credential-encryption.service";
 import { validateWhatsAppConnectionCredentialEncryptionConfiguration } from "../application/whatsapp-connection-credential-encryption.config";
+import {
+  recordWhatsAppConnectionAudit,
+  setWhatsAppConnectionOperationalRecorderForTesting,
+} from "../application/whatsapp-connection-operational-events";
 import { WhatsAppConnectionCurrentService } from "../application/whatsapp-connection-current.service";
+import type { ManualWhatsAppConnectionRepository } from "../contracts/whatsapp-connection.repository";
+import { WhatsAppConnectionMetaTransportError } from "../domain/whatsapp-connection.errors";
+import {
+  normalizeManualMetaAppSecret,
+  normalizeManualSystemUserAccessToken,
+} from "../domain/whatsapp-connection.validation";
+import type { ManualMetaAppTransport, ManualMetaPhoneNumber, ManualMetaTokenInspectionResult, ManualMetaWaba } from "../infrastructure/meta/manual-meta-app.transport";
 import { PostgreSqlWhatsAppConnectionRepository } from "../infrastructure/postgresql/postgresql-whatsapp-connection.repository";
 import { WhatsAppConnectionController } from "../http/whatsapp-connection.controller";
 
@@ -34,6 +48,26 @@ type RawManualRow = Readonly<{
   system_user_access_token_key_version: string | null;
   encrypted_webhook_verify_token: string | null;
   webhook_verify_token_key_version: string | null;
+  encrypted_access_token: string | null;
+  token_key_version: string | null;
+  token_fingerprint: string | null;
+  token_expires_at: Date | null;
+  meta_business_id: string | null;
+  waba_id: string | null;
+  phone_number_id: string | null;
+  display_phone_number: string | null;
+  verified_name: string | null;
+  last_verified_at: Date | null;
+  encrypted_registration_pin: string | null;
+  registration_pin_key_version: string | null;
+  registration_pin_fingerprint: string | null;
+  phone_registration_completed_at: Date | null;
+  waba_subscription_completed_at: Date | null;
+  finalization_last_error_code: string | null;
+  finalization_last_error_at: Date | null;
+  connected_at: Date | null;
+  disconnected_at: Date | null;
+  replaced_connection_id: string | null;
 }>;
 
 const cases: TestCase[] = [];
@@ -57,6 +91,38 @@ function encryptionService(): WhatsAppConnectionCredentialEncryptionService {
     activeKeyVersion: "phase11k_m1",
     keysJson: JSON.stringify({ phase11k_m1: key }),
   }));
+}
+
+class FakeManualMetaTransport implements ManualMetaAppTransport {
+  valid = true;
+  type = "SYSTEM_USER";
+  scopes: readonly string[] = MANUAL_SYSTEM_USER_REQUIRED_WHATSAPP_SCOPES;
+  expiresAt: Date | null = new Date(Date.now() + 86_400_000);
+  reportedAppId: string | null = null;
+  systemUserId: string | null = "system_user_phase11k_m1";
+  failure: WhatsAppConnectionMetaTransportError | null = null;
+  inspections = 0;
+
+  async inspectSystemUserToken(appId: string): Promise<ManualMetaTokenInspectionResult> {
+    this.inspections += 1;
+    if (this.failure) throw this.failure;
+    return {
+      valid: this.valid,
+      appId: this.reportedAppId ?? appId,
+      type: this.type,
+      scopes: this.scopes,
+      expiresAt: this.expiresAt,
+      systemUserId: this.systemUserId,
+    };
+  }
+
+  async listAssignedWabas(): Promise<readonly ManualMetaWaba[]> {
+    return [];
+  }
+
+  async listPhoneNumbers(): Promise<readonly ManualMetaPhoneNumber[]> {
+    return [];
+  }
 }
 
 function responseProbe(): Partial<Response> & { statusCode?: number; body?: unknown } {
@@ -84,6 +150,25 @@ async function cleanup(): Promise<void> {
   await executeDatabaseQuery({ text: "DELETE FROM sellers WHERE seller_id = ANY($1::varchar[])", values: [sellerIds] });
 }
 
+async function readRawManualRow(sellerId: string, connectionId: string): Promise<RawManualRow | undefined> {
+  const result = await executeDatabaseQuery<RawManualRow>({
+    text: `
+      SELECT connection_method, status, meta_app_id, public_webhook_id, encrypted_meta_app_secret, meta_app_secret_key_version,
+             encrypted_system_user_access_token, system_user_access_token_key_version, encrypted_webhook_verify_token, webhook_verify_token_key_version,
+             encrypted_access_token, token_key_version, token_fingerprint, token_expires_at,
+             meta_business_id, waba_id, phone_number_id, display_phone_number, verified_name, last_verified_at,
+             encrypted_registration_pin, registration_pin_key_version, registration_pin_fingerprint,
+             phone_registration_completed_at, waba_subscription_completed_at, finalization_last_error_code, finalization_last_error_at,
+             connected_at, disconnected_at, replaced_connection_id
+      FROM whatsapp_connections
+      WHERE seller_id = $1 AND connection_id = $2
+      LIMIT 1
+    `,
+    values: [sellerId, connectionId],
+  });
+  return result.rows[0];
+}
+
 async function expectsError(callback: () => Promise<unknown> | unknown): Promise<boolean> {
   try {
     await callback();
@@ -91,6 +176,37 @@ async function expectsError(callback: () => Promise<unknown> | unknown): Promise
   } catch {
     return true;
   }
+}
+
+async function manualSetupResponse(
+  service: ManualConnectionSetupService,
+  tenant = createTenantContext("seller_phase11k_manual_error"),
+  body: Record<string, unknown> = {
+    appId: "123456789012345",
+    appSecret: "safe_fake_controller_app_secret",
+    systemUserAccessToken: "safe_fake_controller_system_user_token",
+  },
+): Promise<Partial<Response> & { statusCode?: number; body?: unknown }> {
+  const controller = new WhatsAppConnectionController({} as never, undefined, undefined, undefined, service);
+  const res = responseProbe();
+  await controller.setupManualConnection({ body, tenant } as unknown as Request, res as Response);
+  return res;
+}
+
+async function manualCredentialReplacementResponse(
+  service: ManualConnectionSetupService,
+  tenant: ReturnType<typeof createTenantContext>,
+  connectionId: string,
+  body: Record<string, unknown>,
+): Promise<Partial<Response> & { statusCode?: number; body?: unknown }> {
+  const controller = new WhatsAppConnectionController({} as never, undefined, undefined, undefined, service);
+  const res = responseProbe();
+  await controller.replaceManualCredentials({
+    body,
+    params: { connectionId },
+    tenant,
+  } as unknown as Request, res as Response);
+  return res;
 }
 
 async function main(): Promise<void> {
@@ -106,7 +222,8 @@ async function main(): Promise<void> {
   const sellerService = new SellerService(new PostgreSqlSellerRepository());
   const repository = new PostgreSqlWhatsAppConnectionRepository();
   const encryption = encryptionService();
-  const setupService = new ManualConnectionSetupService(repository, encryption);
+  const transport = new FakeManualMetaTransport();
+  const setupService = new ManualConnectionSetupService(repository, encryption, transport);
   const currentService = new WhatsAppConnectionCurrentService(repository);
 
   const sellerA = uniqueId("seller_phase11k_m1");
@@ -131,23 +248,83 @@ async function main(): Promise<void> {
     add("existing ACTIVE connection remains untouched", (await repository.findActiveBySeller(tenantA))?.connectionId === activated?.connectionId);
     add("setup response includes safe callback path and one-time verify token", setup.webhookSetup.callbackPath.startsWith("/api/whatsapp/webhooks/connections/") && Boolean(setup.webhookSetup.verifyToken) && !setup.webhookSetup.callbackPath.includes(sellerA));
 
-    const raw = await executeDatabaseQuery<RawManualRow>({
-      text: `
-        SELECT connection_method, status, meta_app_id, public_webhook_id, encrypted_meta_app_secret, meta_app_secret_key_version,
-               encrypted_system_user_access_token, system_user_access_token_key_version, encrypted_webhook_verify_token, webhook_verify_token_key_version
-        FROM whatsapp_connections
-        WHERE seller_id = $1 AND connection_id = $2
-        LIMIT 1
-      `,
-      values: [sellerA, setup.connection.connectionId],
-    });
-    const rawRow = raw.rows[0];
+    const formattingInspectionsBefore = transport.inspections;
+    const malformedCredentialResponses = await Promise.all([
+      manualSetupResponse(setupService, tenantA, { appId, appSecret: `"${appSecret}"`, systemUserAccessToken }),
+      manualSetupResponse(setupService, tenantA, { appId, appSecret: `${appSecret}\n`, systemUserAccessToken }),
+      manualSetupResponse(setupService, tenantA, { appId, appSecret, systemUserAccessToken: ` ${systemUserAccessToken}` }),
+      manualSetupResponse(setupService, tenantA, { appId, appSecret, systemUserAccessToken: `"${systemUserAccessToken}"` }),
+      manualSetupResponse(setupService, tenantA, { appId, appSecret, systemUserAccessToken: `${systemUserAccessToken}\n` }),
+    ]);
+    add("quoted, whitespace-padded, or multiline credential formats fail before Meta", malformedCredentialResponses.every((response) => response.statusCode === 400) && transport.inspections === formattingInspectionsBefore);
+    add("App Secret edge spacing is trimmed without mutating valid internal characters", normalizeManualMetaAppSecret("  internal|secret value  ") === "internal|secret value");
+    add("valid System User token punctuation is preserved exactly", normalizeManualSystemUserAccessToken("EA-valid_token+value=/") === "EA-valid_token+value=/");
+
+    const rawRow = await readRawManualRow(sellerA, setup.connection.connectionId);
     const stored = await repository.findManualCredentialStorage(tenantA, setup.connection.connectionId);
     add("manual non-secret metadata persists safely", rawRow?.connection_method === "CUSTOMER_OWNED_META_APP" && rawRow.status === "PENDING" && rawRow.meta_app_id === appId);
-    add("App Secret and System User Token are encrypted before persistence", Boolean(rawRow?.encrypted_meta_app_secret) && Boolean(rawRow?.encrypted_system_user_access_token) && rawRow?.encrypted_meta_app_secret !== appSecret && rawRow.encrypted_system_user_access_token !== systemUserAccessToken);
+    add("App Secret and System User Token are encrypted before persistence", rawRow !== undefined && Boolean(rawRow.encrypted_meta_app_secret) && Boolean(rawRow.encrypted_system_user_access_token) && rawRow.encrypted_meta_app_secret !== appSecret && rawRow.encrypted_system_user_access_token !== systemUserAccessToken);
     add("plaintext manual secrets are never stored", !JSON.stringify(rawRow).includes(appSecret) && !JSON.stringify(rawRow).includes(systemUserAccessToken) && !JSON.stringify(rawRow).includes(setup.webhookSetup.verifyToken));
     add("server generates and encrypts webhook Verify Token", Boolean(rawRow?.encrypted_webhook_verify_token) && stored !== null && encryption.decryptManualWebhookVerifyToken(stored.encryptedWebhookVerifyToken) === setup.webhookSetup.verifyToken);
     add("manual credential key versions persist without fingerprints", rawRow?.meta_app_secret_key_version === "phase11k_m1" && rawRow.system_user_access_token_key_version === "phase11k_m1" && rawRow.webhook_verify_token_key_version === "phase11k_m1");
+
+    const rejectedCredentialAppId = "991122334455667";
+    transport.reportedAppId = "991122334455668";
+    const appMismatchResponse = await manualSetupResponse(setupService, tenantA, {
+      appId: rejectedCredentialAppId,
+      appSecret,
+      systemUserAccessToken,
+    });
+    transport.reportedAppId = null;
+    transport.type = "USER";
+    transport.systemUserId = null;
+    const tokenTypeResponse = await manualSetupResponse(setupService, tenantA, {
+      appId: rejectedCredentialAppId,
+      appSecret,
+      systemUserAccessToken,
+    });
+    transport.type = "SYSTEM_USER";
+    transport.systemUserId = "system_user_phase11k_m1";
+    transport.scopes = ["whatsapp_business_management"];
+    const permissionResponse = await manualSetupResponse(setupService, tenantA, {
+      appId: rejectedCredentialAppId,
+      appSecret,
+      systemUserAccessToken,
+    });
+    transport.scopes = MANUAL_SYSTEM_USER_REQUIRED_WHATSAPP_SCOPES;
+    transport.expiresAt = new Date(Date.now() - 60_000);
+    const expiredResponse = await manualSetupResponse(setupService, tenantA, {
+      appId: rejectedCredentialAppId,
+      appSecret,
+      systemUserAccessToken,
+    });
+    transport.expiresAt = new Date(Date.now() + 86_400_000);
+    add("setup enforces app relationship, System User type, token expiry, and both WhatsApp scopes", JSON.stringify(appMismatchResponse.body).includes("META_APP_CREDENTIAL_MISMATCH") && JSON.stringify(tokenTypeResponse.body).includes("META_TOKEN_TYPE_INVALID") && JSON.stringify(permissionResponse.body).includes("META_REQUIRED_PERMISSION_MISSING") && JSON.stringify(expiredResponse.body).includes("META_TOKEN_EXPIRED"));
+    transport.expiresAt = null;
+    const nonExpiringSetup = await setupService.setup(tenantA, {
+      appId: "991122334455669",
+      appSecret,
+      systemUserAccessToken,
+    });
+    transport.expiresAt = new Date(Date.now() + 86_400_000);
+    add("non-expiring System User tokens are accepted explicitly", nonExpiringSetup.connection.status === "PENDING");
+    add("failed credential verification never creates or mutates a draft", await repository.findReusableManualDraft(tenantA, rejectedCredentialAppId) === null);
+
+    const rollbackAppId = "111222333444555";
+    const rollbackSetupService = new ManualConnectionSetupService(repository, encryption, transport, async (callback) => {
+      await withTransaction(async (transaction) => {
+        await callback(transaction);
+        throw new Error("phase11k_m1_forced_commit_failure");
+      });
+      throw new Error("phase11k_m1_transaction_runner_returned_after_failure");
+    });
+    const rollbackFailed = await expectsError(() => rollbackSetupService.setup(tenantA, {
+      appId: rollbackAppId,
+      appSecret,
+      systemUserAccessToken,
+    }));
+    const rolledBackDraft = await repository.findReusableManualDraft(tenantA, rollbackAppId);
+    add("transaction failure rolls back the manual draft and all credentials", rollbackFailed && rolledBackDraft === null);
 
     const publicRead = await repository.findByConnectionId(tenantA, setup.connection.connectionId);
     const current = await currentService.getCurrent(tenantA);
@@ -155,13 +332,109 @@ async function main(): Promise<void> {
     add("current-status and ordinary reads never return Verify Token or manual secrets", !publicPayload.includes(setup.webhookSetup.verifyToken) && !publicPayload.includes(appSecret) && !publicPayload.includes(systemUserAccessToken));
     add("ordinary reads never return encrypted values, fingerprints, or key versions", !/encrypted|fingerprint|keyVersion|VerifyToken|AccessToken|AppSecret/u.test(publicPayload));
 
-    const retry = await setupService.setup(tenantA, { appId, appSecret: `${appSecret}_rotated`, systemUserAccessToken: `${systemUserAccessToken}_rotated` });
+    const storageBeforeInvalidRetry = await repository.findManualCredentialStorage(tenantA, setup.connection.connectionId);
+    transport.valid = false;
+    const invalidRetryResponse = await manualSetupResponse(setupService, tenantA, {
+      appId,
+      appSecret: `${appSecret}_invalid_retry`,
+      systemUserAccessToken: `${systemUserAccessToken}_invalid_retry`,
+    });
+    transport.valid = true;
+    const storageAfterInvalidRetry = await repository.findManualCredentialStorage(tenantA, setup.connection.connectionId);
+    add("invalid token cannot produce credentials-verified setup success", invalidRetryResponse.statusCode === 400 && JSON.stringify(invalidRetryResponse.body) === JSON.stringify({
+      message: "WhatsApp connection could not be validated.",
+      issueCode: "META_TOKEN_INVALID",
+    }));
+    add("existing draft cannot bypass submitted credential validation", storageBeforeInvalidRetry?.encryptedSystemUserAccessToken === storageAfterInvalidRetry?.encryptedSystemUserAccessToken);
+
+    const replacementAppSecret = `${appSecret}_rotated`;
+    const replacementAccessToken = `${systemUserAccessToken}_rotated`;
+    const inspectionsBeforeRetry = transport.inspections;
+    const retry = await setupService.setup(tenantA, {
+      appId,
+      appSecret: replacementAppSecret,
+      systemUserAccessToken: replacementAccessToken,
+    });
+    const retryStorage = await repository.findManualCredentialStorage(tenantA, retry.connection.connectionId);
     add("same seller retry reuses a safe existing draft", retry.connection.connectionId === setup.connection.connectionId && retry.webhookSetup.verifyToken !== setup.webhookSetup.verifyToken);
+    add("every setup retry performs real submitted credential inspection", transport.inspections === inspectionsBeforeRetry + 1);
+    add("same-draft retry atomically stores only the newest encrypted credentials", retryStorage !== null && encryption.decryptManualMetaAppSecret(retryStorage.encryptedMetaAppSecret) === replacementAppSecret && encryption.decryptManualSystemUserAccessToken(retryStorage.encryptedSystemUserAccessToken) === replacementAccessToken && encryption.decryptManualSystemUserAccessToken(retryStorage.encryptedSystemUserAccessToken) !== systemUserAccessToken);
+
+    await repository.persistAccessTokenCredential(tenantA, retry.connection.connectionId, encryption.encryptAccessToken("safe_fake_stale_generic_token"));
+    await repository.persistVerifiedMetadata(tenantA, retry.connection.connectionId, {
+      metaBusinessId: "772345678901230",
+      wabaId: "772345678901231",
+      phoneNumberId: "772345678901232",
+      displayPhoneNumber: "+212 600 000 333",
+      verifiedName: "Stale verified name",
+    });
+    await repository.persistRegistrationPinCredential(tenantA, retry.connection.connectionId, encryption.encryptRegistrationPin("123456"));
+    await repository.persistFinalizationProgress(tenantA, retry.connection.connectionId, {
+      phoneRegistrationCompletedAt: new Date(),
+      wabaSubscriptionCompletedAt: new Date(),
+      finalizationLastErrorCode: "meta_permission_denied",
+    });
+    await repository.updateLifecycleStatus(tenantA, retry.connection.connectionId, "VERIFYING");
+    const replacementPending = await repository.markReplacementPending(tenantA, retry.connection.connectionId, active.connectionId);
+    const publicWebhookIdBeforeReplacement = (await readRawManualRow(sellerA, retry.connection.connectionId))?.public_webhook_id;
+    const latestAppSecret = `${appSecret}_latest`;
+    const latestAccessToken = `${systemUserAccessToken}_latest`;
+    const replaceResponse = await manualCredentialReplacementResponse(setupService, tenantA, retry.connection.connectionId, {
+      appId,
+      appSecret: latestAppSecret,
+      systemUserAccessToken: latestAccessToken,
+    });
+    const resetRow = await readRawManualRow(sellerA, retry.connection.connectionId);
+    const resetStorage = await repository.findManualCredentialStorage(tenantA, retry.connection.connectionId);
+    add("dedicated credential replacement returns only verified PENDING state", replaceResponse.statusCode === 200 && (replaceResponse.body as { connection?: { status?: string } }).connection?.status === "PENDING" && !JSON.stringify(replaceResponse.body).includes(latestAppSecret) && !JSON.stringify(replaceResponse.body).includes(latestAccessToken));
+    add("credential replacement stores and exposes the newest token to subsequent backend reads", resetStorage !== null && encryption.decryptManualSystemUserAccessToken(resetStorage.encryptedSystemUserAccessToken) === latestAccessToken && encryption.decryptManualMetaAppSecret(resetStorage.encryptedMetaAppSecret) === latestAppSecret);
+    add("credential replacement clears stale asset, verification, finalization, generic-token, and PIN state atomically", resetRow?.status === "PENDING" && resetRow.meta_business_id === null && resetRow.waba_id === null && resetRow.phone_number_id === null && resetRow.display_phone_number === null && resetRow.verified_name === null && resetRow.last_verified_at === null && resetRow.encrypted_access_token === null && resetRow.token_key_version === null && resetRow.token_fingerprint === null && resetRow.token_expires_at === null && resetRow.encrypted_registration_pin === null && resetRow.registration_pin_key_version === null && resetRow.registration_pin_fingerprint === null && resetRow.phone_registration_completed_at === null && resetRow.waba_subscription_completed_at === null && resetRow.finalization_last_error_code === null && resetRow.finalization_last_error_at === null);
+    add("credential replacement preserves webhook identity and replacement linkage", replacementPending?.replacedConnectionId === active.connectionId && resetRow !== undefined && resetRow.public_webhook_id === publicWebhookIdBeforeReplacement && resetRow.replaced_connection_id === active.connectionId);
 
     const secondDraft = await setupService.setup(tenantA, { appId: "987654321098765", appSecret, systemUserAccessToken });
     const publicIdA = rawRow?.public_webhook_id ?? "";
     const publicIdB = secondDraft.webhookSetup.callbackPath.split("/").pop() ?? "";
     add("public webhook ID is opaque, unique, and not sellerId", Boolean(publicIdA) && publicIdA !== publicIdB && publicIdA !== sellerA && !publicIdA.includes(sellerA) && !/881234567890123/u.test(publicIdA));
+
+    const activeManual = await setupService.setup(tenantB, {
+      appId: "333444555666777",
+      appSecret,
+      systemUserAccessToken,
+    });
+    await repository.updateLifecycleStatus(tenantB, activeManual.connection.connectionId, "ACTIVE");
+    const activeManualStorageBefore = await repository.findManualCredentialStorage(tenantB, activeManual.connection.connectionId);
+    const inspectionsBeforeActiveReplacement = transport.inspections;
+    const activeReplacementResponse = await manualCredentialReplacementResponse(setupService, tenantB, activeManual.connection.connectionId, {
+      appId: "333444555666777",
+      appSecret: `${appSecret}_active_replacement`,
+      systemUserAccessToken: `${systemUserAccessToken}_active_replacement`,
+    });
+    const activeRepositoryReplacement = activeManualStorageBefore
+      ? await repository.replaceManualCredentialsAndResetState(tenantB, activeManual.connection.connectionId, {
+          metaAppId: "333444555666777",
+          encryptedMetaAppSecret: activeManualStorageBefore.encryptedMetaAppSecret,
+          metaAppSecretKeyVersion: activeManualStorageBefore.metaAppSecretKeyVersion,
+          encryptedSystemUserAccessToken: activeManualStorageBefore.encryptedSystemUserAccessToken,
+          systemUserAccessTokenKeyVersion: activeManualStorageBefore.systemUserAccessTokenKeyVersion,
+          encryptedWebhookVerifyToken: activeManualStorageBefore.encryptedWebhookVerifyToken,
+          webhookVerifyTokenKeyVersion: activeManualStorageBefore.webhookVerifyTokenKeyVersion,
+        })
+      : undefined;
+    const activeManualStorageAfter = await repository.findManualCredentialStorage(tenantB, activeManual.connection.connectionId);
+    add("ACTIVE manual connection credentials return the dedicated 409 issue without Meta or persistence", activeReplacementResponse.statusCode === 409 && JSON.stringify(activeReplacementResponse.body) === JSON.stringify({
+      message: "Active WhatsApp connection credentials cannot be replaced.",
+      issueCode: "MANUAL_CONNECTION_CREDENTIAL_REPLACEMENT_FORBIDDEN",
+    }) && transport.inspections === inspectionsBeforeActiveReplacement && activeRepositoryReplacement === null && activeManualStorageBefore?.encryptedSystemUserAccessToken === activeManualStorageAfter?.encryptedSystemUserAccessToken && (await repository.findByConnectionId(tenantB, activeManual.connection.connectionId))?.status === "ACTIVE");
+
+    const inspectionsBeforeUnknownReplacementBody = transport.inspections;
+    const unknownReplacementBody = await manualCredentialReplacementResponse(setupService, tenantA, retry.connection.connectionId, {
+      appId,
+      appSecret,
+      systemUserAccessToken,
+      sellerId: sellerA,
+    });
+    add("credential replacement rejects unknown browser fields before Meta or persistence", unknownReplacementBody.statusCode === 400 && transport.inspections === inspectionsBeforeUnknownReplacementBody);
+
     add("another seller cannot read or update the draft", await repository.findByConnectionId(tenantB, setup.connection.connectionId) === null && await repository.persistManualCredentials(tenantB, setup.connection.connectionId, {
       encryptedMetaAppSecret: rawRow?.encrypted_meta_app_secret ?? "encrypted",
       metaAppSecretKeyVersion: rawRow?.meta_app_secret_key_version ?? "v",
@@ -169,6 +442,15 @@ async function main(): Promise<void> {
       systemUserAccessTokenKeyVersion: rawRow?.system_user_access_token_key_version ?? "v",
       encryptedWebhookVerifyToken: rawRow?.encrypted_webhook_verify_token ?? "encrypted",
       webhookVerifyTokenKeyVersion: rawRow?.webhook_verify_token_key_version ?? "v",
+    }) === null);
+    add("another seller cannot invoke the atomic credential replacement", resetStorage !== null && await repository.replaceManualCredentialsAndResetState(tenantB, setup.connection.connectionId, {
+      metaAppId: appId,
+      encryptedMetaAppSecret: resetStorage.encryptedMetaAppSecret,
+      metaAppSecretKeyVersion: resetStorage.metaAppSecretKeyVersion,
+      encryptedSystemUserAccessToken: resetStorage.encryptedSystemUserAccessToken,
+      systemUserAccessTokenKeyVersion: resetStorage.systemUserAccessTokenKeyVersion,
+      encryptedWebhookVerifyToken: resetStorage.encryptedWebhookVerifyToken,
+      webhookVerifyTokenKeyVersion: resetStorage.webhookVerifyTokenKeyVersion,
     }) === null);
 
     const embedded = await repository.createCandidate(tenantB);
@@ -187,6 +469,97 @@ async function main(): Promise<void> {
       text: "UPDATE whatsapp_connections SET encrypted_meta_app_secret = $3 WHERE seller_id = $1 AND connection_id = $2",
       values: [sellerB, embedded.connectionId, rawRow?.encrypted_meta_app_secret ?? "encrypted"],
     })));
+
+    const capturedEvents: unknown[] = [];
+    setWhatsAppConnectionOperationalRecorderForTesting({
+      recordAudit: (eventName, payload) => capturedEvents.push({ eventName, payload }),
+      increment: () => undefined,
+      observe: () => undefined,
+    });
+    try {
+      recordWhatsAppConnectionAudit("whatsapp_connection.manual_setup_failed", {
+        sellerId: sellerA,
+        connectionMethod: "CUSTOMER_OWNED_META_APP",
+        operationStage: "input_validation",
+        errorCode: "MANUAL_CONNECTION_SETUP_FAILED",
+        draftMode: "unknown",
+        reason: "invalid_request",
+      });
+      const sanitizedSellerEventText = JSON.stringify(capturedEvents.at(-1));
+      add("central operational logging drops sellerId from safe payloads", !sanitizedSellerEventText.includes(sellerA) && !sanitizedSellerEventText.includes("sellerId"));
+
+      const unavailableResponse = await manualSetupResponse(new ManualConnectionSetupService({} as ManualWhatsAppConnectionRepository, null, transport));
+      const unavailableEvent = capturedEvents.at(-1);
+      add("missing encryption configuration fails closed with a bounded safe 500", unavailableResponse.statusCode === 500 && JSON.stringify(unavailableResponse.body) === JSON.stringify({ message: "WhatsApp connection service unavailable.", issueCode: "WHATSAPP_CREDENTIAL_ENCRYPTION_UNAVAILABLE" }) && JSON.stringify(unavailableEvent).includes("encryption_service_initialization"));
+      add("missing and malformed encryption configuration are rejected before persistence", await expectsError(() => validateWhatsAppConnectionCredentialEncryptionConfiguration({})) && await expectsError(() => validateWhatsAppConnectionCredentialEncryptionConfiguration({
+        activeKeyVersion: "phase11k_m1",
+        keysJson: JSON.stringify({ phase11k_m1: "not-a-valid-aes-256-key" }),
+      })));
+
+      const diagnosticTransport = new FakeManualMetaTransport();
+      diagnosticTransport.failure = new WhatsAppConnectionMetaTransportError("auth", {
+        operation: "inspect_system_user_token",
+        httpStatus: 401,
+        metaErrorCode: 190,
+        metaErrorSubcode: 467,
+      });
+      const diagnosticAppSecret = "safe_fake_diagnostic_app_secret_marker";
+      const diagnosticAccessToken = "safe_fake_diagnostic_access_token_marker";
+      const diagnosticResponse = await manualSetupResponse(
+        new ManualConnectionSetupService(repository, encryption, diagnosticTransport),
+        tenantA,
+        {
+          appId,
+          appSecret: diagnosticAppSecret,
+          systemUserAccessToken: diagnosticAccessToken,
+        },
+      );
+      const diagnosticEvent = capturedEvents.find((entry) =>
+        (entry as { eventName?: string }).eventName === "whatsapp_connection.manual_meta_graph_failed"
+      );
+      const diagnosticEventText = JSON.stringify(diagnosticEvent);
+      add("debug-token caller authentication failure maps to the acquired App access token", diagnosticResponse.statusCode === 400 && diagnosticEventText.includes("\"metaOperation\":\"inspect_system_user_token\"") && diagnosticEventText.includes("\"httpStatus\":401") && diagnosticEventText.includes("\"metaErrorCode\":190") && diagnosticEventText.includes("\"metaErrorSubcode\":467") && diagnosticEventText.includes("\"issueCode\":\"META_APP_ACCESS_TOKEN_INVALID\""));
+      add("setup Graph diagnostics exclude credentials, request URLs, fields, raw payloads, and trace data", !diagnosticEventText.includes(diagnosticAppSecret) && !diagnosticEventText.includes(diagnosticAccessToken) && !/appSecret|systemUserAccessToken|client_secret|oauth\/access_token|Authorization|fbtrace|raw_graph/iu.test(diagnosticEventText));
+
+      const appSecretFailureTransport = new FakeManualMetaTransport();
+      appSecretFailureTransport.failure = new WhatsAppConnectionMetaTransportError("validation", {
+        operation: "acquire_app_access_token",
+        httpStatus: 400,
+        metaErrorCode: 190,
+        metaErrorSubcode: 123,
+      });
+      const appSecretFailureResponse = await manualSetupResponse(
+        new ManualConnectionSetupService(repository, encryption, appSecretFailureTransport),
+        tenantA,
+        {
+          appId,
+          appSecret: diagnosticAppSecret,
+          systemUserAccessToken: diagnosticAccessToken,
+        },
+      );
+      const appSecretDiagnostic = capturedEvents.find((entry) => {
+        const payload = (entry as { payload?: { metaOperation?: string } }).payload;
+        return payload?.metaOperation === "acquire_app_access_token";
+      });
+      const appSecretDiagnosticText = JSON.stringify(appSecretDiagnostic);
+      add("App credential acquisition failure maps separately from the input System User token", appSecretFailureResponse.statusCode === 400 && JSON.stringify(appSecretFailureResponse.body).includes("META_APP_SECRET_INVALID") && appSecretDiagnosticText.includes("\"metaErrorSubcode\":123") && !appSecretDiagnosticText.includes(diagnosticAppSecret) && !appSecretDiagnosticText.includes(diagnosticAccessToken) && !/client_secret|oauth\/access_token|Authorization|fbtrace/iu.test(appSecretDiagnosticText));
+
+      const repositoryFailure = new ManualConnectionSetupService({
+        findReusableManualDraft: async () => {
+          throw new Error("phase11k_m1_repository_failure_safe");
+        },
+      } as unknown as ManualWhatsAppConnectionRepository, encryption, transport, async (callback) => callback({} as DatabaseTransactionExecutor));
+      const eventCountBeforeRepositoryFailure = capturedEvents.length;
+      const repositoryFailureResponse = await manualSetupResponse(repositoryFailure);
+      const repositoryFailureEvents = capturedEvents.slice(eventCountBeforeRepositoryFailure);
+      const eventText = JSON.stringify(capturedEvents);
+      add("repository failure returns the generic safe 500 with exactly one safe event", repositoryFailureResponse.statusCode === 500 && JSON.stringify(repositoryFailureResponse.body) === JSON.stringify({ message: "WhatsApp connection service unavailable." }) && repositoryFailureEvents.length === 1 && JSON.stringify(repositoryFailureEvents[0]).includes("existing_draft_lookup"));
+      add("manual setup failure diagnostics never contain credentials or request body", !eventText.includes("safe_fake_controller_app_secret") && !eventText.includes("safe_fake_controller_system_user_token") && !/appSecret|systemUserAccessToken|verifyToken|appId/u.test(eventText));
+    } finally {
+      setWhatsAppConnectionOperationalRecorderForTesting(undefined);
+    }
+
+    add("manual setup validates every accepted submission before encryption or persistence", transport.inspections >= 6);
   } finally {
     await cleanup();
     const remainingConnections = sellerIds.length

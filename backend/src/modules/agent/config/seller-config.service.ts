@@ -27,9 +27,7 @@ export class SellerConfigService {
       };
     }
 
-    console.warn(
-      `⚠️ Seller config not found for ${cleanSellerId || "(empty)"}, using ${DEFAULT_DEMO_SELLER_ID}`,
-    );
+    console.warn("⚠️ Seller config not found, using the safe default configuration");
 
     return {
       sellerConfig:

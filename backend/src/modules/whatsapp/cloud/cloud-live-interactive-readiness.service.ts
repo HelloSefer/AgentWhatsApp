@@ -13,16 +13,6 @@ type ReadinessCheck = {
   message?: string;
 };
 
-function maskSecret(value: string): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  const suffix = value.slice(-4);
-
-  return `****${suffix}`;
-}
-
 export function maskReadinessPhone(value: string): string | undefined {
   const digits = value.replace(/\D/g, "");
 
@@ -103,13 +93,11 @@ export function buildLiveInteractiveReadiness(input: {
       key: "WHATSAPP_CLOUD_ACCESS_TOKEN",
       value: env.whatsappCloudAccessToken,
       severity: "blocking",
-      maskedValue: maskSecret(env.whatsappCloudAccessToken),
     }),
     presenceCheck({
       key: "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
       value: env.whatsappCloudPhoneNumberId,
       severity: "blocking",
-      maskedValue: maskSecret(env.whatsappCloudPhoneNumberId),
     }),
     presenceCheck({
       key: "TEST_RECIPIENT_PHONE",
@@ -137,7 +125,7 @@ export function buildLiveInteractiveReadiness(input: {
       key: "SELLER_ID",
       passed: !sellerId.startsWith("seller_demo_"),
       severity: "warning",
-      currentValue: sellerId || "not_provided",
+      currentValue: sellerId ? "provided" : "not_provided",
       message: sellerId.startsWith("seller_demo_")
         ? "Demo seller selected for readiness check."
         : "Provide sellerId if the smoke test should target a specific seller.",
@@ -179,7 +167,7 @@ export function buildLiveInteractiveReadiness(input: {
     },
     inputs: {
       testRecipientPhoneMasked: maskReadinessPhone(testRecipientPhone),
-      sellerId: sellerId || undefined,
+      sellerIdProvided: Boolean(sellerId),
     },
     safety: {
       sendsMessages: false,

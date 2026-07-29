@@ -7,13 +7,14 @@ import { roleHasPermission } from "../../auth";
 import { SellerService } from "../../seller/application/seller.service";
 import { PostgreSqlSellerRepository } from "../../seller/infrastructure/postgresql/postgresql-seller.repository";
 import { ManualConnectionSetupService } from "../application/manual-connection-setup.service";
+import { MANUAL_SYSTEM_USER_REQUIRED_WHATSAPP_SCOPES } from "../application/manual-system-user-token-validation";
 import { ManualWebhookConfigurationService } from "../application/manual-webhook-configuration.service";
 import { buildManualWebhookCallbackUrl } from "../application/manual-webhook-url.service";
 import { timingSafeStringEqual, verifyMetaSignature } from "../application/manual-webhook-security.service";
 import { WhatsAppConnectionCredentialEncryptionService } from "../application/whatsapp-connection-credential-encryption.service";
 import { validateWhatsAppConnectionCredentialEncryptionConfiguration } from "../application/whatsapp-connection-credential-encryption.config";
 import { ManualWebhookConfigurationError, WhatsAppConnectionMetaTransportError } from "../domain/whatsapp-connection.errors";
-import type { ManualMetaTokenInspectionResult, ManualMetaWaba, ManualMetaPhoneNumber, ManualMetaWebhookTransport, ManualMetaWabaSubscription } from "../infrastructure/meta/manual-meta-app.transport";
+import { FetchManualMetaAppTransport, type ManualMetaTokenInspectionResult, type ManualMetaWaba, type ManualMetaPhoneNumber, type ManualMetaWebhookTransport, type ManualMetaWabaSubscription } from "../infrastructure/meta/manual-meta-app.transport";
 import { PostgreSqlWhatsAppConnectionRepository } from "../infrastructure/postgresql/postgresql-whatsapp-connection.repository";
 import { ManualWebhookPublicController } from "../http/manual-webhook-public.controller";
 import { WhatsAppConnectionController } from "../http/whatsapp-connection.controller";
@@ -53,7 +54,7 @@ class FakeManualWebhookTransport implements ManualMetaWebhookTransport {
   noAddOnSubscribe = false;
 
   async inspectSystemUserToken(): Promise<ManualMetaTokenInspectionResult> {
-    return { valid: true, appId: "123456789012345", type: "SYSTEM_USER", scopes: [], systemUserId: "system_user_m3" };
+    return { valid: true, appId: "123456789012345", type: "SYSTEM_USER", scopes: MANUAL_SYSTEM_USER_REQUIRED_WHATSAPP_SCOPES, systemUserId: "system_user_m3" };
   }
 
   async listAssignedWabas(): Promise<readonly ManualMetaWaba[]> {
@@ -196,10 +197,63 @@ async function main(): Promise<void> {
   const migrationStatus = await getDatabaseMigrationStatus();
   add("No Phase 11K-M3 migration is pending or required", migrationStatus.applied.includes("0013") && migrationStatus.pending.length === 0);
 
+  const transportCallbackUrl = "https://backend.example/api/whatsapp/webhooks/connections/transport_contract";
+  const transportAppId = "123456789012345";
+  let transportPostContentType: string | null = null;
+  let transportPostBody: Record<string, unknown> = {};
+  let transportGetFields: string | null = "not_requested";
+  const transportFetch: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (init?.method === "POST") {
+      transportPostContentType = new Headers(init.headers).get("content-type");
+      transportPostBody = typeof init.body === "string"
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : {};
+      return new Response(JSON.stringify({
+        data: [{
+          override_callback_uri: transportCallbackUrl,
+          whatsapp_business_api_data: {
+            id: transportAppId,
+            name: "Phase 11K M3",
+          },
+        }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    transportGetFields = url.searchParams.get("fields");
+    return new Response(JSON.stringify({
+      data: [{
+        override_callback_uri: transportCallbackUrl,
+        whatsapp_business_api_data: {
+          id: transportAppId,
+          name: "Phase 11K M3",
+        },
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const liveShapeTransport = new FetchManualMetaAppTransport("v25.0", transportFetch);
+  await liveShapeTransport.subscribeWabaWithCallback(
+    "100000000000001",
+    transportCallbackUrl,
+    "verify_token_phase11k_m3",
+    "system_token_phase11k_m3",
+  );
+  const liveShapeSubscriptions = await liveShapeTransport.listWabaSubscriptions(
+    "100000000000001",
+    "system_token_phase11k_m3",
+  );
+  add("callback override transport uses Meta's JSON request contract",
+    transportPostContentType === "application/json"
+    && transportPostBody.override_callback_uri === transportCallbackUrl
+    && transportPostBody.verify_token === "verify_token_phase11k_m3");
+  add("subscription readback accepts Meta's nested whatsapp_business_api_data app shape",
+    liveShapeSubscriptions[0]?.appId === transportAppId
+    && liveShapeSubscriptions[0]?.callbackUrl === transportCallbackUrl);
+  add("subscription readback uses the official unprojected edge response", transportGetFields === null);
+
   const sellerService = new SellerService(new PostgreSqlSellerRepository());
   const repository = new PostgreSqlWhatsAppConnectionRepository();
   const encryption = encryptionService();
-  const setupService = new ManualConnectionSetupService(repository, encryption);
+  const setupService = new ManualConnectionSetupService(repository, encryption, new FakeManualWebhookTransport());
   const publicController = new ManualWebhookPublicController(repository, encryption);
   const sellerA = uniqueId("seller_phase11k_m3");
   const sellerB = uniqueId("seller_phase11k_m3");
@@ -246,6 +300,10 @@ async function main(): Promise<void> {
     add("readback confirms correct app", configured.webhook.subscriptionConfirmed === true);
     add("configure response is safe", !/safe_fake|token|seller_phase11k|\+212/i.test(JSON.stringify(configured)) && configured.nextStep === "FINALIZE_CONNECTION");
     add("same configuration retry is idempotent", (await configureService.configure(tenantA, setup.connection.connectionId)).webhook.configured === true && transport.subscribeCalls.length === 1);
+    const sameAppWithoutOverrideTransport = new FakeManualWebhookTransport();
+    sameAppWithoutOverrideTransport.subscriptions = [{ appId: "123456789012345" }];
+    await new ManualWebhookConfigurationService(repository, encryption, sameAppWithoutOverrideTransport, "https://backend.example").configure(tenantA, setup.connection.connectionId);
+    add("same-app subscription without the exact callback override is repaired", sameAppWithoutOverrideTransport.subscribeCalls.length === 1);
     const wrongAppTransport = new FakeManualWebhookTransport();
     wrongAppTransport.subscriptions = [{ appId: "another_app", callbackUrl }];
     wrongAppTransport.noAddOnSubscribe = true;

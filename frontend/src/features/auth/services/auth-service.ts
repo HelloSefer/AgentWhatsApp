@@ -10,19 +10,10 @@ import type {
   SafeAuthErrorCode,
   SignupInput,
 } from "../types/auth-contracts";
-
-const DEFAULT_BACKEND_BASE_URL = "http://localhost:5000";
-
-function backendBaseUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_BACKEND_BASE_URL ??
-    process.env.NEXT_PUBLIC_API_BASE_URL ??
-    DEFAULT_BACKEND_BASE_URL
-  ).replace(/\/+$/u, "");
-}
+import { authenticatedBackendFetch, backendUrl } from "@/lib/backend-http-client";
 
 export const authEndpoints = {
-  googleStart: () => `${backendBaseUrl()}/api/auth/google/start`,
+  googleStart: () => backendUrl("/api/auth/google/start"),
 } as const;
 
 export class AuthServiceError extends Error implements SafeAuthError {
@@ -122,15 +113,7 @@ async function requestJson<TResponse>(
   let response: Response;
 
   try {
-    response = await fetch(`${backendBaseUrl()}${path}`, {
-      ...init,
-      credentials: "include",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        ...init.headers,
-      },
-    });
+    response = await authenticatedBackendFetch(path, init);
   } catch {
     throw new AuthServiceError({
       code: "service_unavailable",
@@ -170,8 +153,8 @@ export const httpAuthService: AuthService = {
   async logout() {
     let response: Response;
 
-    try {
-      response = await fetch(`${backendBaseUrl()}/api/auth/logout`, {
+  try {
+      response = await fetch(backendUrl("/api/auth/logout"), {
         method: "POST",
         credentials: "include",
         headers: { Accept: "application/json" },
@@ -192,8 +175,8 @@ export const httpAuthService: AuthService = {
   async currentUser() {
     let response: Response;
 
-    try {
-      response = await fetch(`${backendBaseUrl()}/api/auth/me`, {
+  try {
+      response = await fetch(backendUrl("/api/auth/me"), {
         method: "GET",
         credentials: "include",
         headers: { Accept: "application/json" },

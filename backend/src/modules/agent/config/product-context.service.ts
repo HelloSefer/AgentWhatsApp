@@ -27,9 +27,7 @@ export class ProductContextService {
       };
     }
 
-    console.warn(
-      `⚠️ Product context not found for ${cleanSellerId || "(empty)"}, using ${DEFAULT_DEMO_SELLER_ID}`,
-    );
+    console.warn("⚠️ Product context not found, using the safe default product");
 
     return {
       productContext:
