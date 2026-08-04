@@ -11,6 +11,11 @@ import { productContextService } from "../config/product-context.service";
 import { requiredFieldsService } from "../config/required-fields.service";
 import { sellerConfigService } from "../config/seller-config.service";
 import {
+  buildSandalsDevelopmentRuntimeProductContext,
+  buildSandalsDevelopmentSellerConfig,
+  SANDALS_DEVELOPMENT_PRODUCT_ID,
+} from "../../development/sandals-development-template";
+import {
   asLegacyOrderEntities,
   initializeCart,
   reconcileLegacyOrderStateWithCart,
@@ -190,11 +195,18 @@ function normalizeSessionCartState(session: ConversationSession): {
   changed: boolean;
 } {
   const sellerId = session.sellerId || DEFAULT_DEMO_SELLER_ID;
-  const configProduct = session.productId
+  const knownSeller = sellerConfigService.hasSellerConfig(sellerId);
+  const isSandalsDevelopmentTenant =
+    !knownSeller && session.productId === SANDALS_DEVELOPMENT_PRODUCT_ID;
+  const configProduct = knownSeller && session.productId
     ? productContextService.getProductContextById(session.productId)
     : undefined;
-  const productContext = configProduct || productContextService.getActiveProductContext(sellerId);
-  const sellerConfig = sellerConfigService.getSellerConfig(sellerId);
+  const productContext = isSandalsDevelopmentTenant
+    ? buildSandalsDevelopmentRuntimeProductContext(sellerId)
+    : configProduct || productContextService.getActiveProductContext(knownSeller ? sellerId : DEFAULT_DEMO_SELLER_ID);
+  const sellerConfig = isSandalsDevelopmentTenant
+    ? buildSandalsDevelopmentSellerConfig(sellerId)
+    : sellerConfigService.getSellerConfig(knownSeller ? sellerId : DEFAULT_DEMO_SELLER_ID);
   const fields = requiredFieldsService.getOrderFields({
     sellerConfig,
     productContext,

@@ -18,6 +18,7 @@ import authRoutes from "./modules/auth/auth.routes";
 import onboardingRoutes from "./modules/onboarding/onboarding.routes";
 import whatsappConnectionRoutes from "./modules/whatsapp-connection/whatsapp-connection.routes";
 import manualWebhookPublicRoutes from "./modules/whatsapp-connection/manual-webhook-public.routes";
+import { createDevelopmentTenantRoutes } from "./modules/development/development-tenant.routes";
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.use("/api/database", databaseHealthRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/onboarding", onboardingRoutes);
 app.use("/api/whatsapp-connections", whatsappConnectionRoutes);
+app.use("/api/development-tenant", createDevelopmentTenantRoutes());
 
 app.use((_req, res) => {
   res.status(404).json({

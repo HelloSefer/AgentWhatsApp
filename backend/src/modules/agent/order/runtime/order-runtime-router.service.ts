@@ -55,6 +55,10 @@ import {
   resolveConfiguredOptionCanonicalValue,
   withConversationProductDefaults,
 } from "../../../conversation-engine/config/conversation-product-config.service";
+import {
+  buildSandalsDevelopmentSellerConfig,
+  SANDALS_DEVELOPMENT_PRODUCT_ID,
+} from "../../../development/sandals-development-template";
 
 export function isGuardedOrderRuntimeAction(message: string): boolean {
   return /^(?:first_entry:order_now|info:(?:order_now|continue_order)|cart_offer:.+|cart_quantity:.+|cart_item_option:.+|cart_item_previous:(?:same|different)|cart_review:.+|cart_review_item:.+|cart_review_item_edit:.+|order_checkout:.+|order_checkout_field:.+)$/.test(message);
@@ -216,6 +220,8 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
   const sellerConfig = normalizeSellerConfig(
     knownSeller
       ? sellerConfigService.getSellerConfig(requestedSellerId)
+      : persistedTenantProductAvailable && baseProductContext.productId === SANDALS_DEVELOPMENT_PRODUCT_ID
+        ? buildSandalsDevelopmentSellerConfig(requestedSellerId)
       : {
           ...sellerConfigService.getSellerConfig(DEFAULT_DEMO_SELLER_ID),
           sellerId: requestedSellerId,

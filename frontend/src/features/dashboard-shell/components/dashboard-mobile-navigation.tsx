@@ -17,10 +17,13 @@ import { dashboardNavigationSections } from "../config/dashboard-navigation";
 import { isDashboardNavigationItemActive } from "../utils/dashboard-route-matching";
 import { DashboardNavigationItem } from "./dashboard-navigation-item";
 import { DashboardUserMenu } from "./dashboard-user-menu";
+import { useDevelopmentTenantNavigation } from "@/features/development-tenant/hooks/use-development-tenant-navigation";
 
 export function DashboardMobileNavigation() {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const developmentSection = useDevelopmentTenantNavigation();
+  const sections = developmentSection ? [...dashboardNavigationSections, developmentSection] : dashboardNavigationSections;
 
   return (
     <Sheet onOpenChange={setOpen} open={open}>
@@ -40,7 +43,7 @@ export function DashboardMobileNavigation() {
         </SheetHeader>
         <nav aria-label="Dashboard" className="flex-1 overflow-y-auto px-3 py-4">
           <div className="space-y-5">
-            {dashboardNavigationSections.map((section) => (
+            {sections.map((section) => (
               <section aria-label={section.label} className="space-y-1.5" key={section.label}>
                 <p className="px-3 text-[0.68rem] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
                   {section.label}

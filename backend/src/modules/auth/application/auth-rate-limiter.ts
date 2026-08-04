@@ -13,7 +13,8 @@ export type AuthRateLimitAction =
   | "manual_whatsapp_discover"
   | "manual_whatsapp_select_assets"
   | "manual_whatsapp_configure_webhook"
-  | "manual_whatsapp_finalize";
+  | "manual_whatsapp_finalize"
+  | "development_tenant_reset";
 
 export type AuthRateLimitDecision = Readonly<{
   allowed: boolean;
@@ -45,6 +46,7 @@ const POLICY: Readonly<Record<AuthRateLimitAction, Readonly<{ limit: number; win
   manual_whatsapp_select_assets: { limit: 20, windowSeconds: 15 * 60 },
   manual_whatsapp_configure_webhook: { limit: 10, windowSeconds: 15 * 60 },
   manual_whatsapp_finalize: { limit: 10, windowSeconds: 15 * 60 },
+  development_tenant_reset: { limit: 5, windowSeconds: 15 * 60 },
 });
 
 function sha256(value: string): string {

@@ -1,4 +1,5 @@
 import { env } from "../../../config/env";
+import { runtimeReadComposition } from "../../../composition/runtime-read/runtime-read-composition.runtime";
 import { firstEntryCtaQuestion } from "../../conversation-engine/adapters/first-entry-conversation.adapter";
 import type { AgentResult } from "../agent-action.types";
 import { normalizeFirstEntryClick } from "./first-entry-click-normalizer.service";
@@ -22,6 +23,13 @@ import type { AgentReplyUiHint } from "../reply/reply-renderer.types";
 import type { WhatsAppInteractivePreview } from "../reply/whatsapp-interactive.types";
 import type { ConversationSession } from "../agent-brain.types";
 import { validateSellerConfigReadiness } from "./seller-config-readiness.service";
+import {
+  buildSandalsDevelopmentRuntimeProductContext,
+  buildSandalsDevelopmentSellerConfig,
+  SANDALS_DEVELOPMENT_PRODUCT_ID,
+} from "../../development/sandals-development-template";
+import type { ProductContext } from "./product-context.types";
+import type { SellerConfig } from "./seller-config.types";
 
 type FirstEntryLiveSmokePresentationMode =
   | "single_message"
@@ -84,6 +92,8 @@ type BuildLiveSmokeResultInput = {
   customerPhone: string;
   phoneNumberId: string;
   message: string;
+  sellerId?: string;
+  trustedCustomerOwnedConnection?: boolean;
   sourceType?: string;
   buttonReplyId?: string;
   buttonReplyTitle?: string;
@@ -410,6 +420,58 @@ function getFirstEntryButtons(firstEntry: IntentAwareFirstEntryPreviewResult) {
     }));
 }
 
+async function resolveFirstEntryCommerceConfig(sellerId: string): Promise<{
+  sellerConfig: SellerConfig;
+  productContext: ProductContext;
+  fallbackUsed: boolean;
+} | null> {
+  if (sellerConfigService.hasSellerConfig(sellerId)) {
+    const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
+    const productResult = productContextService.getActiveProductContextWithMeta(sellerId);
+    return {
+      sellerConfig: normalizeSellerConfig(
+        sellerResult.sellerConfig,
+        productResult.productContext.price,
+      ),
+      productContext: productResult.productContext,
+      fallbackUsed: sellerResult.fallbackUsed || productResult.fallbackUsed,
+    };
+  }
+
+  const templateProductContext = buildSandalsDevelopmentRuntimeProductContext(sellerId);
+  const catalog = await runtimeReadComposition.catalogReader.resolve({
+    sellerId,
+    productId: SANDALS_DEVELOPMENT_PRODUCT_ID,
+    legacyProductContext: templateProductContext,
+  });
+  if (
+    catalog.source !== "persistence" ||
+    catalog.productContext.sellerId !== sellerId ||
+    catalog.productContext.productId !== SANDALS_DEVELOPMENT_PRODUCT_ID
+  ) {
+    return null;
+  }
+  const productContext: ProductContext = {
+    ...templateProductContext,
+    ...catalog.productContext,
+    images: templateProductContext.images,
+    benefits: templateProductContext.benefits,
+    infoMenu: templateProductContext.infoMenu,
+    stock: templateProductContext.stock,
+    conversationalName: templateProductContext.conversationalName,
+    singularName: templateProductContext.singularName,
+    pluralName: templateProductContext.pluralName,
+  };
+  return {
+    sellerConfig: normalizeSellerConfig(
+      buildSandalsDevelopmentSellerConfig(sellerId),
+      productContext.price,
+    ),
+    productContext,
+    fallbackUsed: false,
+  };
+}
+
 function buildFirstEntryPresentation(
   firstEntry: IntentAwareFirstEntryPreviewResult,
 ): FirstEntryLiveSmokePresentation {
@@ -543,14 +605,15 @@ export function buildFirstEntryLiveSmokeDispatchPreview(input: {
 export async function buildFirstEntryLiveSmokeResult(
   input: BuildLiveSmokeResultInput,
 ): Promise<FirstEntryLiveSmokeBuildResult> {
-  const sellerId = cleanText(env.firstEntryLiveSmokeSellerId);
+  const sellerId = cleanText(input.sellerId) || cleanText(env.firstEntryLiveSmokeSellerId);
   const customerPhone = normalizePhoneForGuard(input.customerPhone);
+  const trustedCustomerOwnedConnection = input.trustedCustomerOwnedConnection === true;
   const readiness = buildFirstEntryLiveSmokeReadiness({
     testRecipientPhone: customerPhone,
     sellerId,
   });
 
-  if (!readiness.ready) {
+  if (!readiness.ready && !trustedCustomerOwnedConnection) {
     return {
       handled: false,
       blockedReason: "first_entry_live_smoke_readiness_not_ready",
@@ -591,11 +654,9 @@ export async function buildFirstEntryLiveSmokeResult(
     };
   }
 
-  const sellerResult = sellerConfigService.getSellerConfigWithMeta(sellerId);
-  const productResult =
-    productContextService.getActiveProductContextWithMeta(sellerId);
+  const commerce = await resolveFirstEntryCommerceConfig(sellerId);
 
-  if (sellerResult.fallbackUsed || productResult.fallbackUsed) {
+  if (!commerce || commerce.fallbackUsed) {
     return {
       handled: false,
       blockedReason: "first_entry_live_smoke_seller_or_product_not_configured",
@@ -603,19 +664,15 @@ export async function buildFirstEntryLiveSmokeResult(
     };
   }
 
-  const sellerConfig = normalizeSellerConfig(
-    sellerResult.sellerConfig,
-    productResult.productContext.price,
-  );
   const session = await getConversationSession(
     conversationKey,
     sellerId,
-    productResult.productContext.productId,
+    commerce.productContext.productId,
     customerPhone,
   );
   const firstEntry = renderIntentAwareFirstEntryPreview({
-    sellerConfig,
-    productContext: productResult.productContext,
+    sellerConfig: commerce.sellerConfig,
+    productContext: commerce.productContext,
     session,
     orderState: session.orderState,
     customerMessage: input.message,

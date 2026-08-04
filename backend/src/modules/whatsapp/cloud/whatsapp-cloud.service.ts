@@ -3456,18 +3456,20 @@ export async function processNormalizedCloudMessage(
       const runtimeActionId = getGuardedRuntimeActionId(message);
       perMessageResult.inputSourceType = message.sourceType;
       perMessageResult.normalizedActionId = transportActionId;
+      const customerOwnedOrderRuntimeActivation =
+        connectionRuntime?.tokenSource === "encrypted_connection_token";
       const firstEntryLiveSmoke = await buildFirstEntryLiveSmokeResult({
+        sellerId: identity.sellerId,
         customerPhone: identity.customerPhone,
         phoneNumberId: identity.phoneNumberId || message.phoneNumberId,
         message: message.text,
+        trustedCustomerOwnedConnection: customerOwnedOrderRuntimeActivation,
         sourceType: message.sourceType,
         buttonReplyId: message.buttonReplyId,
         buttonReplyTitle: message.buttonReplyTitle,
       });
       const liveSmokeModeArmed =
         firstEntryLiveSmoke.readiness.liveEnabled === true;
-      const customerOwnedOrderRuntimeActivation =
-        connectionRuntime?.tokenSource === "encrypted_connection_token";
       const liveSmokeDispatchAllowed =
         liveSmokeModeArmed &&
         (env.whatsappInteractiveEnabled === true || options.forceDryRun === true) &&
@@ -3475,8 +3477,7 @@ export async function processNormalizedCloudMessage(
         firstEntryLiveSmoke.readiness.sellerIdConfigured === true &&
         firstEntryLiveSmoke.readiness.expectedSellerId === identity.sellerId;
       const bypassFirstEntryLiveSmoke =
-        customerOwnedOrderRuntimeActivation ||
-        (runtimeActionId !== undefined && runtimeActionId !== "first_entry:order_now");
+        runtimeActionId !== undefined && runtimeActionId !== "first_entry:order_now";
 
       if (
         liveSmokeModeArmed &&

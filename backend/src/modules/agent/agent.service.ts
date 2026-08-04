@@ -70,6 +70,12 @@ import { runWithConversationConfig } from "../conversation-engine/config/convers
 import { getActiveConversationConfig } from "../conversation-engine/config/conversation-config-context.service";
 import { applyResolvedConversationProductConfig, withConversationProductDefaults } from "../conversation-engine/config/conversation-product-config.service";
 import { runtimeReadComposition } from "../../composition/runtime-read/runtime-read-composition.runtime";
+import {
+  buildSandalsDevelopmentRuntimeProductContext,
+  buildSandalsDevelopmentSellerConfig,
+  SANDALS_DEVELOPMENT_PRODUCT_ID,
+} from "../development/sandals-development-template";
+import type { ProductContext as ConfigProductContext } from "./config/product-context.types";
 
 export type GenerateAgentOptions = {
   customerId?: string;
@@ -85,6 +91,10 @@ export type GenerateAgentOptions = {
   orderRuntimeEnabled?: boolean;
   /** Trusted Cloud transport metadata; never read from public request bodies. */
   transportInput?: AgentInboundTransportInput;
+  /** Internal resolved commerce config for persisted tenants. */
+  runtimeSellerConfig?: SellerConfig;
+  /** Internal resolved order fields for persisted tenants. */
+  runtimeRequiredFields?: RequiredOrderField[];
 };
 
 export type GenerateAgentDependencies = {
@@ -311,15 +321,16 @@ async function appendMessageToMemory(
 function getRuntimeRequiredOrderFields(
   options?: GenerateAgentOptions,
 ): RequiredOrderField[] | undefined {
+  if (options?.runtimeRequiredFields) {
+    return options.runtimeRequiredFields;
+  }
   if (!options?.sellerId) {
     return undefined;
   }
 
   try {
-    const sellerConfig = sellerConfigService.getSellerConfig(options.sellerId);
-    const configProductContext = productContextService.getActiveProductContext(
-      options.sellerId,
-    );
+    const sellerConfig = options.runtimeSellerConfig || sellerConfigService.getSellerConfig(options.sellerId);
+    const configProductContext = productContextService.getActiveProductContext(options.sellerId);
     const activeConversationConfig = getActiveConversationConfig();
     const effectiveConversationConfig = activeConversationConfig
       ? withConversationProductDefaults(activeConversationConfig, configProductContext)
@@ -361,7 +372,7 @@ function getRuntimeInfoMenuDisplayMode(
   }
 
   try {
-    return sellerConfigService.getSellerConfig(options.sellerId).interactive
+    return (options.runtimeSellerConfig || sellerConfigService.getSellerConfig(options.sellerId)).interactive
       .infoMenuDisplayMode;
   } catch (error) {
     console.error("❌ Info menu display mode resolution failed", error);
@@ -664,12 +675,6 @@ async function resolveRuntimeProductContext(
 
   try {
     const knownSeller = sellerConfigService.hasSellerConfig(options.sellerId);
-    const sellerConfig = knownSeller
-      ? sellerConfigService.getSellerConfig(options.sellerId)
-      : {
-          ...sellerConfigService.getSellerConfig(DEFAULT_DEMO_SELLER_ID),
-          sellerId: options.sellerId,
-        };
     const legacyProductContext = productContextService.getActiveProductContext(
       knownSeller ? options.sellerId : DEFAULT_DEMO_SELLER_ID,
     );
@@ -678,6 +683,16 @@ async function resolveRuntimeProductContext(
       productId: options.productId?.trim() || legacyProductContext.productId,
       legacyProductContext,
     });
+    const sellerConfig = knownSeller
+      ? sellerConfigService.getSellerConfig(options.sellerId)
+      : catalogResolution.source === "persistence" &&
+          catalogResolution.productContext.sellerId === options.sellerId &&
+          catalogResolution.productContext.productId === SANDALS_DEVELOPMENT_PRODUCT_ID
+        ? buildSandalsDevelopmentSellerConfig(options.sellerId)
+        : {
+            ...sellerConfigService.getSellerConfig(DEFAULT_DEMO_SELLER_ID),
+            sellerId: options.sellerId,
+          };
 
     return toAgentProductContext({
       sellerConfig,
@@ -687,6 +702,57 @@ async function resolveRuntimeProductContext(
     console.error("❌ Runtime product context resolution failed", error);
     return productContext;
   }
+}
+
+async function resolveRuntimeCommerceConfig(
+  productContext: ProductContext,
+  options?: GenerateAgentOptions,
+): Promise<{ sellerConfig?: SellerConfig; productContext: ProductContext; requiredFields?: RequiredOrderField[] }> {
+  const sellerId = options?.sellerId?.trim();
+  if (!sellerId) return { productContext: await resolveRuntimeProductContext(productContext, options) };
+  if (sellerConfigService.hasSellerConfig(sellerId)) {
+    const resolvedProductContext = await resolveRuntimeProductContext(productContext, options);
+    return {
+      sellerConfig: sellerConfigService.getSellerConfig(sellerId),
+      productContext: resolvedProductContext,
+    };
+  }
+  const templateConfigProductContext = buildSandalsDevelopmentRuntimeProductContext(sellerId);
+  const catalogResolution = await runtimeReadComposition.catalogReader.resolve({
+    sellerId,
+    productId: options?.productId?.trim() || SANDALS_DEVELOPMENT_PRODUCT_ID,
+    legacyProductContext: templateConfigProductContext,
+  });
+  const resolvedConfigProductContext: ConfigProductContext = catalogResolution.source === "persistence"
+    ? {
+        ...templateConfigProductContext,
+        ...catalogResolution.productContext,
+        images: templateConfigProductContext.images,
+        benefits: templateConfigProductContext.benefits,
+        infoMenu: templateConfigProductContext.infoMenu,
+        stock: templateConfigProductContext.stock,
+        conversationalName: templateConfigProductContext.conversationalName,
+        singularName: templateConfigProductContext.singularName,
+        pluralName: templateConfigProductContext.pluralName,
+      }
+    : templateConfigProductContext;
+  if (
+    catalogResolution.source === "persistence" &&
+    resolvedConfigProductContext.sellerId === sellerId &&
+    resolvedConfigProductContext.productId === SANDALS_DEVELOPMENT_PRODUCT_ID
+  ) {
+    const sellerConfig = buildSandalsDevelopmentSellerConfig(sellerId);
+    const requiredFields = requiredFieldsService.getOrderFields({
+      sellerConfig,
+      productContext: resolvedConfigProductContext,
+    });
+    return {
+      sellerConfig,
+      productContext: toAgentProductContext({ sellerConfig, configProductContext: resolvedConfigProductContext }),
+      requiredFields,
+    };
+  }
+  return { productContext: await resolveRuntimeProductContext(productContext, options) };
 }
 
 function mightBeOrderMessage(message: string): boolean {
@@ -1955,22 +2021,30 @@ export async function generateAgentResult(
   dependencies: GenerateAgentDependencies = {},
 ): Promise<AgentResult> {
   const sellerId = options?.sellerId?.trim() || DEFAULT_DEMO_SELLER_ID;
-  const runtimeProductContext = await resolveRuntimeProductContext(productContext, options);
+  const commerce = await resolveRuntimeCommerceConfig(productContext, options);
+  const runtimeProductContext = commerce.productContext;
   const productId = options?.productId?.trim() || runtimeProductContext.productId;
   const configResolution = await runtimeReadComposition.conversationConfigReader.resolve({ sellerId, productId });
   const resolvedConfig = configResolution.config;
   const configuredProductContext: ProductContext = resolvedConfig.productWording
     ? {
         ...runtimeProductContext,
-        productName: resolvedConfig.productWording.fullName,
-        conversationalProductName: resolvedConfig.productWording.conversationalName,
+        productName: resolvedConfig.productWording.fullName || runtimeProductContext.productName,
+        conversationalProductName:
+          resolvedConfig.productWording.conversationalName ||
+          runtimeProductContext.conversationalProductName,
       }
     : runtimeProductContext;
   return runWithConversationConfig(resolvedConfig, () =>
     generateAgentResultInternal(
       message,
       configuredProductContext,
-      { ...options, productId },
+      {
+        ...options,
+        productId,
+        runtimeSellerConfig: commerce.sellerConfig,
+        runtimeRequiredFields: commerce.requiredFields,
+      },
       dependencies,
     ),
   );

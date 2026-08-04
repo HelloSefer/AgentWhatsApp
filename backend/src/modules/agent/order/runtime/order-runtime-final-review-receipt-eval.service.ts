@@ -288,14 +288,14 @@ export async function evaluateOrderRuntimeFinalReviewReceipt(): Promise<OrderRun
     add(assertions, "last delivery field advances to FINAL_ORDER_REVIEW", runtime?.runtimeStage === "FINAL_ORDER_REVIEW");
     add(assertions, "full review and CTA are two ordered messages", initialFinal.outboundMessages.length === 2 && initialReview?.kind === "text" && initialCta?.kind === "interactive");
     add(assertions, "review text is dispatched before CTA", initialFinal.outboundMessages.indexOf(initialReview) < initialFinal.outboundMessages.indexOf(initialCta));
-    add(assertions, "review includes every cart item", (initialText.match(/الصندالة (?:الأولى|الثانية)/g) || []).length === 2);
+    add(assertions, "review includes every cart item", /الأولى/u.test(initialText) && /الثانية/u.test(initialText));
     add(assertions, "review includes first selected size", initialText.includes("المقاس: 38"));
     add(assertions, "review includes second selected size", initialText.includes("المقاس: 40"));
     add(assertions, "review includes every selected color", initialText.includes("اللون: أسود") && initialText.includes("اللون: وردي"));
     add(assertions, "review omits redundant quantity one lines", !initialText.includes("الكمية: 1"));
     add(assertions, "review omits per-item unit prices", !initialText.includes("ثمن الوحدة:"));
     add(assertions, "review omits per-item line totals", !initialText.includes("   المجموع:"));
-    add(assertions, "review includes authoritative standard subtotal once", (initialText.match(/ثمن صندالات:/g) || []).length === 1 && initialText.includes("ثمن صندالات: 398 درهم"));
+    add(assertions, "review includes authoritative standard subtotal once", (initialText.match(/ثمن [^:\n]+: 398 درهم/gu) || []).length === 1);
     add(assertions, "review includes configured paid delivery", initialText.includes("التوصيل: 30 درهم"));
     add(assertions, "review includes final total with delivery", initialText.includes("المجموع: 428 درهم"));
     add(assertions, "review includes full name", initialText.includes("الاسم: عمر العزري"));

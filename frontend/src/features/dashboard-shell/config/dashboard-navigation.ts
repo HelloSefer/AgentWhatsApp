@@ -99,6 +99,14 @@ export const dashboardPageMeta = [
       breadcrumb: ["Settings", "WhatsApp"],
     },
   },
+  {
+    href: "/dashboard/settings/development",
+    match: "prefix",
+    meta: {
+      title: "Development Tenant",
+      breadcrumb: ["Settings", "Development Tenant"],
+    },
+  },
 ] as const satisfies readonly {
   href: string;
   match: "exact" | "prefix";

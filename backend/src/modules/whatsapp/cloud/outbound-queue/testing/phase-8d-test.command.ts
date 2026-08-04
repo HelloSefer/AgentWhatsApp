@@ -183,6 +183,7 @@ const phase8dConnectionResolver = Object.freeze({
     connectionId: "conn_phase8d",
     phoneNumberId: "123456789012345",
     accessToken: "token_phase8d",
+    tokenSource: "encrypted_connection_token" as const,
   }),
 });
 

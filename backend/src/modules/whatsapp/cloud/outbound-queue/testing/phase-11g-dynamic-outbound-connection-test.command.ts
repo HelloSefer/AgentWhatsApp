@@ -67,12 +67,13 @@ function resolver(connections: Record<string, { phoneNumberId: string; accessTok
         connectionId: `conn_${sellerId}`,
         phoneNumberId: connection.phoneNumberId,
         accessToken: connection.accessToken,
+        tokenSource: "encrypted_connection_token" as const,
       };
     },
   });
 }
 
-function fakeRepository(rows: Record<string, { status: string; phoneNumberId?: string }>): WhatsAppConnectionRepository {
+function fakeRepository(rows: Record<string, { status: string; phoneNumberId?: string; connectionMethod?: string }>): WhatsAppConnectionRepository {
   return {
     findActiveBySeller: async (tenant: TenantContext) => {
       const row = rows[tenant.sellerId];
@@ -82,9 +83,24 @@ function fakeRepository(rows: Record<string, { status: string; phoneNumberId?: s
         sellerId: tenant.sellerId,
         provider: "META_WHATSAPP_CLOUD_API",
         status: "ACTIVE",
+        connectionMethod: row.connectionMethod || "EMBEDDED_SIGNUP",
         phoneNumberId: row.phoneNumberId,
         createdAt: new Date("2026-07-28T00:00:00.000Z"),
         updatedAt: new Date("2026-07-28T00:00:00.000Z"),
+      };
+    },
+    findManualCredentialStorage: async (tenant: TenantContext, connectionId: string) => {
+      const row = rows[tenant.sellerId];
+      if (!row || row.connectionMethod !== "CUSTOMER_OWNED_META_APP" || connectionId !== `conn_${tenant.sellerId}`) return null;
+      return {
+        connectionId,
+        sellerId: tenant.sellerId,
+        encryptedMetaAppSecret: "encrypted_meta_app_secret",
+        metaAppSecretKeyVersion: "v1",
+        encryptedSystemUserAccessToken: "encrypted_system_user_access_token",
+        systemUserAccessTokenKeyVersion: "v1",
+        encryptedWebhookVerifyToken: "encrypted_webhook_verify_token",
+        webhookVerifyTokenKeyVersion: "v1",
       };
     },
   } as unknown as WhatsAppConnectionRepository;
@@ -181,11 +197,14 @@ async function run(): Promise<void> {
   add("queue payload contains no credentials or phone routing", !/token|credential|secret|phoneNumberId|phone_number_id|sender/i.test(JSON.stringify(group({ sellerId: "seller_a" }))));
 
   const activeResolver = new PersistentWhatsAppOutboundConnectionResolver(
-    fakeRepository({ seller_active: { status: "ACTIVE", phoneNumberId: "333333333333333" } }),
-    fakeCredentialService({ token: "token_active" }),
+    fakeRepository({ seller_active: { status: "ACTIVE", phoneNumberId: "333333333333333", connectionMethod: "CUSTOMER_OWNED_META_APP" } }),
+    fakeCredentialService({ token: "legacy_token_must_not_be_used" }),
+    {
+      decryptManualSystemUserAccessToken: () => "token_active",
+    } as never,
   );
   const active = await activeResolver.resolveForTrustedSeller("seller_active");
-  add("ACTIVE connection resolves only by trusted seller", active.phoneNumberId === "333333333333333" && active.accessToken === "token_active");
+  add("ACTIVE customer-owned connection resolves only by trusted seller and encrypted token source", active.phoneNumberId === "333333333333333" && active.accessToken === "token_active" && active.tokenSource === "encrypted_connection_token");
   add("no ACTIVE connection fails closed", await expectsOutboundError(() => new PersistentWhatsAppOutboundConnectionResolver(fakeRepository({}), fakeCredentialService({ token: "x" })).resolveForTrustedSeller("seller_missing"), "missing_active_connection"));
   add("VERIFYING connection is not used", await expectsOutboundError(() => new PersistentWhatsAppOutboundConnectionResolver(fakeRepository({ seller_verifying: { status: "VERIFYING", phoneNumberId: "444444444444444" } }), fakeCredentialService({ token: "x" })).resolveForTrustedSeller("seller_verifying"), "missing_active_connection"));
   add("DISCONNECTED connection is not used", await expectsOutboundError(() => new PersistentWhatsAppOutboundConnectionResolver(fakeRepository({ seller_disconnected: { status: "DISCONNECTED", phoneNumberId: "555555555555555" } }), fakeCredentialService({ token: "x" })).resolveForTrustedSeller("seller_disconnected"), "missing_active_connection"));
