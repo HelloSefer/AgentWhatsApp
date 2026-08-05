@@ -71,8 +71,11 @@ export const dashboardNavigationSections = [
     items: [
       {
         label: "Settings",
+        href: "/dashboard/settings",
         icon: Settings,
-        status: "soon",
+        match: "exact",
+        status: "available",
+        requiredPermission: "settings:manage",
       },
       {
         label: "Help",
@@ -89,6 +92,14 @@ export const dashboardPageMeta = [
     match: "exact",
     meta: {
       title: "Overview",
+    },
+  },
+  {
+    href: "/dashboard/settings",
+    match: "exact",
+    meta: {
+      title: "Settings",
+      breadcrumb: ["Configuration", "Settings"],
     },
   },
   {

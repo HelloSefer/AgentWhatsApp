@@ -13,11 +13,6 @@ import type { WhatsAppInteractivePreview } from "../../agent/reply/whatsapp-inte
 import type { AgentIdentity } from "../../agent/identity/agent-identity.types";
 import { conversationKeyService } from "../../agent/identity/conversation-key.service";
 import { sellerResolverService } from "../../agent/identity/seller-resolver.service";
-import { sellerConfigService } from "../../agent/config/seller-config.service";
-import {
-  buildFirstEntryLiveSmokeResult,
-  markFirstEntryLiveSmokeShown,
-} from "../../agent/config/first-entry-live-smoke.service";
 import type { OrderEntities } from "../../agent/agent-brain.types";
 import { fastAnalyzeCustomerMessage } from "../../agent/fast-intent-analyzer.service";
 import {
@@ -2169,7 +2164,8 @@ export async function dispatchPreparedOutboundGroupDirectly(
   if (connection && connection.tokenSource !== "encrypted_connection_token") {
     throw new WhatsAppOutboundError("missing_connection_credentials");
   }
-  const allowGlobalCredentialFallback = connection ? false : undefined;
+  // Queue dispatch is customer-owned only: a missing resolved connection fails closed.
+  const allowGlobalCredentialFallback = false;
   for (let index = startCommandIndex; index < group.commands.length; index += 1) {
     const command = group.commands[index];
     if (command.type === "agent_reply") {
@@ -3367,7 +3363,7 @@ export async function processNormalizedCloudMessage(
   }
   const connectionPhoneNumberId = connectionRuntime?.phoneNumberId ?? message.phoneNumberId;
   const connectionAccessToken = connectionRuntime?.accessToken;
-  const allowGlobalCredentialFallback = connectionRuntime ? false : undefined;
+  const allowGlobalCredentialFallback = false;
   const customerId = identity.conversationKey;
   const perMessageResult: ProcessCloudWebhookResult = {
     ok: true,
@@ -3458,18 +3454,10 @@ export async function processNormalizedCloudMessage(
       perMessageResult.normalizedActionId = transportActionId;
       const customerOwnedOrderRuntimeActivation =
         connectionRuntime?.tokenSource === "encrypted_connection_token";
-      const firstEntryLiveSmoke = await buildFirstEntryLiveSmokeResult({
-        sellerId: identity.sellerId,
-        customerPhone: identity.customerPhone,
-        phoneNumberId: identity.phoneNumberId || message.phoneNumberId,
-        message: message.text,
-        trustedCustomerOwnedConnection: customerOwnedOrderRuntimeActivation,
-        sourceType: message.sourceType,
-        buttonReplyId: message.buttonReplyId,
-        buttonReplyTitle: message.buttonReplyTitle,
-      });
-      const liveSmokeModeArmed =
-        firstEntryLiveSmoke.readiness.liveEnabled === true;
+      // First-entry is handled by the normal Agent pipeline below.  The
+      // retained diagnostic branch is permanently disarmed for customer traffic.
+      const firstEntryLiveSmoke = { handled: false, blockedReason: "diagnostic_disabled", readiness: { liveEnabled: false } } as any;
+      const liveSmokeModeArmed = false;
       const liveSmokeDispatchAllowed =
         liveSmokeModeArmed &&
         (env.whatsappInteractiveEnabled === true || options.forceDryRun === true) &&
@@ -3560,11 +3548,7 @@ export async function processNormalizedCloudMessage(
           firstSendResult?.ok &&
           firstEntryLiveSmoke.reason === "first_entry_live_smoke"
         ) {
-          await markFirstEntryLiveSmokeShown({
-            conversationKey: firstEntryLiveSmoke.conversationKey,
-            sellerId: firstEntryLiveSmoke.sellerId,
-            customerPhone: firstEntryLiveSmoke.customerPhone,
-          });
+          await Promise.resolve();
         }
 
         let sendResult: CloudReplyDispatchResult;
@@ -3608,11 +3592,7 @@ export async function processNormalizedCloudMessage(
           sendResult.ok &&
           firstEntryLiveSmoke.reason === "first_entry_live_smoke"
         ) {
-          await markFirstEntryLiveSmokeShown({
-            conversationKey: firstEntryLiveSmoke.conversationKey,
-            sellerId: firstEntryLiveSmoke.sellerId,
-            customerPhone: firstEntryLiveSmoke.customerPhone,
-          });
+          await Promise.resolve();
         }
 
         logJson({
@@ -4062,11 +4042,7 @@ export async function processNormalizedCloudMessage(
         );
 
         if (confirmedOrder) {
-          const receiptConfig = sellerConfigService.getSellerConfig(
-            identity.sellerId,
-          ).receipt;
-
-          if (receiptConfig.enabled && receiptConfig.sendAfterConfirmation) {
+          if (confirmedOrder.receiptEnabled === true && confirmedOrder.receiptSendAfterConfirmation === true) {
             const responseGroupDispatcher =
               options.preparedResponseGroupDispatcher || options.outboundGroupDispatcher;
             if (result.meta?.orderRuntime?.durableReceiptOutboxCommitted === true) {

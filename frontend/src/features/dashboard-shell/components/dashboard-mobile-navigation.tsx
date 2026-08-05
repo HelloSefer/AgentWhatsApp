@@ -18,12 +18,25 @@ import { isDashboardNavigationItemActive } from "../utils/dashboard-route-matchi
 import { DashboardNavigationItem } from "./dashboard-navigation-item";
 import { DashboardUserMenu } from "./dashboard-user-menu";
 import { useDevelopmentTenantNavigation } from "@/features/development-tenant/hooks/use-development-tenant-navigation";
+import { useAuthSession } from "@/features/auth/hooks/use-auth-session";
+import type { DashboardNavigationSection } from "../types/dashboard-navigation.types";
+
+function visibleSections(sections: readonly DashboardNavigationSection[], role: string | undefined): readonly DashboardNavigationSection[] {
+  return sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => item.requiredPermission !== "settings:manage" || role === "OWNER" || role === "ADMIN"),
+    }))
+    .filter((section) => section.items.length > 0);
+}
 
 export function DashboardMobileNavigation() {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const auth = useAuthSession();
   const developmentSection = useDevelopmentTenantNavigation();
-  const sections = developmentSection ? [...dashboardNavigationSections, developmentSection] : dashboardNavigationSections;
+  const baseSections = developmentSection ? [...dashboardNavigationSections, developmentSection] : dashboardNavigationSections;
+  const sections = visibleSections(baseSections, auth.memberships[0]?.role);
 
   return (
     <Sheet onOpenChange={setOpen} open={open}>

@@ -1,6 +1,5 @@
 import type { Request, Response } from "express";
 import { env } from "../../../../config/env";
-import { productContextService } from "../../config/product-context.service";
 import { conversationKeyService } from "../../identity/conversation-key.service";
 import { evaluateGuardedOrderRuntime } from "./order-runtime-eval.service";
 import { evaluateOrderRuntimeWebhookIntegration } from "./order-runtime-webhook-eval.service";
@@ -45,9 +44,8 @@ export async function resetOrderRuntimeController(req: Request, res: Response) {
   if (!sellerId || !customerPhone) {
     return res.status(400).json({ message: "sellerId and customerPhone are required" });
   }
-  const productId =
-    optionalText(req.body?.productId) ||
-    productContextService.getActiveProductContext(sellerId).productId;
+  const productId = optionalText(req.body?.productId);
+  if (!productId) return res.status(400).json({ ok: false, code: "PRODUCT_CONTEXT_REQUIRED" });
   const conversationKey = conversationKeyService.buildConversationKey(sellerId, customerPhone);
   if (req.body?.fullFlowReset === true) {
     if (!isAllowedFullResetScope(sellerId, customerPhone)) {

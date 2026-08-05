@@ -4,14 +4,11 @@ import { runtimeReadComposition } from "../../../../composition/runtime-read/run
 import { runtimeWriteComposition } from "../../../../composition/runtime-write/runtime-write-composition.runtime";
 import { getValkeyClient } from "../../../../infrastructure/valkey/valkey.client";
 import { takeConversationPendingOrderSelections } from "../../session/conversation-session.service";
-import { DEFAULT_DEMO_SELLER_ID } from "../../identity/seller-resolver.service";
 import { normalizeSellerConfig } from "../../config/first-entry-config.service";
 import { renderFirstEntryMessage } from "../../config/first-entry-renderer.service";
 import { offerConfigService } from "../../config/offers/offer-config.service";
-import { productContextService } from "../../config/product-context.service";
 import { requiredFieldsService } from "../../config/required-fields.service";
 import type { RequiredOrderField } from "../../config/required-fields.types";
-import { sellerConfigService } from "../../config/seller-config.service";
 import {
   prepareConfirmedOrderReceipt,
   prepareConfirmedOrderReceiptDocument,
@@ -55,10 +52,6 @@ import {
   resolveConfiguredOptionCanonicalValue,
   withConversationProductDefaults,
 } from "../../../conversation-engine/config/conversation-product-config.service";
-import {
-  buildSandalsDevelopmentSellerConfig,
-  SANDALS_DEVELOPMENT_PRODUCT_ID,
-} from "../../../development/sandals-development-template";
 
 export function isGuardedOrderRuntimeAction(message: string): boolean {
   return /^(?:first_entry:order_now|info:(?:order_now|continue_order)|cart_offer:.+|cart_quantity:.+|cart_item_option:.+|cart_item_previous:(?:same|different)|cart_review:.+|cart_review_item:.+|cart_review_item_edit:.+|order_checkout:.+|order_checkout_field:.+)$/.test(message);
@@ -143,32 +136,29 @@ export async function getOrderRuntimeReadiness(
   sellerId: string,
   activationRequested = false,
   tenantScopedProductAvailable = false,
+  productId = "",
 ): Promise<OrderRuntimeReadiness> {
-  const known = sellerConfigService.hasSellerConfig(sellerId);
-  const configured = known ? sellerConfigService.getSellerConfig(sellerId) : undefined;
-  const feature = normalizeSellerConfig(configured || sellerConfigService.getSellerConfig("seller_demo_sandals"), undefined).multiItemOrderFlow!;
-  const persistedTenantRuntimeAllowed =
-    activationRequested &&
-    tenantScopedProductAvailable &&
-    !known;
-  const scoped = known
-    ? feature.allowedSellerIds?.includes(sellerId) === true
-    : persistedTenantRuntimeAllowed;
+  const projection = productId
+    ? await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId, productId })
+    : { status: "SELLER_COMMERCE_CONFIG_REQUIRED" as const };
+  const feature = projection.status === "READY" ? projection.sellerConfig.multiItemOrderFlow! : { enabled: false, runtimeMode: "disabled" as const, allowedSellerIds: [] };
+  const persistedTenantRuntimeAllowed = activationRequested && tenantScopedProductAvailable && projection.status === "READY";
+  const scoped = persistedTenantRuntimeAllowed && feature.allowedSellerIds?.includes(sellerId) === true;
   let valkeyReady = false;
   try {
     valkeyReady = (await getValkeyClient().ping()) === "PONG";
   } catch (_error) {
     valkeyReady = false;
   }
-  const flowEnabled = (known || persistedTenantRuntimeAllowed) && scoped && feature.runtimeMode !== "disabled" && (feature.enabled || activationRequested);
+  const flowEnabled = persistedTenantRuntimeAllowed && scoped && feature.runtimeMode !== "disabled" && (feature.enabled || activationRequested);
   return {
     flowEnabled,
     runtimeMode: feature.runtimeMode,
     liveDispatchEnabled: env.whatsappCloudReplyButtonsEnabled && env.whatsappInteractiveChoicesEnabled,
     guardedSellerScope: scoped,
-    sellerKnown: known,
+    sellerKnown: projection.status === "READY",
     valkeyReady,
-    ...(!known && !persistedTenantRuntimeAllowed
+    ...(projection.status !== "READY"
       ? { reason: "unknown_seller" }
       : !scoped
         ? { reason: "seller_not_allowlisted" }
@@ -189,44 +179,25 @@ async function persist(input: OrderRuntimeTurnInput, runtime: OrderRuntimeSessio
 export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInput): Promise<OrderRuntimeTurnResult> {
   const requestedSellerId = input.sellerId.trim();
   const requestedProductId = input.productId?.trim();
-  const knownSeller = sellerConfigService.hasSellerConfig(requestedSellerId);
-  const legacyProductContext =
-    (requestedProductId
-      ? productContextService.getProductContextById(requestedProductId)
-      : undefined) ||
-    productContextService.getActiveProductContext(
-      knownSeller ? requestedSellerId : DEFAULT_DEMO_SELLER_ID,
-    );
-  const catalogResolution = await runtimeReadComposition.catalogReader.resolve({
-    sellerId: requestedSellerId,
-    productId: requestedProductId || legacyProductContext.productId,
-    legacyProductContext,
-  });
-  const baseProductContext = catalogResolution.productContext;
+  if (!requestedProductId) return { handled: true, reply: orderMessage("error.recovery"), stage: "RECOVERY_REQUIRED", warnings: ["PRODUCT_CONTEXT_REQUIRED"], failureCode: "PRODUCT_CONTEXT_REQUIRED" };
+  const projection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId: requestedSellerId, productId: requestedProductId });
+  if (projection.status !== "READY") return { handled: true, reply: orderMessage("error.recovery"), stage: "RECOVERY_REQUIRED", warnings: [projection.status], failureCode: projection.status };
+  const baseProductContext = projection.productContext;
   const productOwnedByTenant =
     baseProductContext.active === true &&
     baseProductContext.sellerId.trim() === requestedSellerId &&
     (!requestedProductId || baseProductContext.productId.trim() === requestedProductId);
   const persistedTenantProductAvailable =
-    catalogResolution.source === "persistence" &&
     productOwnedByTenant;
   const readiness = await getOrderRuntimeReadiness(
     requestedSellerId,
     input.activationRequested === true,
     persistedTenantProductAvailable,
+    baseProductContext.productId,
   );
   if (!readiness.flowEnabled || !readiness.valkeyReady) return { handled: false, warnings: [] };
 
-  const sellerConfig = normalizeSellerConfig(
-    knownSeller
-      ? sellerConfigService.getSellerConfig(requestedSellerId)
-      : persistedTenantProductAvailable && baseProductContext.productId === SANDALS_DEVELOPMENT_PRODUCT_ID
-        ? buildSandalsDevelopmentSellerConfig(requestedSellerId)
-      : {
-          ...sellerConfigService.getSellerConfig(DEFAULT_DEMO_SELLER_ID),
-          sellerId: requestedSellerId,
-        },
-  );
+  const sellerConfig = normalizeSellerConfig(projection.sellerConfig);
   if (!productOwnedByTenant) {
     return {
       handled: true,

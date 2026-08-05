@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { OrderEntities } from "../agent-brain.types";
 import type { ProductContext } from "../product-context.types";
-import { productContextService } from "../config/product-context.service";
-import { sellerConfigService } from "../config/seller-config.service";
 import { calculateOrderTotals } from "./order-pricing.service";
 import type { ResolvedDeliveryQuote } from "./delivery-pricing.service";
 import type { CartDraft } from "./cart-state.types";
@@ -114,6 +112,8 @@ export interface ConfirmedOrder {
   receiptLocalFileDeleteError?: string;
   receiptBranding?: ReceiptBrandingSnapshot;
   receiptProduct?: ReceiptProductSnapshot;
+  receiptEnabled?: boolean;
+  receiptSendAfterConfirmation?: boolean;
   cartItems?: ConfirmedOrderCartItemSnapshot[];
 }
 
@@ -128,6 +128,7 @@ type SaveConfirmedOrderInput = {
   deliveryQuote: ResolvedDeliveryQuote;
   cart?: CartDraft;
   source?: "agent" | "whatsapp_cloud";
+  receiptContext?: Readonly<{ branding: ReceiptBrandingSnapshot; enabled: boolean; sendAfterConfirmation: boolean }>;
 };
 
 type ListConfirmedOrdersFilters = {
@@ -206,14 +207,9 @@ function buildReceiptSnapshots(input: SaveConfirmedOrderInput): {
   branding: ReceiptBrandingSnapshot;
   product: ReceiptProductSnapshot;
 } {
-  const sellerConfig = input.sellerId
-    ? sellerConfigService.getSellerConfig(input.sellerId)
-    : undefined;
-  const branding = sellerConfig?.receipt.branding;
-  const configProduct = input.productContext.productId
-    ? productContextService.getProductContextById(input.productContext.productId)
-    : undefined;
-  const configuredOptions = configProduct?.optionGroups || [];
+  if (!input.receiptContext?.enabled) throw new Error("RECEIPT_CONFIG_REQUIRED");
+  const branding = input.receiptContext.branding;
+  const configuredOptions: Array<{ key: string; label: string; required: boolean; options: string[] }> = [];
   const collected = input.collected as Record<string, unknown>;
   const attributes = configuredOptions.flatMap((option) => {
     const value = collected[option.key];
@@ -259,25 +255,9 @@ function buildReceiptSnapshots(input: SaveConfirmedOrderInput): {
 
   return {
     branding: {
-      storeName: branding?.storeName || sellerConfig?.businessName || "Boutique",
-      slogan: branding?.slogan,
-      logoUrl: branding?.logoUrl,
-      primaryColor: branding?.primaryColor,
-      secondaryColor: branding?.secondaryColor,
-      accentColor: branding?.accentColor,
-      phone: branding?.phone,
-      whatsapp: branding?.whatsapp,
-      email: branding?.email,
-      website: branding?.website,
-      address: branding?.address,
-      instagram: branding?.instagram,
-      facebook: branding?.facebook,
-      tiktok: branding?.tiktok,
-      footerMessage: sellerConfig?.receipt.footerText,
-      paymentMethodLabel: sellerConfig?.receipt.paymentMethodLabel,
+      ...branding,
     },
     product: {
-      imageRef: configProduct?.images.find(Boolean),
       attributes,
       requiredAttributeKeys: configuredOptions
         .filter((option) => option.required)
@@ -392,6 +372,8 @@ export function saveConfirmedOrder(input: SaveConfirmedOrderInput): ConfirmedOrd
     receiptSendStatus: "NOT_REQUESTED",
     receiptBranding: receiptSnapshots.branding,
     receiptProduct: receiptSnapshots.product,
+    receiptEnabled: input.receiptContext?.enabled,
+    receiptSendAfterConfirmation: input.receiptContext?.sendAfterConfirmation,
     cartItems: buildCartItemSnapshots(input.cart),
     createdAt: confirmedAt,
     updatedAt: confirmedAt,

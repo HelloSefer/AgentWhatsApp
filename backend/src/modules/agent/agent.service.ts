@@ -13,10 +13,8 @@ import { env } from "../../config/env";
 import { interactiveSendDecisionService } from "./reply/interactive-send-decision.service";
 import type { InteractiveSendChannel } from "./reply/interactive-send-decision.types";
 import { whatsappInteractiveMapper } from "./reply/whatsapp-interactive.mapper";
-import { productContextService } from "./config/product-context.service";
 import { requiredFieldsService } from "./config/required-fields.service";
 import type { RequiredOrderField } from "./config/required-fields.types";
-import { sellerConfigService } from "./config/seller-config.service";
 import type { SellerConfig } from "./config/seller-config.types";
 import { buildSalesResponse } from "./sales/sales-response.builder";
 import {
@@ -55,6 +53,7 @@ import {
 } from "./info/informational-ai-answer.service";
 import type { InformationalAIAnswerDependencies } from "./info/informational-ai-answer.types";
 import type { ProductContext } from "./product-context.types";
+import type { ProductContext as ConfigProductContext } from "./config/product-context.types";
 import { buildOptionalFieldPrompt } from "./order-understanding/optional-field-dialogue.service";
 import { renderOrderProgressReply } from "./order/order-response.builder";
 import {
@@ -70,12 +69,6 @@ import { runWithConversationConfig } from "../conversation-engine/config/convers
 import { getActiveConversationConfig } from "../conversation-engine/config/conversation-config-context.service";
 import { applyResolvedConversationProductConfig, withConversationProductDefaults } from "../conversation-engine/config/conversation-product-config.service";
 import { runtimeReadComposition } from "../../composition/runtime-read/runtime-read-composition.runtime";
-import {
-  buildSandalsDevelopmentRuntimeProductContext,
-  buildSandalsDevelopmentSellerConfig,
-  SANDALS_DEVELOPMENT_PRODUCT_ID,
-} from "../development/sandals-development-template";
-import type { ProductContext as ConfigProductContext } from "./config/product-context.types";
 
 export type GenerateAgentOptions = {
   customerId?: string;
@@ -329,19 +322,9 @@ function getRuntimeRequiredOrderFields(
   }
 
   try {
-    const sellerConfig = options.runtimeSellerConfig || sellerConfigService.getSellerConfig(options.sellerId);
-    const configProductContext = productContextService.getActiveProductContext(options.sellerId);
-    const activeConversationConfig = getActiveConversationConfig();
-    const effectiveConversationConfig = activeConversationConfig
-      ? withConversationProductDefaults(activeConversationConfig, configProductContext)
-      : undefined;
-
-    return requiredFieldsService.getOrderFields({
-      sellerConfig,
-      productContext: effectiveConversationConfig
-        ? applyResolvedConversationProductConfig(configProductContext, effectiveConversationConfig)
-        : configProductContext,
-    });
+    const sellerConfig = options.runtimeSellerConfig;
+    if (!sellerConfig) return undefined;
+    return undefined;
   } catch (error) {
     console.error("❌ Required order fields resolution failed", error);
     return undefined;
@@ -372,8 +355,7 @@ function getRuntimeInfoMenuDisplayMode(
   }
 
   try {
-    return (options.runtimeSellerConfig || sellerConfigService.getSellerConfig(options.sellerId)).interactive
-      .infoMenuDisplayMode;
+    return options.runtimeSellerConfig?.interactive.infoMenuDisplayMode || "list";
   } catch (error) {
     console.error("❌ Info menu display mode resolution failed", error);
     return "list";
@@ -603,7 +585,7 @@ async function buildSoftInfoSelectionResultIfHandled(input: {
 
 function toAgentProductContext(input: {
   sellerConfig: SellerConfig;
-  configProductContext: ReturnType<typeof productContextService.getActiveProductContext>;
+  configProductContext: ConfigProductContext;
 }): ProductContext {
   const colorGroup = input.configProductContext.optionGroups.find(
     (group) => group.key === "color",
@@ -674,30 +656,9 @@ async function resolveRuntimeProductContext(
   }
 
   try {
-    const knownSeller = sellerConfigService.hasSellerConfig(options.sellerId);
-    const legacyProductContext = productContextService.getActiveProductContext(
-      knownSeller ? options.sellerId : DEFAULT_DEMO_SELLER_ID,
-    );
-    const catalogResolution = await runtimeReadComposition.catalogReader.resolve({
-      sellerId: options.sellerId,
-      productId: options.productId?.trim() || legacyProductContext.productId,
-      legacyProductContext,
-    });
-    const sellerConfig = knownSeller
-      ? sellerConfigService.getSellerConfig(options.sellerId)
-      : catalogResolution.source === "persistence" &&
-          catalogResolution.productContext.sellerId === options.sellerId &&
-          catalogResolution.productContext.productId === SANDALS_DEVELOPMENT_PRODUCT_ID
-        ? buildSandalsDevelopmentSellerConfig(options.sellerId)
-        : {
-            ...sellerConfigService.getSellerConfig(DEFAULT_DEMO_SELLER_ID),
-            sellerId: options.sellerId,
-          };
-
-    return toAgentProductContext({
-      sellerConfig,
-      configProductContext: catalogResolution.productContext,
-    });
+    const projection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId: options.sellerId!, productId: options.productId?.trim() || productContext.productId || "" });
+    if (projection.status === "READY") return toAgentProductContext({ sellerConfig: projection.sellerConfig, configProductContext: projection.productContext });
+    return productContext;
   } catch (error) {
     console.error("❌ Runtime product context resolution failed", error);
     return productContext;
@@ -707,52 +668,23 @@ async function resolveRuntimeProductContext(
 async function resolveRuntimeCommerceConfig(
   productContext: ProductContext,
   options?: GenerateAgentOptions,
-): Promise<{ sellerConfig?: SellerConfig; productContext: ProductContext; requiredFields?: RequiredOrderField[] }> {
+): Promise<{ sellerConfig?: SellerConfig; productContext: ProductContext; requiredFields?: RequiredOrderField[]; failureCode?: "SELLER_COMMERCE_CONFIG_REQUIRED" | "SELLER_COMMERCE_CONFIG_INVALID" }> {
   const sellerId = options?.sellerId?.trim();
   if (!sellerId) return { productContext: await resolveRuntimeProductContext(productContext, options) };
-  if (sellerConfigService.hasSellerConfig(sellerId)) {
-    const resolvedProductContext = await resolveRuntimeProductContext(productContext, options);
-    return {
-      sellerConfig: sellerConfigService.getSellerConfig(sellerId),
-      productContext: resolvedProductContext,
-    };
-  }
-  const templateConfigProductContext = buildSandalsDevelopmentRuntimeProductContext(sellerId);
-  const catalogResolution = await runtimeReadComposition.catalogReader.resolve({
-    sellerId,
-    productId: options?.productId?.trim() || SANDALS_DEVELOPMENT_PRODUCT_ID,
-    legacyProductContext: templateConfigProductContext,
-  });
-  const resolvedConfigProductContext: ConfigProductContext = catalogResolution.source === "persistence"
-    ? {
-        ...templateConfigProductContext,
-        ...catalogResolution.productContext,
-        images: templateConfigProductContext.images,
-        benefits: templateConfigProductContext.benefits,
-        infoMenu: templateConfigProductContext.infoMenu,
-        stock: templateConfigProductContext.stock,
-        conversationalName: templateConfigProductContext.conversationalName,
-        singularName: templateConfigProductContext.singularName,
-        pluralName: templateConfigProductContext.pluralName,
-      }
-    : templateConfigProductContext;
-  if (
-    catalogResolution.source === "persistence" &&
-    resolvedConfigProductContext.sellerId === sellerId &&
-    resolvedConfigProductContext.productId === SANDALS_DEVELOPMENT_PRODUCT_ID
-  ) {
-    const sellerConfig = buildSandalsDevelopmentSellerConfig(sellerId);
+  const projection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId: sellerId!, productId: options?.productId?.trim() || productContext.productId || "" });
+  if (projection.status === "READY") {
+    const sellerConfig = projection.sellerConfig;
     const requiredFields = requiredFieldsService.getOrderFields({
       sellerConfig,
-      productContext: resolvedConfigProductContext,
+      productContext: projection.productContext,
     });
     return {
       sellerConfig,
-      productContext: toAgentProductContext({ sellerConfig, configProductContext: resolvedConfigProductContext }),
+      productContext: toAgentProductContext({ sellerConfig, configProductContext: projection.productContext }),
       requiredFields,
     };
   }
-  return { productContext: await resolveRuntimeProductContext(productContext, options) };
+  return { productContext, failureCode: projection.status };
 }
 
 function mightBeOrderMessage(message: string): boolean {
@@ -2022,6 +1954,9 @@ export async function generateAgentResult(
 ): Promise<AgentResult> {
   const sellerId = options?.sellerId?.trim() || DEFAULT_DEMO_SELLER_ID;
   const commerce = await resolveRuntimeCommerceConfig(productContext, options);
+  if (options?.sellerId && commerce.failureCode) {
+    return { reply: "سمح ليا، الخدمة ديال الطلب ما متوفراش دابا.", actions: [], source: "direct" };
+  }
   const runtimeProductContext = commerce.productContext;
   const productId = options?.productId?.trim() || runtimeProductContext.productId;
   const configResolution = await runtimeReadComposition.conversationConfigReader.resolve({ sellerId, productId });

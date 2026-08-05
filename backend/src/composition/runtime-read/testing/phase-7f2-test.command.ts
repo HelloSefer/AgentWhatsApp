@@ -192,7 +192,7 @@ async function main(): Promise<void> {
     const agentSource = await source("modules/agent/agent.service.ts");
     add("Runtime integration performs no persistence writes or migrations", !/createProduct|replaceProduct|setProductAvailability|saveSellerOverride|saveProductOverride|persistConfirmedOrder|runDatabaseMigrations/u.test(runtimeReadSource));
     add("Composition/repositories are not created per message", !/createRuntimeReadComposition\(/u.test(agentSource) && /runtimeReadComposition/u.test(agentSource));
-    add("Existing Agent runtime path keeps the disabled legacy provider available", /resolveRuntimeProductContext/u.test(agentSource) && /runtimeReadComposition\.catalogReader\.resolve/u.test(agentSource));
+    add("Existing Agent runtime path uses the seller commerce projection", /resolveRuntimeProductContext/u.test(agentSource) && /sellerCommerceProjectionReader\.resolve/u.test(agentSource));
 
     await persistence.conversationConfigService.saveSellerOverride(tenantB, {
       schemaVersion: 1,
@@ -204,9 +204,9 @@ async function main(): Promise<void> {
     const disabledAgentProbe = await runAgentProbe({ enabled: false, sellerId: "seller_demo_sandals", productId: "prod_demo_sandal_001" });
     const disabledAgentReply = JSON.parse(disabledAgentProbe).reply as string;
     add("Existing Agent test path succeeds with feature disabled", Boolean(disabledAgentReply));
-    add("Customer-visible default output remains unchanged with no persisted rows", disabledAgentReply.includes("صندالة نسائية") && disabledAgentReply.includes("199"));
+    add("Missing persisted commerce config is customer-safe", disabledAgentReply.includes("الخدمة ديال الطلب"));
     const enabledAgentProbe = await runAgentProbe({ enabled: true, sellerId: sellerA, productId: sharedProductId });
-    add("Existing Agent test path can use seeded persisted reads when enabled", JSON.parse(enabledAgentProbe).reply.includes("منتج أ"));
+    add("Missing seller commerce config blocks catalog-only Agent reads", JSON.parse(enabledAgentProbe).reply.includes("الخدمة ديال الطلب"));
   } finally {
     await cleanup();
     const remaining = sellerIds.length

@@ -1,4 +1,5 @@
 import { env } from "../../../config/env";
+import { runtimeReadComposition } from "../../../composition/runtime-read/runtime-read-composition.runtime";
 import { getValkeyClient } from "../../../infrastructure/valkey/valkey.client";
 import type {
   ConversationMessage,
@@ -7,14 +8,7 @@ import type {
 } from "../agent-brain.types";
 import { conversationKeyService } from "../identity/conversation-key.service";
 import { DEFAULT_DEMO_SELLER_ID } from "../identity/seller-resolver.service";
-import { productContextService } from "../config/product-context.service";
 import { requiredFieldsService } from "../config/required-fields.service";
-import { sellerConfigService } from "../config/seller-config.service";
-import {
-  buildSandalsDevelopmentRuntimeProductContext,
-  buildSandalsDevelopmentSellerConfig,
-  SANDALS_DEVELOPMENT_PRODUCT_ID,
-} from "../../development/sandals-development-template";
 import {
   asLegacyOrderEntities,
   initializeCart,
@@ -189,24 +183,17 @@ export function createEmptySession(input: SessionIdentity): ConversationSession 
   };
 }
 
-function normalizeSessionCartState(session: ConversationSession): {
+async function normalizeSessionCartState(session: ConversationSession): Promise<{
   migrated: boolean;
   integrityInvalidPaths: string[];
   changed: boolean;
-} {
-  const sellerId = session.sellerId || DEFAULT_DEMO_SELLER_ID;
-  const knownSeller = sellerConfigService.hasSellerConfig(sellerId);
-  const isSandalsDevelopmentTenant =
-    !knownSeller && session.productId === SANDALS_DEVELOPMENT_PRODUCT_ID;
-  const configProduct = knownSeller && session.productId
-    ? productContextService.getProductContextById(session.productId)
-    : undefined;
-  const productContext = isSandalsDevelopmentTenant
-    ? buildSandalsDevelopmentRuntimeProductContext(sellerId)
-    : configProduct || productContextService.getActiveProductContext(knownSeller ? sellerId : DEFAULT_DEMO_SELLER_ID);
-  const sellerConfig = isSandalsDevelopmentTenant
-    ? buildSandalsDevelopmentSellerConfig(sellerId)
-    : sellerConfigService.getSellerConfig(knownSeller ? sellerId : DEFAULT_DEMO_SELLER_ID);
+}> {
+  const sellerId = session.sellerId;
+  if (!sellerId || !session.productId) return { migrated: false, integrityInvalidPaths: ["seller_commerce_projection_required"], changed: false };
+  const projection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId, productId: session.productId || "" });
+  if (projection.status !== "READY") return { migrated: false, integrityInvalidPaths: [projection.status], changed: false };
+  const productContext = projection.productContext;
+  const sellerConfig = projection.sellerConfig;
   const fields = requiredFieldsService.getOrderFields({
     sellerConfig,
     productContext,
@@ -242,7 +229,7 @@ function normalizeSessionCartState(session: ConversationSession): {
 export async function saveConversationSession(
   session: ConversationSession,
 ): Promise<void> {
-  const cartNormalization = normalizeSessionCartState(session);
+  const cartNormalization = await normalizeSessionCartState(session);
   if (cartNormalization.migrated) {
     console.info(JSON.stringify({
       event: "cart.legacy_migrated",
@@ -318,7 +305,7 @@ export async function getConversationSession(
       sellerId: session.sellerId || identity.sellerId,
       productId: session.productId || identity.productId,
     };
-    const normalization = normalizeSessionCartState(normalizedSession);
+    const normalization = await normalizeSessionCartState(normalizedSession);
     if (normalization.changed) {
       await saveConversationSession(normalizedSession);
     }
