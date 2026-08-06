@@ -20,6 +20,8 @@ import whatsappConnectionRoutes from "./modules/whatsapp-connection/whatsapp-con
 import manualWebhookPublicRoutes from "./modules/whatsapp-connection/manual-webhook-public.routes";
 import { createDevelopmentTenantRoutes } from "./modules/development/development-tenant.routes";
 import sellerSettingsRoutes from "./modules/seller-settings/seller-settings.routes";
+import { createCatalogProductRoutes } from "./modules/catalog/catalog-products.routes";
+import { sendWhatsAppConnectionProductBindingValidationError } from "./modules/whatsapp-connection/http/whatsapp-connection-http.errors";
 
 const app = express();
 
@@ -37,6 +39,18 @@ app.use(
     },
   }),
 );
+app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const path = req.originalUrl.split("?")[0] || "";
+  const isBindingRoute = /^\/api\/whatsapp-connections\/[^/]+\/product-binding\/?$/u.test(path);
+  const isJsonParseFailure = error instanceof SyntaxError || (
+    typeof error === "object" && error !== null && "type" in error && error.type === "entity.parse.failed"
+  );
+  if (isBindingRoute && isJsonParseFailure) {
+    sendWhatsAppConnectionProductBindingValidationError(res, [{ field: "body", code: "INVALID_OBJECT" }]);
+    return;
+  }
+  next(error);
+});
 app.use(csrfOriginProtection);
 
 app.use("/", healthRoutes);
@@ -54,6 +68,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/onboarding", onboardingRoutes);
 app.use("/api/whatsapp-connections", whatsappConnectionRoutes);
 app.use("/api/seller", sellerSettingsRoutes);
+app.use("/api/seller", createCatalogProductRoutes());
 app.use("/api/development-tenant", createDevelopmentTenantRoutes());
 
 app.use((_req, res) => {

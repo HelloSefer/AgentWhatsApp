@@ -15,12 +15,15 @@ import { ManualWebhookConfigurationService } from "./application/manual-webhook-
 import { WhatsAppConnectionCredentialEncryptionService } from "./application/whatsapp-connection-credential-encryption.service";
 import { getWhatsAppConnectionCredentialEncryptionConfiguration } from "./application/whatsapp-connection-credential-encryption.config";
 import { WhatsAppConnectionCredentialService } from "./application/whatsapp-connection-credential.service";
+import { WhatsAppConnectionProductBindingService } from "./application/whatsapp-connection-product-binding.service";
 import { WhatsAppConnectionController } from "./http/whatsapp-connection.controller";
 import { FetchMetaEmbeddedSignupTransport } from "./infrastructure/meta/meta-embedded-signup.transport";
 import { FetchManualMetaAppTransport } from "./infrastructure/meta/manual-meta-app.transport";
 import { postgreSqlWhatsAppConnectionRepository } from "./infrastructure/postgresql/postgresql-whatsapp-connection.repository";
 import type { MetaEmbeddedSignupConfiguration } from "./application/meta-embedded-signup.config";
 import type { WhatsAppConnectionCredentialService as CredentialService } from "./application/whatsapp-connection-credential.service";
+import { CatalogService, PostgreSqlCatalogRepository } from "../catalog";
+import { runtimeReadComposition } from "../../composition/runtime-read/runtime-read-composition.runtime";
 
 function safeMetaConfiguration(): MetaEmbeddedSignupConfiguration | null {
   try {
@@ -113,13 +116,38 @@ export function createWhatsAppConnectionRoutes(
   );
   const currentService = new WhatsAppConnectionCurrentService(postgreSqlWhatsAppConnectionRepository);
   const disconnectService = new WhatsAppConnectionDisconnectService(postgreSqlWhatsAppConnectionRepository);
-  const controller = new WhatsAppConnectionController(completionService, currentService, finalizationService, disconnectService, manualSetupService, manualAssetsService, manualWebhookConfigurationService, manualFinalizationService);
+  const productBindingService = new WhatsAppConnectionProductBindingService(
+    postgreSqlWhatsAppConnectionRepository,
+    new CatalogService(new PostgreSqlCatalogRepository()),
+  );
+  const controller = new WhatsAppConnectionController(completionService, currentService, finalizationService, disconnectService, manualSetupService, manualAssetsService, manualWebhookConfigurationService, manualFinalizationService, productBindingService, runtimeReadComposition.sellerCommerceProjectionReader);
 
   router.get(
     "/current",
     authenticate,
     authorizeRead,
     controller.getCurrentConnection,
+  );
+
+  router.get(
+    "/:connectionId/product-binding",
+    authenticate,
+    authorizeRead,
+    controller.getProductBinding,
+  );
+
+  router.put(
+    "/:connectionId/product-binding",
+    authenticate,
+    authorizeManage,
+    controller.putProductBinding,
+  );
+
+  router.delete(
+    "/:connectionId/product-binding",
+    authenticate,
+    authorizeManage,
+    controller.deleteProductBinding,
   );
 
   router.post(

@@ -42,6 +42,11 @@ export type ConfirmedOrderSnapshotOption = Readonly<{
   key: string;
   label: string;
   value: SupportedOrderFieldValue;
+  /** Optional to preserve old persisted snapshots which stored display facts only. */
+  optionId?: string;
+  optionLabel?: string;
+  valueId?: string;
+  valueLabel?: string;
 }>;
 
 export type ConfirmedOrderSnapshotItem = Readonly<{
@@ -51,6 +56,9 @@ export type ConfirmedOrderSnapshotItem = Readonly<{
   quantity: number;
   selectedOptions: readonly ConfirmedOrderSnapshotOption[];
   unitPriceMinor: number;
+  currencyCode?: string;
+  lineSubtotalMinor?: number;
+  lineDiscountMinor?: number;
   lineTotalMinor: number;
   unitPrice: number;
   lineTotal: number;
@@ -67,6 +75,7 @@ export type ConfirmedOrderSelectedOfferSnapshot = Readonly<{
   label?: string;
   offerTotalMinor: number;
   discountMinor: number;
+  normalSubtotalMinor?: number;
   offerTotal: number;
   discountAmount: number;
 }>;
@@ -95,6 +104,9 @@ export type ConfirmedOrderSnapshot = Readonly<{
   orderFields: readonly ConfirmedOrderSnapshotField[];
   currency: string;
   standardSubtotalMinor: number;
+  /** Explicit historical commercial totals; old snapshots safely omit these. */
+  subtotalAmountMinor?: number;
+  discountAmountMinor?: number;
   standardSubtotal: number;
   selectedOffer?: ConfirmedOrderSelectedOfferSnapshot;
   recommendedOffer?: ConfirmedOrderRecommendedOfferSnapshot;
@@ -102,6 +114,7 @@ export type ConfirmedOrderSnapshot = Readonly<{
   merchandiseTotal: number;
   deliveryFee?: DeliveryFeeSnapshot;
   finalTotalMinor: number;
+  totalAmountMinor?: number;
   finalTotal: number;
   commercialWarnings: readonly string[];
 }>;

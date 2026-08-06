@@ -26,6 +26,8 @@ import {
   type WhatsAppConnectionStatus,
 } from "../services/embedded-signup-completion-service";
 import { whatsappConnectionErrorMessage } from "../utils/whatsapp-connection-error-message";
+import { WhatsappProductBindingCard } from "./whatsapp-product-binding-card";
+import { whatsappProductBindingKeys } from "../hooks/use-whatsapp-product-binding";
 
 type ConfirmationKind = "replace" | "disconnect" | null;
 type WizardMode = "new" | "replace" | "resume" | null;
@@ -131,6 +133,7 @@ export function WhatsappConnectionCard() {
 
   const refreshCurrent = async () => {
     await queryClient.invalidateQueries({ queryKey: whatsappConnectionQueryKey });
+    await queryClient.invalidateQueries({ queryKey: whatsappProductBindingKeys.all });
   };
 
   const signup = useMetaEmbeddedSignup({
@@ -388,6 +391,8 @@ export function WhatsappConnectionCard() {
         </Dialog>
       </CardContent>
     </Card>
+
+    {connection?.connectionId ? <WhatsappProductBindingCard connectionId={connection.connectionId} /> : null}
 
     </div>
   );

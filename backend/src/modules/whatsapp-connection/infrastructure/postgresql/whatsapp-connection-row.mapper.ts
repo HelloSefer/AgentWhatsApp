@@ -4,6 +4,7 @@ import { WHATSAPP_CONNECTION_METHODS, WHATSAPP_CONNECTION_PROVIDER, WHATSAPP_CON
 export type WhatsAppConnectionRow = Readonly<{
   connection_id: string;
   seller_id: string;
+  bound_product_id: string | null;
   provider: string;
   connection_method: string | null;
   status: string;
@@ -52,6 +53,7 @@ export function mapWhatsAppConnection(row: WhatsAppConnectionRow): WhatsAppConne
   return {
     connectionId: row.connection_id,
     sellerId: row.seller_id,
+    boundProductId: row.bound_product_id,
     provider: WHATSAPP_CONNECTION_PROVIDER,
     connectionMethod: connectionMethod as WhatsAppConnection["connectionMethod"],
     status: row.status as WhatsAppConnection["status"],

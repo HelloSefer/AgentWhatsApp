@@ -3,12 +3,15 @@ import type { RequiredOrderField } from "../../../config/required-fields.types";
 import type { CartDraft } from "../../cart-state.types";
 import type { ItemCollectionCommandResult, ItemCollectionFailureCode } from "../item-collection.types";
 import type { ItemCollectionProgressionResult } from "../progression/item-collection-progression.types";
+import type { ItemCollectionOptionActionScope } from "../presentation/item-collection-presentation.types";
 
 export type ItemOptionAction = {
   type: "SELECT_ITEM_OPTION";
   rawId: string;
   fieldKey: string;
   canonicalValue: string;
+  productId?: string;
+  targetId?: string;
 };
 
 export type ItemOptionActionNormalizationFailureCode =
@@ -18,6 +21,8 @@ export type ItemOptionActionNormalizationFailureCode =
   | "EMPTY_CANONICAL_VALUE"
   | "UNSAFE_FIELD_KEY"
   | "UNSAFE_CANONICAL_VALUE"
+  | "UNSAFE_PRODUCT_ID"
+  | "UNSAFE_TARGET_ID"
   | "ACTION_ID_TOO_LONG"
   | "EXTRA_ACTION_SEGMENT";
 
@@ -37,7 +42,8 @@ export type ItemOptionActionHandleFailureCode =
   | "FIELD_NOT_CURRENTLY_EXPECTED"
   | "FIELD_NOT_CONFIGURED"
   | "OPEN_TEXT_ACTION_NOT_SUPPORTED"
-  | "CANONICAL_VALUE_NOT_CONFIGURED";
+  | "CANONICAL_VALUE_NOT_CONFIGURED"
+  | "ACTION_SCOPE_MISMATCH";
 
 export type ItemOptionActionHandlerInput = {
   action: ItemOptionAction;
@@ -45,6 +51,7 @@ export type ItemOptionActionHandlerInput = {
   sellerId: string;
   productContext: ProductContext;
   requiredFields: RequiredOrderField[];
+  optionActionScope?: ItemCollectionOptionActionScope;
 };
 
 export type ItemOptionActionHandleResult = {

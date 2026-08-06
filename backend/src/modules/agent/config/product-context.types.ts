@@ -70,6 +70,8 @@ export type ProductContext = {
   pluralName?: string;
   description?: string;
   price: number;
+  /** Catalog money remains integer minor units; `price` is a legacy display adapter. */
+  priceAmountMinor?: number;
   oldPrice?: number;
   currency: "MAD";
   /** Commercial configuration only. Offer selection and pricing are handled in later phases. */

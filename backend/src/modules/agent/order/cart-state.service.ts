@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { OrderEntities } from "../agent-brain.types";
 import type { RequiredOrderField } from "../config/required-fields.types";
+import type { ProductContext } from "../config/product-context.types";
 import {
   cartStatuses,
   type CartCompatibilityInput,
@@ -84,6 +85,8 @@ function cloneItem(item: CartItem): CartItem {
     ...item,
     quantityExplicitlySet: item.quantityExplicitlySet,
     selectedOptions: { ...item.selectedOptions },
+    ...(item.selectedOptionFacts ? { selectedOptionFacts: item.selectedOptionFacts.map((fact) => ({ ...fact })) } : {}),
+    ...(item.selectedOfferFacts ? { selectedOfferFacts: { ...item.selectedOfferFacts } } : {}),
   };
 }
 
@@ -221,7 +224,13 @@ export function initializeCart(mode: CartMode = "STANDARD"): CartDraft {
   };
 }
 
-export function createItemFingerprint(item: Pick<CartItem, "productId" | "selectedOptions">): string {
+export function createItemFingerprint(item: Pick<CartItem, "productId" | "selectedOptions"> & Partial<Pick<CartItem, "selectedOptionFacts">>): string {
+  if (item.selectedOptionFacts?.length) {
+    const facts = item.selectedOptionFacts
+      .map((fact) => [fact.optionId.trim(), fact.valueId.trim()] as const)
+      .sort(([leftOption, leftValue], [rightOption, rightValue]) => leftOption === rightOption ? leftValue.localeCompare(rightValue) : leftOption.localeCompare(rightOption));
+    return `${item.productId.trim()}::${JSON.stringify(facts)}`;
+  }
   const options = Object.entries(item.selectedOptions)
     .map(([key, value]) => [normalizeKey(key), normalizeOptionValue(value)] as const)
     .sort(([leftKey, leftValue], [rightKey, rightValue]) =>
@@ -231,11 +240,75 @@ export function createItemFingerprint(item: Pick<CartItem, "productId" | "select
   return `${item.productId.trim()}::${JSON.stringify(options)}`;
 }
 
+function createDisplayOptionFingerprint(item: Pick<CartItem, "productId" | "selectedOptions"> & Partial<Pick<CartItem, "selectedOptionFacts">>): string {
+  const options = item.selectedOptionFacts?.length
+    ? item.selectedOptionFacts.map((fact) => [normalizeKey(fact.optionId), normalizeOptionValue(fact.valueLabel)] as const)
+    : Object.entries(item.selectedOptions).map(([key, value]) => [normalizeKey(key), normalizeOptionValue(value)] as const);
+  options.sort(([leftKey, leftValue], [rightKey, rightValue]) =>
+    leftKey === rightKey ? leftValue.localeCompare(rightValue) : leftKey.localeCompare(rightKey),
+  );
+  return `${item.productId.trim()}::${JSON.stringify(options)}`;
+}
+
+/**
+ * Converts the existing label-oriented collection state into temporary facts
+ * from the already-authoritative runtime Catalog projection. This boundary is
+ * deliberately pure so every caller can safely use it before persisting a
+ * cart or before confirmation revalidation.
+ */
+export function hydrateCartProductAuthority(input: {
+  cart: CartDraft;
+  productContext: ProductContext;
+}): CartIntegrityResult & { cart: CartDraft } {
+  const cart = cloneCart(input.cart);
+  const invalidPaths: string[] = [];
+  const price = input.productContext.priceAmountMinor;
+  const currencyCode = input.productContext.currency?.trim().toUpperCase();
+  if (!Number.isSafeInteger(price) || !price || price <= 0) invalidPaths.push("product.priceAmountMinor");
+  if (!/^[A-Z]{3}$/.test(currencyCode || "")) invalidPaths.push("product.currency");
+  const optionGroups = new Map(input.productContext.optionGroups.map((group) => [group.key, group]));
+  const hydrateItem = (item: CartItem, path: string) => {
+    if (item.productId !== input.productContext.productId) {
+      invalidPaths.push(`${path}.productId`);
+      return;
+    }
+    item.productName = input.productContext.name;
+    item.unitPriceAmountMinor = price;
+    item.currencyCode = currencyCode;
+    const facts: NonNullable<CartItem["selectedOptionFacts"]> = [];
+    const seenOptions = new Set<string>();
+    for (const [optionId, selected] of Object.entries(item.selectedOptions)) {
+      const group = optionGroups.get(optionId);
+      if (!group || seenOptions.has(optionId)) {
+        invalidPaths.push(`${path}.selectedOptions.${optionId}`);
+        continue;
+      }
+      seenOptions.add(optionId);
+      const normalized = normalizeOptionValue(selected);
+      const value = group.valueConfigurations?.find((candidate) =>
+        normalizeOptionValue(candidate.canonicalValue) === normalized || normalizeOptionValue(candidate.label) === normalized,
+      );
+      if (!value || !value.enabled || !value.available) {
+        invalidPaths.push(`${path}.selectedOptions.${optionId}`);
+        continue;
+      }
+      item.selectedOptions[optionId] = value.canonicalValue;
+      facts.push({ optionId: group.key, optionLabel: group.label, valueId: value.key, valueLabel: value.label });
+    }
+    item.selectedOptionFacts = facts.sort((left, right) => left.optionId.localeCompare(right.optionId));
+  };
+  cart.items.forEach((item, index) => hydrateItem(item, `items.${index}`));
+  if (cart.currentItemDraft) hydrateItem(cart.currentItemDraft, "currentItemDraft");
+  return { cart, valid: invalidPaths.length === 0, invalidPaths, warnings: [] };
+}
+
 export function areCartItemsMergeCompatible(left: CartItem, right: CartItem): boolean {
   return (
     left.status === "COMPLETE" &&
     right.status === "COMPLETE" &&
-    createItemFingerprint(left) === createItemFingerprint(right)
+    (left.selectedOptionFacts?.length && right.selectedOptionFacts?.length
+      ? createItemFingerprint(left) === createItemFingerprint(right)
+      : createDisplayOptionFingerprint(left) === createDisplayOptionFingerprint(right))
   );
 }
 

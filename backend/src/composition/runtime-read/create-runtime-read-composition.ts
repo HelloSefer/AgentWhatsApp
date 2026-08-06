@@ -5,6 +5,7 @@ import { RuntimeConversationConfigReader } from "./runtime-conversation-config-r
 import { resolveRuntimeReadMode, type RuntimeReadMode } from "./runtime-read-mode";
 import { SellerCommerceConfigRuntimeReader, SellerCommerceConfigRepository } from "../../modules/seller-commerce-config";
 import { SellerCommerceRuntimeProjectionReader } from "./seller-commerce-runtime-projection";
+import { PostgreSqlWhatsAppConnectionRepository } from "../../modules/whatsapp-connection";
 
 export type RuntimeReadComposition = Readonly<{
   catalogReader: RuntimeCatalogReader;
@@ -21,6 +22,6 @@ export function createRuntimeReadComposition(input: Readonly<{
   return Object.freeze({
     catalogReader: new RuntimeCatalogReader(persistence.catalogService, mode),
     conversationConfigReader: new RuntimeConversationConfigReader(persistence.conversationConfigService, mode),
-    sellerCommerceProjectionReader: new SellerCommerceRuntimeProjectionReader({ commerceConfigReader: new SellerCommerceConfigRuntimeReader(new SellerCommerceConfigRepository()), catalogService: persistence.catalogService, conversationConfigService: persistence.conversationConfigService, workspaceProfileRepository: persistence.sellerWorkspaceProfileRepository }),
+    sellerCommerceProjectionReader: new SellerCommerceRuntimeProjectionReader({ commerceConfigReader: new SellerCommerceConfigRuntimeReader(new SellerCommerceConfigRepository()), catalogService: persistence.catalogService, conversationConfigService: persistence.conversationConfigService, workspaceProfileRepository: persistence.sellerWorkspaceProfileRepository, whatsappConnectionRepository: new PostgreSqlWhatsAppConnectionRepository() }),
   });
 }

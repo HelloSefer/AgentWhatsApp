@@ -1,8 +1,9 @@
 export { CatalogService } from "./application/catalog.service";
 export type { CatalogProductList, CatalogRepository } from "./contracts/catalog.repository";
 export type { CatalogOption, CatalogOptionValue } from "./domain/catalog-option";
-export type { CatalogProduct, CatalogProductDraft, CatalogProductInput, ProductAvailability } from "./domain/catalog-product";
-export { CatalogPersistenceError, CatalogSellerNotFoundError, CatalogValidationError, ProductAlreadyExistsError, ProductNotFoundError } from "./domain/catalog.errors";
+export type { CatalogProduct, CatalogProductAlias, CatalogProductDraft, CatalogProductImage, CatalogProductImageMimeType, CatalogProductInput, CatalogProductOffer, ProductAvailability } from "./domain/catalog-product";
+export { CATALOG_PRODUCT_IMAGE_MIME_TYPES } from "./domain/catalog-product";
+export { CatalogPersistenceError, CatalogSellerNotFoundError, CatalogValidationError, ProductAliasAlreadyExistsError, ProductAlreadyExistsError, ProductNotFoundError } from "./domain/catalog.errors";
 export { validateCatalogProductId, validateCatalogProductInput, validateProductAvailability } from "./domain/catalog.validation";
 export type { Money } from "./domain/money";
 export { validateMoney } from "./domain/money";

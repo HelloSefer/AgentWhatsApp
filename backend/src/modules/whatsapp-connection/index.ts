@@ -19,6 +19,7 @@ export { WhatsAppConnectionCredentialEncryptionService } from "./application/wha
 export { WhatsAppConnectionCredentialService } from "./application/whatsapp-connection-credential.service";
 export { WhatsAppConnectionCurrentService } from "./application/whatsapp-connection-current.service";
 export { WhatsAppConnectionDisconnectService } from "./application/whatsapp-connection-disconnect.service";
+export { WhatsAppConnectionProductBindingService } from "./application/whatsapp-connection-product-binding.service";
 export { WhatsAppConnectionFinalizationService } from "./application/whatsapp-connection-finalization.service";
 export type {
   PersistWhatsAppConnectionCredentialInput,
@@ -48,6 +49,7 @@ export {
   WhatsAppConnectionFinalizationVerificationError,
   WhatsAppConnectionMetaConfigurationError,
   WhatsAppConnectionMetaTransportError,
+  WhatsAppConnectionNotFoundError,
   WhatsAppConnectionPersistenceError,
   WhatsAppConnectionPhoneNumberAlreadyAssignedError,
   WhatsAppConnectionSellerNotFoundError,

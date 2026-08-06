@@ -23,8 +23,11 @@ import {
   validateItemCollectionOption,
 } from "../item-collection/item-collection-requirements.service";
 import { normalizeItemOptionActionId } from "../item-collection/actions/item-option-action-normalizer.service";
+import { matchesItemCollectionOptionActionScope } from "../item-collection/presentation/item-collection-presentation.service";
 import type { SupportedOrderFieldValue } from "../cart-state.types";
+import { hydrateCartProductAuthority } from "../cart-state.service";
 import { runCartPlanningPreview } from "../planning/preview/cart-planning-preview.service";
+import { revalidateCartBeforeConfirmation } from "../confirmation-revalidation.service";
 import {
   recoveryReply,
   replyFromCartReview,
@@ -33,6 +36,7 @@ import {
   replyFromInitialPlannedItemCollection,
   replyFromItemCollection,
   replyFromOrderEntryOption,
+  replyFromRefreshedOrderEntryOption,
   replyFromPlanning,
   staleActionReply,
   type RuntimeReply,
@@ -48,7 +52,7 @@ import type {
 import { orderMessage } from "../../../conversation-engine/adapters/order-conversation.adapter";
 import { getActiveConversationConfig } from "../../../conversation-engine/config/conversation-config-context.service";
 import {
-  applyResolvedConversationProductConfig,
+  applyConnectedCatalogConversationPresentation,
   resolveConfiguredOptionCanonicalValue,
   withConversationProductDefaults,
 } from "../../../conversation-engine/config/conversation-product-config.service";
@@ -103,10 +107,17 @@ function validInitialItemOptions(
   return valid;
 }
 
-function initialSelectableItemOption(
+function nextInitialSelectableItemOption(
   fields: RequiredOrderField[],
+  selectedOptions: Record<string, SupportedOrderFieldValue>,
 ): RequiredOrderField | undefined {
-  return getRequiredItemCollectionFields(fields).find((field) => field.options?.length);
+  return getRequiredItemCollectionFields(fields).find(
+    (field) => field.options?.length && selectedOptions[field.key] === undefined,
+  );
+}
+
+function orderEntryOptionActionScope(productId: string, field: RequiredOrderField) {
+  return { productId, targetId: `order-entry-${field.key}` };
 }
 
 function asTurnResult(input: RuntimeReply & { stage: OrderRuntimeStage; warnings?: readonly string[]; failureCode?: string; confirmedSnapshotId?: string; receiptReady?: boolean; durableReceiptOutboxCommitted?: boolean; publicOrderCode?: string; receiptArtifact?: OrderRuntimeTurnResult["receiptArtifact"] }): OrderRuntimeTurnResult {
@@ -180,7 +191,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
   const requestedSellerId = input.sellerId.trim();
   const requestedProductId = input.productId?.trim();
   if (!requestedProductId) return { handled: true, reply: orderMessage("error.recovery"), stage: "RECOVERY_REQUIRED", warnings: ["PRODUCT_CONTEXT_REQUIRED"], failureCode: "PRODUCT_CONTEXT_REQUIRED" };
-  const projection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId: requestedSellerId, productId: requestedProductId });
+  const projection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId: requestedSellerId, productId: requestedProductId, connectionId: input.connectionId, phoneNumberId: input.phoneNumberId });
   if (projection.status !== "READY") return { handled: true, reply: orderMessage("error.recovery"), stage: "RECOVERY_REQUIRED", warnings: [projection.status], failureCode: projection.status };
   const baseProductContext = projection.productContext;
   const productOwnedByTenant =
@@ -209,12 +220,14 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
   }
   const activeConversationConfig = getActiveConversationConfig();
   const productContext = activeConversationConfig
-    ? applyResolvedConversationProductConfig(
+    ? applyConnectedCatalogConversationPresentation(
         baseProductContext,
         withConversationProductDefaults(activeConversationConfig, baseProductContext),
       )
     : baseProductContext;
   const fields = requiredFieldsService.getOrderFields({ sellerConfig, productContext });
+  const withCatalogFacts = (cart: OrderRuntimeSession["cart"]) =>
+    hydrateCartProductAuthority({ cart, productContext }).cart;
   const offers = offerConfigService.getConfiguredOffers({
     sellerId: input.sellerId,
     productId: productContext.productId,
@@ -252,7 +265,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
       previewPlanningState: runtime.planningState,
       now,
     });
-    runtime.cart = planning.cartAfter;
+    runtime.cart = withCatalogFacts(planning.cartAfter);
     runtime.planningState = planning.previewPlanningState;
     runtime.runtimeStage = "PLANNING";
     runtime.lastHandledAction = "first_entry:order_now";
@@ -311,17 +324,20 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     } else {
       delete runtime.pendingInitialItemOptions;
     }
-    const firstConfiguredOption = initialSelectableItemOption(fields);
-    const firstMissingOption = firstConfiguredOption && validPendingOptions[firstConfiguredOption.key] === undefined
-      ? firstConfiguredOption
-      : undefined;
+    const firstMissingOption = nextInitialSelectableItemOption(
+      fields,
+      validPendingOptions,
+    );
     if (firstMissingOption) {
       runtime.orderEntryFieldKey = firstMissingOption.key;
       runtime.runtimeStage = "PLANNING";
       runtime.lastHandledAction = "first_entry:order_now";
       await persist(input, runtime, fields);
       return asTurnResult({
-        ...replyFromOrderEntryOption(firstMissingOption),
+        ...replyFromOrderEntryOption(
+          firstMissingOption,
+          orderEntryOptionActionScope(productContext.productId, firstMissingOption),
+        ),
         stage: runtime.runtimeStage,
       });
     }
@@ -337,21 +353,35 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
 
   if (runtime.runtimeStage === "PLANNING") {
     if (runtime.orderEntryFieldKey) {
+      const currentOrderEntryField = fields.find(
+        (field) => field.key === runtime.orderEntryFieldKey,
+      );
       const selection = normalizeItemOptionActionId(message);
       if (
+        !currentOrderEntryField ||
         !selection.recognized ||
         !selection.valid ||
         !selection.action ||
-        selection.action.fieldKey !== runtime.orderEntryFieldKey
+        selection.action.fieldKey !== runtime.orderEntryFieldKey ||
+        !matchesItemCollectionOptionActionScope(
+          selection.action,
+          orderEntryOptionActionScope(productContext.productId, currentOrderEntryField!),
+        )
       ) {
-        return isGuardedOrderRuntimeAction(message)
-          ? asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage })
-          : { handled: false, warnings: [] };
+        return isGuardedOrderRuntimeAction(message) && currentOrderEntryField
+          ? asTurnResult({
+            ...replyFromRefreshedOrderEntryOption(
+              currentOrderEntryField,
+              orderEntryOptionActionScope(productContext.productId, currentOrderEntryField),
+            ),
+            stage: runtime.runtimeStage,
+          })
+          : isGuardedOrderRuntimeAction(message)
+            ? asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage })
+            : { handled: false, warnings: [] };
       }
 
-      const selectedField = fields.find(
-        (field) => field.key === selection.action!.fieldKey,
-      );
+      const selectedField = currentOrderEntryField;
       const canonicalValue = selectedField
         ? resolveConfiguredOptionCanonicalValue(
             selectedField,
@@ -359,7 +389,13 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
           )
         : undefined;
       if (!canonicalValue) {
-        return asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage });
+        return asTurnResult({
+          ...replyFromRefreshedOrderEntryOption(
+            selectedField!,
+            orderEntryOptionActionScope(productContext.productId, selectedField!),
+          ),
+          stage: runtime.runtimeStage,
+        });
       }
       const validation = validateItemCollectionOption({
         fields,
@@ -367,7 +403,13 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
         value: canonicalValue,
       });
       if (!validation.valid) {
-        return asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage });
+        return asTurnResult({
+          ...replyFromRefreshedOrderEntryOption(
+            selectedField!,
+            orderEntryOptionActionScope(productContext.productId, selectedField!),
+          ),
+          stage: runtime.runtimeStage,
+        });
       }
 
       runtime.pendingInitialItemOptions = {
@@ -375,6 +417,22 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
         [validation.option.field.key]: validation.option.value,
       };
       delete runtime.orderEntryFieldKey;
+
+      const nextMissingOption = nextInitialSelectableItemOption(
+        fields,
+        runtime.pendingInitialItemOptions,
+      );
+      if (nextMissingOption) {
+        runtime.orderEntryFieldKey = nextMissingOption.key;
+        await persist(input, runtime, fields);
+        return asTurnResult({
+          ...replyFromOrderEntryOption(
+            nextMissingOption,
+            orderEntryOptionActionScope(productContext.productId, nextMissingOption),
+          ),
+          stage: runtime.runtimeStage,
+        });
+      }
 
       const planning = startCanonicalPlanning();
       await persist(input, runtime, fields);
@@ -389,7 +447,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     const planning = runCartPlanningPreview({ previewEnabled: true, rawActionId: isGuardedOrderRuntimeAction(message) ? message : undefined, planningText: !isGuardedOrderRuntimeAction(message) ? message : undefined, sellerId: input.sellerId, productContext, offerLookup: offers, cart: runtime.cart, previewPlanningState: runtime.planningState, now });
     if (!planning.handled) return isGuardedOrderRuntimeAction(message) ? asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage }) : { handled: false, warnings: [] };
     if (!planning.planningResult?.success && planning.failureCode) return asTurnResult({ ...recoveryReply(), stage: runtime.runtimeStage, warnings: planning.warnings, failureCode: planning.failureCode });
-    runtime.cart = planning.cartAfter;
+    runtime.cart = withCatalogFacts(planning.cartAfter);
     runtime.planningState = planning.previewPlanningState;
     runtime.lastHandledAction = isGuardedOrderRuntimeAction(message) ? message : undefined;
     if (planning.nextStep === "START_ITEM_COLLECTION") {
@@ -402,8 +460,9 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
         cart: runtime.cart,
         previewState: runtime.itemCollectionState,
         initialItemOptions: runtime.pendingInitialItemOptions,
+        requireOptionActionScope: true,
       });
-      runtime.cart = item.cartAfter;
+      runtime.cart = withCatalogFacts(item.cartAfter);
       runtime.itemCollectionState = item.previewState;
       delete runtime.pendingInitialItemOptions;
       if (item.nextStep === "CART_REVIEW_READY") {
@@ -416,8 +475,9 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
           cart: runtime.cart,
           previewState: runtime.cartReviewState,
           now,
+          requireOptionActionScope: true,
         });
-        runtime.cart = review.cartAfter;
+        runtime.cart = withCatalogFacts(review.cartAfter);
         runtime.cartReviewState = review.previewState;
         runtime.runtimeStage = "CART_REVIEW";
         await persist(input, runtime, fields);
@@ -445,18 +505,18 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
   }
 
   if (runtime.runtimeStage === "COLLECTING_ITEM") {
-    const item = runItemCollectionPreview({ previewEnabled: true, rawActionId: isGuardedOrderRuntimeAction(message) ? message : undefined, itemCollectionText: !isGuardedOrderRuntimeAction(message) ? message : undefined, sellerId: input.sellerId, productContext, requiredFields: fields, cart: runtime.cart, previewState: runtime.itemCollectionState });
+    const item = runItemCollectionPreview({ previewEnabled: true, rawActionId: isGuardedOrderRuntimeAction(message) ? message : undefined, itemCollectionText: !isGuardedOrderRuntimeAction(message) ? message : undefined, sellerId: input.sellerId, productContext, requiredFields: fields, cart: runtime.cart, previewState: runtime.itemCollectionState, requireOptionActionScope: true });
     if (!item.handled) return isGuardedOrderRuntimeAction(message) ? asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage }) : { handled: false, warnings: [] };
     // A handled item turn is already constrained by the D2 normalizers. Some
     // valid mutations intentionally expose a non-success *next prompt* (for
     // example, quantity is still awaited), so keep the trusted cartAfter and
     // let the presentation describe the next required input.
-    runtime.cart = item.cartAfter;
+    runtime.cart = withCatalogFacts(item.cartAfter);
     runtime.itemCollectionState = item.previewState;
     runtime.lastHandledAction = isGuardedOrderRuntimeAction(message) ? message : undefined;
     if (item.nextStep === "CART_REVIEW_READY") {
-      const review = runCartReviewPreview({ previewEnabled: true, sellerId: input.sellerId, productContext, requiredFields: fields, offerLookup: offers, cart: runtime.cart, previewState: runtime.cartReviewState, now });
-      runtime.cart = review.cartAfter;
+      const review = runCartReviewPreview({ previewEnabled: true, sellerId: input.sellerId, productContext, requiredFields: fields, offerLookup: offers, cart: runtime.cart, previewState: runtime.cartReviewState, now, requireOptionActionScope: true });
+      runtime.cart = withCatalogFacts(review.cartAfter);
       runtime.cartReviewState = review.previewState;
       runtime.runtimeStage = "CART_REVIEW";
       await persist(input, runtime, fields);
@@ -481,9 +541,9 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
           }
         : undefined;
     }
-    const review = runCartReviewPreview({ previewEnabled: true, rawActionId: isGuardedOrderRuntimeAction(message) ? message : undefined, cartReviewText: !isGuardedOrderRuntimeAction(message) ? message : undefined, sellerId: input.sellerId, productContext, requiredFields: fields, offerLookup: offers, cart: runtime.cart, previewState: runtime.cartReviewState, cartItemEditPreviewState: runtime.itemEditState, now });
+    const review = runCartReviewPreview({ previewEnabled: true, rawActionId: isGuardedOrderRuntimeAction(message) ? message : undefined, cartReviewText: !isGuardedOrderRuntimeAction(message) ? message : undefined, sellerId: input.sellerId, productContext, requiredFields: fields, offerLookup: offers, cart: runtime.cart, previewState: runtime.cartReviewState, cartItemEditPreviewState: runtime.itemEditState, now, requireOptionActionScope: true });
     if (!review.handled) return isGuardedOrderRuntimeAction(message) ? asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage }) : { handled: false, warnings: [] };
-    runtime.cart = review.cartAfter;
+    runtime.cart = withCatalogFacts(review.cartAfter);
     runtime.cartReviewState = review.previewState;
     const completedFocusedEdit = /^cart_item_option:(?:size|color):/u.test(message) && review.nextStep === "SHOW_CART_REVIEW";
     if (completedFocusedEdit) {
@@ -501,7 +561,10 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     runtime.runtimeStage = stageForCartReview(review.nextStep);
     if (review.nextStep === "DELIVERY_COLLECTION_READY") {
       const delivery = runDeliveryConfirmationPreview({ previewEnabled: true, sellerId: input.sellerId, conversationScopeId: input.conversationKey, productContext, requiredFields: fields, offerLookup: offers, deliveryPricing: sellerConfig.deliveryPolicy.pricing, cart: runtime.cart, now });
-      runtime.cart = delivery.cartAfter;
+      const deliveryReview = delivery.nextStep === "FINAL_ORDER_REVIEW"
+        ? revalidateCartBeforeConfirmation({ cart: delivery.cartAfter, expectedProductId: runtime.productId, sellerId: input.sellerId, productContext, fields, now })
+        : undefined;
+      runtime.cart = withCatalogFacts(deliveryReview?.cart || delivery.cartAfter);
       runtime.deliveryConfirmationState = delivery.previewState;
       runtime.runtimeStage = delivery.nextStep === "FINAL_ORDER_REVIEW"
         ? "FINAL_ORDER_REVIEW"
@@ -518,7 +581,7 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
     const deliveryStateBefore = runtime.deliveryConfirmationState;
     const delivery = runDeliveryConfirmationPreview({ previewEnabled: true, rawActionId: isGuardedOrderRuntimeAction(message) ? message : undefined, deliveryConfirmationText: !isGuardedOrderRuntimeAction(message) ? message : undefined, previewState: runtime.deliveryConfirmationState, sellerId: input.sellerId, conversationScopeId: input.conversationKey, productContext, requiredFields: fields, offerLookup: offers, deliveryPricing: sellerConfig.deliveryPolicy.pricing, cart: runtime.cart, now, cartReviewPreviewState: runtime.cartReviewState, cartItemEditPreviewState: runtime.itemEditState });
     if (!delivery.handled) return isGuardedOrderRuntimeAction(message) ? asTurnResult({ ...staleActionReply(), stage: runtime.runtimeStage }) : { handled: false, warnings: [] };
-    runtime.cart = delivery.cartAfter;
+    runtime.cart = withCatalogFacts(delivery.cartAfter);
     runtime.deliveryConfirmationState = delivery.previewState;
     if (delivery.nextStep === "RETURN_TO_CART_REVIEW") {
       const opensProductEdit = delivery.normalizedAction?.type === "BACK_TO_CART";
@@ -532,8 +595,9 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
         cart: runtime.cart,
         previewState: runtime.cartReviewState,
         now,
+        requireOptionActionScope: true,
       });
-      runtime.cart = review.cartAfter;
+      runtime.cart = withCatalogFacts(review.cartAfter);
       runtime.cartReviewState = review.previewState;
       runtime.itemEditState = review.cartItemEditPreviewState;
       runtime.deliveryConfirmationState = undefined;
@@ -546,8 +610,43 @@ export async function processGuardedOrderRuntimeTurn(input: OrderRuntimeTurnInpu
         failureCode: review.failureCode,
       });
     }
-    else if (delivery.nextStep === "FINAL_ORDER_REVIEW") runtime.runtimeStage = "FINAL_ORDER_REVIEW";
+    else if (delivery.nextStep === "FINAL_ORDER_REVIEW") {
+      const reviewed = revalidateCartBeforeConfirmation({ cart: runtime.cart, expectedProductId: runtime.productId, sellerId: input.sellerId, productContext, fields, now });
+      runtime.cart = reviewed.cart;
+      runtime.runtimeStage = "FINAL_ORDER_REVIEW";
+    }
     else if (delivery.nextStep === "CONFIRMED_ORDER_PREVIEW" && delivery.confirmedPreview && delivery.previewState) {
+      const freshProjection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId: input.sellerId, productId: runtime.productId, connectionId: input.connectionId, phoneNumberId: input.phoneNumberId });
+      const revalidation = revalidateCartBeforeConfirmation({
+        cart: runtime.cart,
+        expectedProductId: runtime.productId,
+        sellerId: input.sellerId,
+        productContext: freshProjection.status === "READY" ? freshProjection.productContext : undefined,
+        fields,
+        now,
+      });
+      if (revalidation.status !== "UNCHANGED") {
+        runtime.cart = revalidation.cart;
+        delete runtime.pendingConfirmation;
+        if (revalidation.status === "BLOCKED") {
+          runtime.runtimeStage = "RECOVERY_REQUIRED";
+          await persist(input, runtime, fields);
+          return asTurnResult({ ...recoveryReply(), stage: runtime.runtimeStage, warnings: [`confirmation_revalidation_${revalidation.reason.toLowerCase()}`], failureCode: "PRODUCT_MISMATCH" });
+        }
+        if (freshProjection.status !== "READY") {
+          runtime.runtimeStage = "RECOVERY_REQUIRED";
+          await persist(input, runtime, fields);
+          return asTurnResult({ ...recoveryReply(), stage: runtime.runtimeStage, warnings: ["confirmation_revalidation_product_unavailable"], failureCode: "PRODUCT_MISMATCH" });
+        }
+        const freshProductContext = freshProjection.productContext;
+        const refreshed = runDeliveryConfirmationPreview({ previewEnabled: true, previewState: { version: 1, kind: "FINAL_ORDER_REVIEW" }, sellerId: input.sellerId, conversationScopeId: input.conversationKey, productContext: freshProductContext, requiredFields: fields, offerLookup: offerConfigService.getConfiguredOffers({ sellerId: input.sellerId, productId: freshProductContext.productId, productContexts: [freshProductContext] }), deliveryPricing: sellerConfig.deliveryPolicy.pricing, cart: runtime.cart, now });
+        runtime.cart = withCatalogFacts(refreshed.cartAfter);
+        runtime.deliveryConfirmationState = refreshed.previewState;
+        runtime.runtimeStage = revalidation.status === "CORRECTION_REQUIRED" ? "CART_REVIEW" : "FINAL_ORDER_REVIEW";
+        await persist(input, runtime, fields);
+        return asTurnResult({ ...(revalidation.status === "CORRECTION_REQUIRED" ? recoveryReply() : replyFromDelivery(refreshed)), stage: runtime.runtimeStage, warnings: [`confirmation_revalidation_${revalidation.reason.toLowerCase()}`, ...refreshed.warnings] });
+      }
+      runtime.cart = revalidation.cart;
       const confirmationAttempt = env.persistenceRuntimeOrderWritesEnabled
         ? runtime.pendingConfirmation || {
           publicOrderCode: createPublicOrderCode(),

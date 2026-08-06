@@ -36,6 +36,8 @@ export type CartPricingLine = Readonly<{
   quantity: number;
   unitPrice: number;
   standardLineTotal: number;
+  unitPriceAmountMinor: number;
+  lineSubtotalAmountMinor: number;
 }>;
 
 /** Immutable trusted pricing data for a future confirmed-order snapshot. */
@@ -44,11 +46,16 @@ export type CartPricingQuote = Readonly<{
   totalUnits: number;
   lines: readonly CartPricingLine[];
   standardSubtotal: number;
+  normalSubtotalAmountMinor: number;
   appliedOfferId?: string;
   appliedOfferLabel?: string;
   offerTotal?: number;
+  offerTotalAmountMinor?: number;
   discountAmount: number;
+  discountAmountMinor: number;
   merchandiseTotal: number;
+  finalTotalAmountMinor: number;
+  currencyCode: string;
   generatedAt: string;
 }>;
 

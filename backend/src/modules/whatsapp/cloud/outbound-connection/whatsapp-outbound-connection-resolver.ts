@@ -97,4 +97,38 @@ export class PersistentWhatsAppOutboundConnectionResolver implements WhatsAppOut
       tokenSource: "encrypted_connection_token",
     };
   }
+
+  async resolveForTrustedInbound(input: Readonly<{ sellerId: string; phoneNumberId: string }>): Promise<PersistedResolvedWhatsAppOutboundConnection> {
+    const tenant = createTenantContext(input.sellerId);
+    const resolved = await this.repository.resolveActiveByPhoneNumberId(input.phoneNumberId);
+    const connection = resolved?.connection;
+    if (!connection || resolved.sellerId !== tenant.sellerId || connection.sellerId !== tenant.sellerId) {
+      incrementWhatsAppConnectionMetric("whatsapp_connection_outbound_resolution_failures_total", { sellerId: tenant.sellerId, reason: "missing_active_connection" });
+      throw new WhatsAppOutboundError("missing_active_connection");
+    }
+    const phoneNumberId = validatePersistedPhoneNumberId(connection.phoneNumberId);
+    if (phoneNumberId !== input.phoneNumberId.trim()) {
+      throw new WhatsAppOutboundError("malformed_persisted_phone_number_id");
+    }
+
+    let accessToken: string | null;
+    try {
+      if (connection.connectionMethod === "CUSTOMER_OWNED_META_APP") {
+        if (!this.manualCredentialEncryptionService || !("findManualCredentialStorage" in this.repository)) {
+          throw new WhatsAppConnectionCredentialEncryptionError();
+        }
+        const storage = await (this.repository as ManualWhatsAppConnectionRepository).findManualCredentialStorage(tenant, connection.connectionId);
+        accessToken = storage ? this.manualCredentialEncryptionService.decryptManualSystemUserAccessToken(storage.encryptedSystemUserAccessToken) : null;
+      } else {
+        accessToken = await this.credentialService.decryptStoredAccessToken(tenant, connection.connectionId);
+      }
+    } catch (error) {
+      if (error instanceof WhatsAppConnectionCredentialEncryptionError) {
+        throw new WhatsAppOutboundError("credential_decryption_failed");
+      }
+      throw error;
+    }
+    if (!accessToken) throw new WhatsAppOutboundError("missing_connection_credentials");
+    return { sellerId: tenant.sellerId, connectionId: connection.connectionId, phoneNumberId, accessToken, tokenSource: "encrypted_connection_token" };
+  }
 }

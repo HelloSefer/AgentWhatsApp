@@ -36,14 +36,16 @@ export function normalizeItemOptionActionId(rawId: unknown): ItemOptionActionNor
   }
 
   const segments = rawId.split(":");
-  if (segments.length > 3) {
-    return result({ recognized: true, valid: false, failureCode: "EXTRA_ACTION_SEGMENT" });
-  }
-  if (segments.length !== 3 || segments[0] !== "cart_item_option") {
+  if ((segments.length !== 3 && segments.length !== 5) || segments[0] !== "cart_item_option") {
     return result({ recognized: true, valid: false, failureCode: "MALFORMED_ACTION_ID" });
   }
 
-  const [, fieldKey, canonicalValue] = segments;
+  const [, first, second, third, fourth] = segments;
+  const isScoped = segments.length === 5;
+  const productId = isScoped ? first : undefined;
+  const fieldKey = isScoped ? second : first;
+  const canonicalValue = isScoped ? third : second;
+  const targetId = isScoped ? fourth : undefined;
   if (!fieldKey) {
     return result({ recognized: true, valid: false, failureCode: "EMPTY_FIELD_KEY" });
   }
@@ -56,12 +58,20 @@ export function normalizeItemOptionActionId(rawId: unknown): ItemOptionActionNor
   if (!isSafeSegment(canonicalValue)) {
     return result({ recognized: true, valid: false, failureCode: "UNSAFE_CANONICAL_VALUE" });
   }
+  if (isScoped && !isSafeSegment(productId || "")) {
+    return result({ recognized: true, valid: false, failureCode: "UNSAFE_PRODUCT_ID" });
+  }
+  if (isScoped && !isSafeSegment(targetId || "")) {
+    return result({ recognized: true, valid: false, failureCode: "UNSAFE_TARGET_ID" });
+  }
 
   const action: ItemOptionAction = {
     type: "SELECT_ITEM_OPTION",
     rawId,
     fieldKey,
     canonicalValue,
+    ...(productId ? { productId } : {}),
+    ...(targetId ? { targetId } : {}),
   };
   return result({ recognized: true, valid: true, action });
 }

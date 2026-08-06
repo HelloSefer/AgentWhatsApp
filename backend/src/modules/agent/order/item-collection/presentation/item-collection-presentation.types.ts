@@ -54,6 +54,13 @@ export type ItemCollectionPresentationInput = {
   requiredFields: RequiredOrderField[];
   /** Optional configured display labels keyed by canonical option value. */
   optionDisplayLabels?: Readonly<Record<string, string>>;
+  /** Connected runtimes bind option actions to the current product and item target. */
+  optionActionScope?: ItemCollectionOptionActionScope;
 };
 
-export type ItemCollectionOptionActionId = `cart_item_option:${string}:${string}`;
+export type ItemCollectionOptionActionScope = Readonly<{
+  productId: string;
+  targetId: string;
+}>;
+
+export type ItemCollectionOptionActionId = string;

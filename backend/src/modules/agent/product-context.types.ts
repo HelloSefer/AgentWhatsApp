@@ -13,6 +13,8 @@ export interface ProductContext {
   category?: string;
   description?: string;
   price?: string;
+  /** Server-owned Catalog monetary authority, retained beside the legacy display price. */
+  priceAmountMinor?: number;
   currency?: string;
   availableColors?: string[];
   availableSizes?: string[];

@@ -15,6 +15,8 @@ import {
   extractIncomingMessages,
   getCloudDiagnostics,
   processCloudWebhookBody,
+  processNormalizedCloudMessage,
+  buildCloudAgentIdentity,
   recordCloudWebhookVerify,
   sendCtaUrl,
   sendCloudText,
@@ -30,6 +32,14 @@ import { getWhatsAppInboundProducer } from "../../../composition/queue/whatsapp-
 import type { WhatsAppInboundJobData } from "./inbound-queue/whatsapp-inbound-job.types";
 import { conversationKeyService } from "../../agent/identity/conversation-key.service";
 import { postgreSqlWhatsAppConnectionRepository } from "../../whatsapp-connection";
+import {
+  PersistentWhatsAppOutboundConnectionResolver,
+} from "./outbound-connection/whatsapp-outbound-connection-resolver";
+import {
+  WhatsAppConnectionCredentialEncryptionService,
+  WhatsAppConnectionCredentialService,
+} from "../../whatsapp-connection";
+import { getWhatsAppConnectionCredentialEncryptionConfiguration } from "../../whatsapp-connection/application/whatsapp-connection-credential-encryption.config";
 import type { ActiveWhatsAppConnectionResolution } from "../../whatsapp-connection";
 import { incrementWhatsAppConnectionMetric, recordWhatsAppConnectionAudit, type SafeWhatsAppConnectionReason } from "../../whatsapp-connection/application/whatsapp-connection-operational-events";
 
@@ -42,6 +52,17 @@ let whatsappInboundProducerProvider: WhatsAppInboundProducerProvider =
 let cloudWebhookProcessor: CloudWebhookProcessor = processCloudWebhookBody;
 let activeConnectionResolver: ActiveConnectionResolver = (phoneNumberId) =>
   postgreSqlWhatsAppConnectionRepository.resolveActiveByPhoneNumberId(phoneNumberId);
+
+function createInboundConnectionResolver(): PersistentWhatsAppOutboundConnectionResolver {
+  const encryption = new WhatsAppConnectionCredentialEncryptionService(
+    getWhatsAppConnectionCredentialEncryptionConfiguration(),
+  );
+  return new PersistentWhatsAppOutboundConnectionResolver(
+    postgreSqlWhatsAppConnectionRepository,
+    new WhatsAppConnectionCredentialService(postgreSqlWhatsAppConnectionRepository, encryption),
+    encryption,
+  );
+}
 
 export function setWhatsAppInboundProducerProviderForTesting(
   provider: WhatsAppInboundProducerProvider | undefined,
@@ -234,10 +255,48 @@ export async function processVerifiedWhatsAppCloudWebhook(
 
   res.status(200).json({ ok: true });
 
-  cloudWebhookProcessor(body, {
-    publicBaseUrl: getRequestBaseUrl(req),
-    connectionScopedRuntime,
-  }).catch((error) => {
+  const messages = extractIncomingMessages(body);
+  if (!messages.length || connectionScopedRuntime) {
+    cloudWebhookProcessor(body, {
+      publicBaseUrl: getRequestBaseUrl(req),
+      connectionScopedRuntime,
+    }).catch((error) => {
+      console.error(
+        JSON.stringify({
+          event: "whatsapp.cloud.error",
+          step: "webhook_background_processing",
+          errorMessage: error instanceof Error ? error.message : "Unknown error",
+        }),
+      );
+    });
+    return;
+  }
+
+  const inboundConnectionResolver = createInboundConnectionResolver();
+  Promise.all(messages.map(async (message) => {
+    if (!isSupportedMetaPhoneNumberId(message.phoneNumberId)) {
+      recordInboundRoutingSkip("invalid_phone_number_id");
+      return;
+    }
+    const activeConnection = await activeConnectionResolver(message.phoneNumberId);
+    if (!activeConnection) {
+      recordInboundRoutingSkip("inactive_or_unknown_phone_number_id");
+      return;
+    }
+    const runtime = await inboundConnectionResolver.resolveForTrustedInbound({
+      sellerId: activeConnection.sellerId,
+      phoneNumberId: message.phoneNumberId,
+    });
+    const identity = buildCloudAgentIdentity({
+      sellerId: runtime.sellerId,
+      phoneNumberId: runtime.phoneNumberId,
+      waId: message.waId,
+    });
+    await processNormalizedCloudMessage(message, identity, {
+      publicBaseUrl: getRequestBaseUrl(req),
+      connectionScopedRuntime: runtime,
+    });
+  })).catch((error) => {
     console.error(
       JSON.stringify({
         event: "whatsapp.cloud.error",

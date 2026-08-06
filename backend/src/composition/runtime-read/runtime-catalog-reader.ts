@@ -63,7 +63,27 @@ export function mapCatalogProductToRuntimeContext(product: CatalogProduct): Prod
     name: product.name,
     description: product.description,
     price: product.price.amountMinor / 100,
+    priceAmountMinor: product.price.amountMinor,
     currency: "MAD",
+    offers: product.offers
+      .slice()
+      .sort((left, right) => (left.priority ?? 0) === (right.priority ?? 0)
+        ? left.offerId.localeCompare(right.offerId)
+        : (left.priority ?? 0) - (right.priority ?? 0))
+      .map((offer) => ({
+        id: offer.offerId,
+        productId: product.productId,
+        label: offer.label,
+        requiredItemCount: offer.requiredItemCount,
+        totalPrice: offer.totalPriceAmountMinor / 100,
+        totalPriceAmountMinor: offer.totalPriceAmountMinor,
+        currency: product.price.currencyCode,
+        active: offer.active,
+        allowMixedOptions: offer.allowMixedOptions,
+        priority: offer.priority,
+        ...(offer.startsAt ? { startsAt: offer.startsAt } : {}),
+        ...(offer.endsAt ? { endsAt: offer.endsAt } : {}),
+      })),
     active: product.availability === "available",
     images: [],
     benefits: [],

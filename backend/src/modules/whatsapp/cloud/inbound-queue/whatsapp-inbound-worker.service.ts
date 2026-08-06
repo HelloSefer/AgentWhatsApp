@@ -25,16 +25,7 @@ import {
   type ConnectionScopedCloudRuntime,
 } from "../whatsapp-cloud.service";
 import type { WhatsAppCloudIncomingMessage } from "../whatsapp-cloud.types";
-
-type WhatsAppInboundConnectionResolver = Readonly<{
-  resolveForTrustedSeller: (sellerId: string) => Promise<Readonly<{
-    sellerId: string;
-    connectionId: string;
-    phoneNumberId: string;
-    accessToken: string;
-    tokenSource?: "encrypted_connection_token";
-  }>>;
-}>;
+import type { WhatsAppInboundConnectionResolver } from "./whatsapp-inbound-connection-resolver";
 
 function validateInboundJobData(data: unknown): WhatsAppInboundJobData {
   if (!data || typeof data !== "object") {
@@ -142,7 +133,10 @@ async function resolveConnectionScopedRuntime(
   data: WhatsAppInboundJobData,
   resolver: WhatsAppInboundConnectionResolver,
 ): Promise<ConnectionScopedCloudRuntime> {
-  const resolved = await resolver.resolveForTrustedSeller(data.sellerId);
+  const resolved = await resolver.resolveForTrustedInbound({
+    sellerId: data.sellerId,
+    phoneNumberId: data.phoneNumberId,
+  });
   if (
     resolved.sellerId !== data.sellerId ||
     resolved.phoneNumberId !== data.phoneNumberId ||

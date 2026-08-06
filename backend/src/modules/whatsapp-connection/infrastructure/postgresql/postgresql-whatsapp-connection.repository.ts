@@ -45,7 +45,7 @@ import {
 } from "../../domain/whatsapp-connection.validation";
 import { mapWhatsAppConnection, type WhatsAppConnectionRow } from "./whatsapp-connection-row.mapper";
 
-const CONNECTION_COLUMNS = "connection_id, seller_id, provider, connection_method, status, meta_app_id, public_webhook_id, meta_business_id, waba_id, phone_number_id, display_phone_number, verified_name, connected_at, last_verified_at, phone_registration_completed_at, waba_subscription_completed_at, finalization_last_error_code, finalization_last_error_at, disconnected_at, replaced_connection_id, created_at, updated_at";
+const CONNECTION_COLUMNS = "connection_id, seller_id, bound_product_id, provider, connection_method, status, meta_app_id, public_webhook_id, meta_business_id, waba_id, phone_number_id, display_phone_number, verified_name, connected_at, last_verified_at, phone_registration_completed_at, waba_subscription_completed_at, finalization_last_error_code, finalization_last_error_at, disconnected_at, replaced_connection_id, created_at, updated_at";
 const CREDENTIAL_COLUMNS = "connection_id, seller_id, encrypted_access_token, token_key_version, token_fingerprint, token_expires_at";
 const REGISTRATION_PIN_COLUMNS = "connection_id, seller_id, encrypted_registration_pin, registration_pin_key_version, registration_pin_fingerprint";
 const MANUAL_CREDENTIAL_COLUMNS = "connection_id, seller_id, encrypted_meta_app_secret, meta_app_secret_key_version, encrypted_system_user_access_token, system_user_access_token_key_version, encrypted_webhook_verify_token, webhook_verify_token_key_version";
@@ -176,6 +176,15 @@ function normalizeFinalizationErrorCode(value: string | null | undefined): strin
 }
 
 export class PostgreSqlWhatsAppConnectionRepository implements WhatsAppConnectionRepository {
+  async setBoundProductId(tenant: TenantContext, connectionId: string, productId: string | null, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null> {
+    try {
+      const result = await executor(options).execute<WhatsAppConnectionRow>({
+        text: `UPDATE whatsapp_connections SET bound_product_id = $3, updated_at = NOW() WHERE seller_id = $1 AND connection_id = $2 RETURNING ${CONNECTION_COLUMNS}`,
+        values: [tenant.sellerId, normalizeConnectionId(connectionId), productId],
+      });
+      return result.rows[0] ? mapWhatsAppConnection(result.rows[0]) : null;
+    } catch (error) { return mapWriteError(error); }
+  }
   async createCandidate(tenant: TenantContext, input?: CreateWhatsAppConnectionCandidateInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection> {
     const connectionId = input?.connectionId ? normalizeConnectionId(input.connectionId) : randomUUID();
     try {

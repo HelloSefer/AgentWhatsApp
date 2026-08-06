@@ -1,0 +1,10 @@
+export type ProductAvailability = "available" | "unavailable";
+export type SellerProductValue = Readonly<{ valueId: string; label: string; position: number; isAvailable: boolean }>;
+export type SellerProductOption = Readonly<{ optionId: string; label: string; required: boolean; position: number; values: readonly SellerProductValue[] }>;
+export type SellerProductOffer = Readonly<{ offerId: string; label: string; requiredItemCount: number; totalPriceAmountMinor: number; active: boolean; allowMixedOptions: boolean; priority?: number; startsAt?: string; endsAt?: string }>;
+export type SellerProductImage = Readonly<{ mimeType: string; position: number }>;
+export type SellerProduct = Readonly<{ productId: string; name: string; description: string | null; price: Readonly<{ amountMinor: number; currencyCode: "MAD" }>; availability: ProductAvailability; options: readonly SellerProductOption[]; aliases: readonly string[]; offers: readonly SellerProductOffer[]; images: readonly SellerProductImage[] }>;
+export type SellerProductsPage = Readonly<{ products: readonly SellerProduct[]; nextCursor?: string }>;
+export type SellerProductWriteInput = Readonly<{ name: string; description: string | null; price: { amountMinor: number; currencyCode: "MAD" }; availability: ProductAvailability; options: readonly SellerProductOption[]; aliases: readonly string[]; offers: readonly SellerProductOffer[] }>;
+export type SellerProductCreateInput = SellerProductWriteInput & Readonly<{ productId: string }>;
+export type SellerProductFieldError = Readonly<{ field: string; code: string }>;

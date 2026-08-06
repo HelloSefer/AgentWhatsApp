@@ -6,9 +6,18 @@ import { closeDatabasePool, createTenantContext, executeDatabaseQuery } from "..
 import { closeValkeyClient } from "../../../infrastructure/valkey/valkey.client";
 import { clearConversationSession } from "../../agent/session/conversation-session.service";
 import { generateAgentResult } from "../../agent/agent.service";
-import { buildFirstEntryLiveSmokeResult } from "../../agent/config/first-entry-live-smoke.service";
+import { normalizeItemOptionActionId } from "../../agent/order/item-collection/actions/item-option-action-normalizer.service";
 import { conversationConfigValidator } from "../../conversation-engine";
 import { validateCatalogProductInput } from "../../catalog";
+import {
+  SellerCommerceConfigRepository,
+} from "../../seller-commerce-config";
+import { canonicalSellerCommerceConfigFromLegacy } from "../../seller-commerce-config/seller-commerce-config.mapper";
+import { PostgreSqlSellerWorkspaceProfileRepository } from "../../seller-workspace-profile";
+import {
+  PostgreSqlWhatsAppConnectionRepository,
+  WhatsAppConnectionProductBindingService,
+} from "../../whatsapp-connection";
 import {
   buildSandalsDevelopmentCatalogProductInput,
   buildSandalsDevelopmentProductConversationConfig,
@@ -37,11 +46,19 @@ function optionIds(result: Awaited<ReturnType<typeof generateAgentResult>>): str
 
 async function cleanupTenant(sellerId: string, conversationKey: string): Promise<void> {
   await clearConversationSession(conversationKey, sellerId, SANDALS_DEVELOPMENT_PRODUCT_ID);
+  await executeDatabaseQuery({ text: "DELETE FROM whatsapp_connections WHERE seller_id = $1", values: [sellerId] });
   await executeDatabaseQuery({ text: "DELETE FROM whatsapp_transactional_outbox WHERE seller_id = $1", values: [sellerId] });
   await executeDatabaseQuery({ text: "DELETE FROM orders WHERE seller_id = $1", values: [sellerId] });
   await executeDatabaseQuery({ text: "DELETE FROM seller_conversation_configs WHERE seller_id = $1", values: [sellerId] });
+  await executeDatabaseQuery({ text: "DELETE FROM seller_commerce_configs WHERE seller_id = $1", values: [sellerId] });
+  await executeDatabaseQuery({ text: "DELETE FROM seller_workspace_profiles WHERE seller_id = $1", values: [sellerId] });
   await executeDatabaseQuery({ text: "DELETE FROM products WHERE seller_id = $1", values: [sellerId] });
   await executeDatabaseQuery({ text: "DELETE FROM sellers WHERE seller_id = $1", values: [sellerId] });
+}
+
+function numericId(prefix: string): string {
+  const digits = randomUUID().replace(/\D/gu, "").slice(0, 14).padEnd(14, "0");
+  return `${prefix}${digits}`;
 }
 
 async function main(): Promise<void> {
@@ -84,8 +101,8 @@ async function main(): Promise<void> {
   add("Reset command preserves WhatsApp connection rows", !/DELETE\s+FROM\s+whatsapp_connections/iu.test(resetCommandSource));
   add("Reset command uses tenant-scoped SQL deletes only", !/DELETE\s+FROM\s+(?:products|orders|seller_conversation_configs|whatsapp_transactional_outbox)(?!\s+WHERE\s+seller_id\s+=\s+\$1)/iu.test(resetCommandSource));
   add("Reset command clears only tenant-scoped Valkey keys", resetCommandSource.includes("session:${sellerId}:*") && resetCommandSource.includes("buffer:${sellerId}:*") && resetCommandSource.includes("lock:${sellerId}:*"));
-  add("Runtime uses persisted sandals template instead of seller_demo_sandals for seeded arbitrary tenants", runtimeSource.includes("buildSandalsDevelopmentSellerConfig(requestedSellerId)") && runtimeSource.includes("persistedTenantProductAvailable"));
-  add("Agent information path uses persisted sandals template instead of seller_demo_sandals for seeded arbitrary tenants", agentSource.includes("buildSandalsDevelopmentSellerConfig(options.sellerId)") && agentSource.includes("catalogResolution.source === \"persistence\""));
+  add("Runtime resolves arbitrary tenants through the exact persisted connection projection", runtimeSource.includes("sellerCommerceProjectionReader.resolve") && runtimeSource.includes("connectionId: input.connectionId") && runtimeSource.includes("phoneNumberId: input.phoneNumberId") && !runtimeSource.includes("buildSandalsDevelopmentSellerConfig("));
+  add("Agent resolves persisted Catalog facts before information or order routing", agentSource.includes("sellerCommerceProjectionReader.resolve") && agentSource.includes("firstEntryProductContext: projection.productContext") && agentSource.includes("applyConnectedCatalogConversationPresentation"));
   add("Runtime receipt path snapshots tenant branding from active seller config", runtimeSource.includes("const receiptBranding = sellerConfig.receipt.branding") && runtimeSource.includes("storeName: receiptBranding?.storeName || sellerConfig.businessName"));
   add("New development template code has no global-token dependency", !/WHATSAPP_CLOUD_ACCESS_TOKEN|FIRST_ENTRY_LIVE_SMOKE_/u.test(`${resetCommandSource}\n${runtimeSource}\n${agentSource}`));
 
@@ -101,7 +118,25 @@ async function main(): Promise<void> {
     };
     const tenant = createTenantContext(persistedSeller);
     const persistence = createPersistenceComposition();
+    const commerce = new SellerCommerceConfigRepository();
+    const profiles = new PostgreSqlSellerWorkspaceProfileRepository();
+    const connections = new PostgreSqlWhatsAppConnectionRepository();
+    const binding = new WhatsAppConnectionProductBindingService(
+      connections,
+      persistence.catalogService,
+    );
+    const phoneNumberId = numericId("7");
     await persistence.sellerService.createSeller(persistedSeller);
+    await profiles.createProfile({
+      sellerId: persistedSeller,
+      displayName: SANDALS_DEVELOPMENT_STORE_NAME,
+    });
+    await commerce.save(
+      tenant,
+      canonicalSellerCommerceConfigFromLegacy(
+        buildSandalsDevelopmentSellerConfig(persistedSeller),
+      ),
+    );
     await persistence.catalogService.createProduct(tenant, buildSandalsDevelopmentCatalogProductInput());
     await persistence.conversationConfigService.saveSellerOverride(tenant, buildSandalsDevelopmentSellerConversationConfig());
     await persistence.conversationConfigService.saveProductOverride(
@@ -109,21 +144,45 @@ async function main(): Promise<void> {
       SANDALS_DEVELOPMENT_PRODUCT_ID,
       buildSandalsDevelopmentProductConversationConfig(),
     );
-    const firstEntry = await buildFirstEntryLiveSmokeResult({
+    const connection = await connections.createManualDraft(tenant, {
+      metaAppId: numericId("8"),
+      publicWebhookId: randomUUID(),
+    });
+    await connections.persistVerifiedMetadata(tenant, connection.connectionId, {
+      metaBusinessId: numericId("9"),
+      wabaId: numericId("6"),
+      phoneNumberId,
+      displayPhoneNumber: "+212600088881",
+      verifiedName: SANDALS_DEVELOPMENT_STORE_NAME,
+    });
+    await binding.setBoundProductId(
+      tenant,
+      connection.connectionId,
+      SANDALS_DEVELOPMENT_PRODUCT_ID,
+    );
+    await connections.updateLifecycleStatus(tenant, connection.connectionId, "ACTIVE");
+    const firstEntry = await generateAgentResult("سلام", undefined, {
       sellerId: persistedSeller,
       customerPhone,
-      phoneNumberId: "123456789012345",
-      message: "سلام",
-      trustedCustomerOwnedConnection: true,
+      conversationKey,
+      productId: SANDALS_DEVELOPMENT_PRODUCT_ID,
+      connectionId: connection.connectionId,
+      phoneNumberId,
+      useMemory: true,
+      orderRuntimeEnabled: true,
+      interactiveSendChannel: "whatsapp_cloud",
+      transportInput: {
+        normalizedText: "سلام",
+        sourceType: "text",
+      },
     });
-    const messages = firstEntry.handled
-      ? firstEntry.result.meta?.firstEntryLiveSmoke?.messages || []
-      : [];
+    const presentation = firstEntry.meta?.firstEntryPresentation;
+    const messages = presentation?.messages || [];
     const ctaIds = messages
       .flatMap((message) => message.kind === "interactive_buttons" && Array.isArray(message.buttons)
         ? message.buttons.map((button) => button.id)
         : []);
-    add("Persisted arbitrary tenant greeting produces split_info_and_cta", firstEntry.handled === true && firstEntry.result.meta?.firstEntryLiveSmoke?.presentationMode === "split_info_and_cta");
+    add("Persisted arbitrary tenant greeting produces split_info_and_cta", presentation?.handledBy === "hybrid_first_entry" && presentation.presentationMode === "split_info_and_cta");
     add("Persisted arbitrary tenant first entry keeps product intro separate from CTA", messages.length === 2 && messages[0]?.kind === "text" && messages[1]?.kind === "interactive_buttons" && messages[0]?.text.includes("صندالة نسائية") && !messages[1]?.text.includes("صندالة نسائية"));
     add("Persisted arbitrary tenant first entry exposes modern CTA ids", ctaIds.join("|") === "first_entry:order_now|first_entry:more_info");
     add("Persisted arbitrary tenant greeting does not ask for size", !JSON.stringify(messages).includes("اختار المقاس"));
@@ -131,6 +190,9 @@ async function main(): Promise<void> {
       sellerId: persistedSeller,
       customerPhone,
       conversationKey,
+      productId: SANDALS_DEVELOPMENT_PRODUCT_ID,
+      connectionId: connection.connectionId,
+      phoneNumberId,
       useMemory: true,
       orderRuntimeEnabled: true,
       interactiveSendChannel: "whatsapp_cloud",
@@ -142,7 +204,10 @@ async function main(): Promise<void> {
     });
     const ids = optionIds(orderNow);
     add("Persisted arbitrary tenant Order Now enters modern guarded runtime", orderNow.meta?.orderRuntime?.stage === "PLANNING");
-    add("Persisted arbitrary tenant Order Now emits cart_item_option actions", ids.some((id) => id.startsWith("cart_item_option:size:")));
+    add("Persisted arbitrary tenant Order Now emits scoped cart_item_option actions", ids.some((id) => {
+      const action = normalizeItemOptionActionId(id);
+      return action.valid && action.action?.fieldKey === "size" && action.action.productId === SANDALS_DEVELOPMENT_PRODUCT_ID && action.action.targetId === "order-entry-size";
+    }));
     add("Persisted arbitrary tenant Order Now does not emit old size action", ids.every((id) => !/^size:/u.test(id)));
     add("Persisted arbitrary tenant normal path emits no safe-default warnings", !capturedWarnings.join("\n").includes("safe default"));
   } finally {

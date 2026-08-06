@@ -13,6 +13,8 @@ export type ProductOfferConfig = {
   label: string;
   requiredItemCount: number;
   totalPrice: number;
+  /** Catalog authority; totalPrice is display compatibility only. */
+  totalPriceAmountMinor?: number;
   currency: string;
   active: boolean;
   allowMixedOptions: boolean;
@@ -59,4 +61,3 @@ export type ProductOfferConfigurationState =
   | "INVALID_CONFIGURATION"
   | "OFFERS_CONFIGURED"
   | "OFFERS_CONFIGURED_BUT_INACTIVE";
-

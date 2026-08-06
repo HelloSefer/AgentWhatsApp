@@ -79,6 +79,43 @@ export function applyResolvedConversationProductConfig(
   };
 }
 
+/**
+ * Connected WhatsApp commerce uses the bound Catalog Product as the only
+ * option/value authority. Conversation configuration may still shape prompts
+ * and list presentation, but cannot replace Product IDs, labels, availability,
+ * or ordering.
+ */
+export function applyConnectedCatalogConversationPresentation(
+  productContext: ProductContext,
+  config: ResolvedConversationConfig,
+): ProductContext {
+  const configuredByKey = new Map(config.options.map((option) => [option.key, option]));
+  const wording = config.productWording;
+
+  return {
+    ...productContext,
+    ...(wording?.fullName ? { name: wording.fullName } : {}),
+    ...(wording?.conversationalName ? { conversationalName: wording.conversationalName } : {}),
+    ...(wording?.singularName ? { singularName: wording.singularName } : {}),
+    ...(wording?.pluralName ? { pluralName: wording.pluralName } : {}),
+    optionGroups: productContext.optionGroups.map((group) => {
+      const presentation = configuredByKey.get(group.key);
+      return {
+        ...group,
+        options: [...group.options],
+        valueConfigurations: group.valueConfigurations?.map((value) => ({ ...value })),
+        ...(presentation?.inputType ? { display: presentation.inputType } : {}),
+        ...(presentation?.promptMessageKey
+          ? { promptMessageKey: presentation.promptMessageKey }
+          : {}),
+        ...(presentation?.presentation
+          ? { presentation: { ...presentation.presentation } }
+          : {}),
+      };
+    }),
+  };
+}
+
 export function resolveConfiguredOptionCanonicalValue(
   field: RequiredOrderField,
   selectionKey: string,

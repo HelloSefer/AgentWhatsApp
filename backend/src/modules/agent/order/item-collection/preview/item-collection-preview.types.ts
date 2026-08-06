@@ -36,6 +36,7 @@ export type ItemCollectionPreviewInput = {
   sellerId: string;
   productContext: ProductContext;
   requiredFields: RequiredOrderField[];
+  requireOptionActionScope?: boolean;
 };
 
 export type ItemCollectionPreviewResult = {

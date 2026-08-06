@@ -158,15 +158,16 @@ export function evaluateCartCommercialState(
     : undefined;
 
   let selectedOffer: SelectedCommercialOffer | undefined;
-  if (input.cart.selectedOfferId) {
+  const selectedOfferId = input.cart.selectedOfferId || recommendedOffer?.offerId;
+  if (selectedOfferId) {
     const selected = calculateSelectedOfferPricing({
       ...pricingInput,
-      offerId: input.cart.selectedOfferId,
+      offerId: selectedOfferId,
     });
     const selectedFailures = selected.offerEligibility.failures.map(cloneFailure);
     failures.push(...selectedFailures);
     selectedOffer = Object.freeze({
-      offerId: input.cart.selectedOfferId,
+      offerId: selectedOfferId,
       eligible: selected.offerEligibility.eligible,
       ...(selected.quote ? { pricing: cloneQuote(selected.quote) } : {}),
       ...(selectedFailures[0] ? { failureCode: selectedFailures[0].code } : {}),
@@ -238,4 +239,3 @@ export function compareCommercialEvaluations(
     ...(currentRecommendedOfferId ? { currentRecommendedOfferId } : {}),
   });
 }
-

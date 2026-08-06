@@ -21,6 +21,7 @@ export type WhatsAppConnectionStatus = typeof WHATSAPP_CONNECTION_STATUSES[numbe
 export type WhatsAppConnection = Readonly<{
   connectionId: string;
   sellerId: string;
+  boundProductId?: string | null;
   provider: WhatsAppConnectionProvider;
   connectionMethod?: WhatsAppConnectionMethod;
   status: WhatsAppConnectionStatus;

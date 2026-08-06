@@ -8,8 +8,17 @@ import type { ManualWebhookConfigurationService } from "../application/manual-we
 import type { WhatsAppConnectionCurrentService } from "../application/whatsapp-connection-current.service";
 import type { WhatsAppConnectionDisconnectService } from "../application/whatsapp-connection-disconnect.service";
 import type { WhatsAppConnectionFinalizationService } from "../application/whatsapp-connection-finalization.service";
+import type { WhatsAppConnectionProductBindingService } from "../application/whatsapp-connection-product-binding.service";
+import type { SellerCommerceRuntimeProjectionReader } from "../../../composition/runtime-read/seller-commerce-runtime-projection";
 import { WhatsAppConnectionCompletionValidationError, WhatsAppConnectionCredentialEncryptionError, WhatsAppConnectionDisconnectValidationError } from "../domain/whatsapp-connection.errors";
 import { sendWhatsappConnectionError } from "./whatsapp-connection-http.errors";
+import {
+  parseProductBindingClearRequest,
+  parseProductBindingConnectionId,
+  parseProductBindingReadRequest,
+  parseProductBindingWriteRequest,
+} from "./whatsapp-connection-product-binding.request";
+import { toWhatsAppConnectionProductBindingResponse } from "./whatsapp-connection-product-binding.dto";
 
 const ACCEPTED_BODY_KEYS = new Set(["code", "wabaId", "phoneNumberId"]);
 const MANUAL_SETUP_BODY_KEYS = new Set(["appId", "appSecret", "systemUserAccessToken"]);
@@ -62,7 +71,40 @@ export class WhatsAppConnectionController {
     private readonly manualAssetsService?: ManualConnectionAssetsService,
     private readonly manualWebhookConfigurationService?: ManualWebhookConfigurationService,
     private readonly manualFinalizationService?: ManualConnectionFinalizationService,
+    private readonly productBindingService?: WhatsAppConnectionProductBindingService,
+    private readonly sellerCommerceProjectionReader?: SellerCommerceRuntimeProjectionReader,
   ) {}
+
+  getProductBinding = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      const authorized = req as AuthorizedRequest;
+      parseProductBindingReadRequest(req);
+      const connectionId = parseProductBindingConnectionId(req.params.connectionId);
+      return res.status(200).json(await this.productBindingResponse(authorized, connectionId));
+    } catch (error) { return sendWhatsappConnectionError(res, error); }
+  };
+
+  putProductBinding = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      const authorized = req as AuthorizedRequest;
+      const connectionId = parseProductBindingConnectionId(req.params.connectionId);
+      const productId = parseProductBindingWriteRequest(req);
+      if (!this.productBindingService) throw new WhatsAppConnectionCredentialEncryptionError();
+      await this.productBindingService.setBoundProductId(authorized.tenant, connectionId, productId);
+      return res.status(200).json(await this.productBindingResponse(authorized, connectionId));
+    } catch (error) { return sendWhatsappConnectionError(res, error); }
+  };
+
+  deleteProductBinding = async (req: Request, res: Response): Promise<Response> => {
+    try {
+      const authorized = req as AuthorizedRequest;
+      parseProductBindingClearRequest(req);
+      const connectionId = parseProductBindingConnectionId(req.params.connectionId);
+      if (!this.productBindingService) throw new WhatsAppConnectionCredentialEncryptionError();
+      await this.productBindingService.setBoundProductId(authorized.tenant, connectionId, null);
+      return res.status(200).json(await this.productBindingResponse(authorized, connectionId));
+    } catch (error) { return sendWhatsappConnectionError(res, error); }
+  };
 
   getCurrentConnection = async (req: Request, res: Response): Promise<Response> => {
     try {
@@ -203,4 +245,13 @@ export class WhatsAppConnectionController {
       return sendWhatsappConnectionError(res, error);
     }
   };
+
+  private async productBindingResponse(authorized: AuthorizedRequest, connectionId: string) {
+    if (!this.productBindingService || !this.sellerCommerceProjectionReader) throw new WhatsAppConnectionCredentialEncryptionError();
+    const binding = await this.productBindingService.getBinding(authorized.tenant, connectionId);
+    const commerce = await this.productBindingService.isActiveConnection(authorized.tenant, connectionId)
+      ? await this.sellerCommerceProjectionReader.resolve({ sellerId: authorized.tenant.sellerId })
+      : null;
+    return toWhatsAppConnectionProductBindingResponse(binding, commerce);
+  }
 }

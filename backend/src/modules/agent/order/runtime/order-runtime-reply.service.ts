@@ -16,6 +16,7 @@ import {
   type PlannedItemOptionDisplay,
 } from "./order-runtime-presentation-copy.service";
 import { buildOrderEntryOptionPresentation } from "../item-collection/presentation/item-collection-presentation.service";
+import type { ItemCollectionOptionActionScope } from "../item-collection/presentation/item-collection-presentation.types";
 import {
   orderLabel,
   orderMessage,
@@ -154,6 +155,12 @@ export function replyFromItemCollection(
     return reply(buildCartReviewIntroduction(plannedPieceCount(result)));
   }
   const interactiveUi = result.shortcutPresentation?.uiHints || presentation?.uiHints;
+  if (!result.success && presentation?.text) {
+    return replyWithVisibleInteractiveBody(
+      `${staleActionReply().text}\n${presentation.text}`,
+      interactiveUi,
+    );
+  }
   const total = plannedPieceCount(result);
   const completed = completedPieceCount(result);
 
@@ -234,17 +241,34 @@ export function replyFromInitialPlannedItemCollection(
   return replyWithVisibleInteractiveBody(text, itemReply.replyUi);
 }
 
-export function replyFromOrderEntryOption(field: RequiredOrderField): RuntimeReply {
-  const presentation = buildOrderEntryOptionPresentation(field);
+export function replyFromOrderEntryOption(
+  field: RequiredOrderField,
+  optionActionScope?: ItemCollectionOptionActionScope,
+): RuntimeReply {
+  const presentation = buildOrderEntryOptionPresentation(field, optionActionScope);
   return replyWithVisibleInteractiveBody(presentation.text, presentation.uiHints);
+}
+
+export function replyFromRefreshedOrderEntryOption(
+  field: RequiredOrderField,
+  optionActionScope: ItemCollectionOptionActionScope,
+): RuntimeReply {
+  const presentation = buildOrderEntryOptionPresentation(field, optionActionScope);
+  return replyWithVisibleInteractiveBody(
+    `${staleActionReply().text}\n${presentation.text}`,
+    presentation.uiHints,
+  );
 }
 
 export function replyFromCartReview(
   result: CartReviewPreviewResult,
   _introduction?: string,
 ): RuntimeReply {
+  const text = result.failureCode === "STALE_ITEM_OPTION_ACTION" && result.presentation?.text
+    ? `${staleActionReply().text}\n${result.presentation.text}`
+    : result.presentation?.text;
   return replyWithVisibleInteractiveBody(
-    result.presentation?.text,
+    text,
     result.presentation?.uiHints,
   );
 }

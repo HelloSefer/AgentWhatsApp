@@ -51,6 +51,10 @@ export function validateConfirmedOrderPersistenceInput(input: unknown): Readonly
   const subtotal = safeMoney(snapshot.merchandiseTotalMinor);
   const delivery = safeMoney(snapshot.deliveryFee?.amountMinor || 0);
   const total = safeMoney(snapshot.finalTotalMinor);
-  if (total !== subtotal + delivery || snapshot.items.some((item) => !Number.isSafeInteger(item.quantity) || item.quantity <= 0 || !Number.isSafeInteger(item.unitPriceMinor) || !Number.isSafeInteger(item.lineTotalMinor) || item.unitPriceMinor < 0 || item.lineTotalMinor < 0 || item.lineTotalMinor !== item.unitPriceMinor * item.quantity || !Array.isArray(item.selectedOptions))) throw new ConfirmedOrderValidationError();
+  if (total !== subtotal + delivery || snapshot.items.some((item) => {
+    const lineSubtotal = item.lineSubtotalMinor ?? item.unitPriceMinor * item.quantity;
+    const lineDiscount = item.lineDiscountMinor ?? 0;
+    return !Number.isSafeInteger(item.quantity) || item.quantity <= 0 || !Number.isSafeInteger(item.unitPriceMinor) || !Number.isSafeInteger(item.lineTotalMinor) || !Number.isSafeInteger(lineSubtotal) || !Number.isSafeInteger(lineDiscount) || item.unitPriceMinor < 0 || item.lineTotalMinor < 0 || lineSubtotal !== item.unitPriceMinor * item.quantity || lineSubtotal - lineDiscount !== item.lineTotalMinor || !Array.isArray(item.selectedOptions);
+  })) throw new ConfirmedOrderValidationError();
   return { snapshot, orderId, customerPhone, idempotencyKey: required(source.confirmationIdempotencyKey, MAX_IDEMPOTENCY_KEY), deliveryDetails: deliveryDetails(snapshot) };
 }

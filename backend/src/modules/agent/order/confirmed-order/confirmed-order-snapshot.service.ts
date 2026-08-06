@@ -111,39 +111,55 @@ function optionLabels(input: ConfirmedOrderSnapshotInput): Map<string, string> {
 function buildItems(input: {
   source: ConfirmedOrderSnapshotInput;
   quote: CartPricingQuote;
+  totalDiscountMinor: number;
 }): ConfirmedOrderSnapshotItem[] | undefined {
   const lines = new Map(input.quote.lines.map((line) => [line.cartItemId, line]));
   const labels = optionLabels(input.source);
   const items: ConfirmedOrderSnapshotItem[] = [];
 
-  for (const item of input.source.cart!.items) {
+  let allocatedDiscount = 0;
+  const cartItems = input.source.cart!.items;
+  for (const [index, item] of cartItems.entries()) {
     const line = lines.get(item.id);
     if (!line || line.productId !== item.productId || line.quantity !== item.quantity) return undefined;
-    const unitPriceMinor = toMinor(line.unitPrice);
-    const lineTotalMinor = toMinor(line.standardLineTotal);
+    const unitPriceMinor = line.unitPriceAmountMinor;
+    const lineSubtotalMinor = line.lineSubtotalAmountMinor;
     if (
       unitPriceMinor === undefined ||
-      lineTotalMinor === undefined ||
-      unitPriceMinor * item.quantity !== lineTotalMinor
+      !Number.isSafeInteger(unitPriceMinor) || !Number.isSafeInteger(lineSubtotalMinor) ||
+      unitPriceMinor * item.quantity !== lineSubtotalMinor
     ) {
       return undefined;
     }
+    const lineDiscountMinor = index === cartItems.length - 1
+      ? input.totalDiscountMinor - allocatedDiscount
+      : Math.floor((lineSubtotalMinor * input.totalDiscountMinor) / input.quote.normalSubtotalAmountMinor);
+    allocatedDiscount += lineDiscountMinor;
+    const facts = new Map((item.selectedOptionFacts || []).map((fact) => [fact.optionId, fact]));
+    const selectedOptions = Object.entries(item.selectedOptions)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => {
+        const fact = facts.get(key);
+        return {
+          key: text(key, 80),
+          label: fact?.optionLabel || labels.get(key.trim().toLocaleLowerCase()) || text(key, 120),
+          value: fact?.valueLabel || (typeof value === "string" ? text(value, 240) : value),
+          ...(fact ? { optionId: text(fact.optionId, 120), optionLabel: text(fact.optionLabel, 120), valueId: text(fact.valueId, 120), valueLabel: text(fact.valueLabel, 240) } : {}),
+        };
+      });
     items.push({
       itemId: text(item.id, 120),
       productId: text(item.productId, 120),
-      productName: text(input.source.productContext.name, 200),
+      productName: text(item.productName || input.source.productContext.name, 200),
       quantity: item.quantity,
-      selectedOptions: Object.entries(item.selectedOptions)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, value]) => ({
-          key: text(key, 80),
-          label: labels.get(key.trim().toLocaleLowerCase()) || text(key, 120),
-          value: typeof value === "string" ? text(value, 240) : value,
-        })),
+      selectedOptions,
       unitPriceMinor,
-      lineTotalMinor,
+      ...(item.currencyCode ? { currencyCode: text(item.currencyCode, 16) } : {}),
+      lineSubtotalMinor,
+      lineDiscountMinor,
+      lineTotalMinor: lineSubtotalMinor - lineDiscountMinor,
       unitPrice: fromMinor(unitPriceMinor),
-      lineTotal: fromMinor(lineTotalMinor),
+      lineTotal: fromMinor(lineSubtotalMinor - lineDiscountMinor),
     });
   }
 
@@ -152,14 +168,15 @@ function buildItems(input: {
 
 function buildSelectedOffer(quote: CartPricingQuote): ConfirmedOrderSelectedOfferSnapshot | undefined {
   if (!quote.appliedOfferId || quote.offerTotal === undefined) return undefined;
-  const offerTotalMinor = toMinor(quote.offerTotal);
-  const discountMinor = toMinor(quote.discountAmount);
+  const offerTotalMinor = quote.offerTotalAmountMinor;
+  const discountMinor = quote.discountAmountMinor;
   if (offerTotalMinor === undefined || discountMinor === undefined) return undefined;
   return {
     offerId: text(quote.appliedOfferId, 128),
     ...(quote.appliedOfferLabel ? { label: text(quote.appliedOfferLabel, 160) } : {}),
     offerTotalMinor,
     discountMinor,
+    normalSubtotalMinor: quote.normalSubtotalAmountMinor,
     offerTotal: fromMinor(offerTotalMinor),
     discountAmount: fromMinor(discountMinor),
   };
@@ -207,10 +224,11 @@ export function createConfirmedOrderSnapshot(
   if (!standard) {
     return { success: false, failureCode: "COMMERCIAL_STATE_BLOCKED", warnings: [...validation.warnings] };
   }
-  const items = buildItems({ source: { ...input, cart }, quote: standard });
-  const standardSubtotalMinor = toMinor(standard.standardSubtotal);
   const finalQuote = selectedPricing || standard;
-  const merchandiseTotalMinor = toMinor(finalQuote.merchandiseTotal);
+  const discountMinor = finalQuote.discountAmountMinor;
+  const items = buildItems({ source: { ...input, cart }, quote: standard, totalDiscountMinor: discountMinor });
+  const standardSubtotalMinor = standard.normalSubtotalAmountMinor;
+  const merchandiseTotalMinor = finalQuote.finalTotalAmountMinor;
   const delivery = resolveReviewDeliveryFee({
     cart,
     requiredFields: input.requiredFields,
@@ -231,7 +249,7 @@ export function createConfirmedOrderSnapshot(
   ) {
     return { success: false, failureCode: "UNSAFE_MONEY_VALUE", warnings: [...validation.warnings] };
   }
-  if (items.reduce((total, item) => total + item.lineTotalMinor, 0) !== standardSubtotalMinor) {
+  if (items.reduce((total, item) => total + (item.lineSubtotalMinor || item.lineTotalMinor), 0) !== standardSubtotalMinor || items.reduce((total, item) => total + (item.lineDiscountMinor || 0), 0) !== discountMinor || items.reduce((total, item) => total + item.lineTotalMinor, 0) !== merchandiseTotalMinor) {
     return { success: false, failureCode: "UNSAFE_MONEY_VALUE", warnings: [...validation.warnings] };
   }
 
@@ -259,6 +277,8 @@ export function createConfirmedOrderSnapshot(
     })),
     currency: text(standard.currency, 16),
     standardSubtotalMinor,
+    subtotalAmountMinor: standardSubtotalMinor,
+    discountAmountMinor: discountMinor,
     standardSubtotal: fromMinor(standardSubtotalMinor),
     ...(selectedOffer ? { selectedOffer } : {}),
     ...(recommendedOffer ? { recommendedOffer } : {}),
@@ -266,6 +286,7 @@ export function createConfirmedOrderSnapshot(
     merchandiseTotal: fromMinor(merchandiseTotalMinor),
     ...(delivery.fee ? { deliveryFee: { ...delivery.fee } } : {}),
     finalTotalMinor,
+    totalAmountMinor: finalTotalMinor,
     finalTotal: fromMinor(finalTotalMinor),
     commercialWarnings: [...validation.commercialEvaluation.warnings].map((warning) => text(warning, 160)),
   };

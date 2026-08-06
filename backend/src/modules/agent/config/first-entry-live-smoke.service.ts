@@ -1,9 +1,9 @@
 import { env } from "../../../config/env";
 import { runtimeReadComposition } from "../../../composition/runtime-read/runtime-read-composition.runtime";
-import { firstEntryCtaQuestion } from "../../conversation-engine/adapters/first-entry-conversation.adapter";
 import type { AgentResult } from "../agent-action.types";
 import { normalizeFirstEntryClick } from "./first-entry-click-normalizer.service";
 import { normalizeSellerConfig } from "./first-entry-config.service";
+import { buildFirstEntryPresentation } from "./first-entry-renderer.service";
 import {
   markFirstEntryShown,
 } from "./first-entry-eligibility.service";
@@ -30,29 +30,6 @@ import {
 } from "../../development/sandals-development-template";
 import type { ProductContext } from "./product-context.types";
 import type { SellerConfig } from "./seller-config.types";
-
-type FirstEntryLiveSmokePresentationMode =
-  | "single_message"
-  | "split_info_and_cta";
-
-type FirstEntryLiveSmokePresentationMessage =
-  | {
-      kind: "text";
-      text: string;
-    }
-  | {
-      kind: "interactive_buttons";
-      text: string;
-      buttons: Array<{
-        id: string;
-        label: string;
-      }>;
-    };
-
-type FirstEntryLiveSmokePresentation = {
-  presentationMode: FirstEntryLiveSmokePresentationMode;
-  messages: FirstEntryLiveSmokePresentationMessage[];
-};
 
 export type FirstEntryLiveSmokeReadiness = {
   ok: true;
@@ -376,50 +353,6 @@ function buildFirstEntryInteractivePayload(input: {
   };
 }
 
-function getSplitCtaQuestion(): string {
-  return firstEntryCtaQuestion("order_or_info", "friendly")!;
-}
-
-function normalizeInfoLine(line: string): string {
-  return line.trim().replace(/\.$/, "");
-}
-
-function buildFirstEntryInfoText(
-  firstEntry: IntentAwareFirstEntryPreviewResult,
-): string {
-  const ctaLine = firstEntry.renderResult.lines
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .at(-1);
-  const lines = [...firstEntry.renderResult.lines];
-
-  while (lines.length && !lines[lines.length - 1].trim()) {
-    lines.pop();
-  }
-
-  if (ctaLine && lines[lines.length - 1]?.trim() === ctaLine) {
-    lines.pop();
-  }
-
-  while (lines.length && !lines[lines.length - 1].trim()) {
-    lines.pop();
-  }
-
-  return lines
-    .map((line) => (line.trim() ? normalizeInfoLine(line) : line))
-    .join("\n")
-    .trim();
-}
-
-function getFirstEntryButtons(firstEntry: IntentAwareFirstEntryPreviewResult) {
-  return (firstEntry.ctas?.items || [])
-    .filter((item) => item.enabled)
-    .map((item) => ({
-      id: item.id,
-      label: item.label,
-    }));
-}
-
 async function resolveFirstEntryCommerceConfig(sellerId: string): Promise<{
   sellerConfig: SellerConfig;
   productContext: ProductContext;
@@ -469,41 +402,6 @@ async function resolveFirstEntryCommerceConfig(sellerId: string): Promise<{
     ),
     productContext,
     fallbackUsed: false,
-  };
-}
-
-function buildFirstEntryPresentation(
-  firstEntry: IntentAwareFirstEntryPreviewResult,
-): FirstEntryLiveSmokePresentation {
-  const infoText = buildFirstEntryInfoText(firstEntry);
-  const buttons = getFirstEntryButtons(firstEntry);
-  const ctaText = getSplitCtaQuestion();
-
-  if (!buttons.length) {
-    return {
-      presentationMode: "single_message",
-      messages: [
-        {
-          kind: "text",
-          text: infoText || firstEntry.text,
-        },
-      ],
-    };
-  }
-
-  return {
-    presentationMode: "split_info_and_cta",
-    messages: [
-      {
-        kind: "text",
-        text: infoText || firstEntry.text,
-      },
-      {
-        kind: "interactive_buttons",
-        text: ctaText,
-        buttons,
-      },
-    ],
   };
 }
 
@@ -573,13 +471,13 @@ export function buildFirstEntryLiveSmokeDispatchPreview(input: {
   });
   const interactive = buildFirstEntryInteractivePayload({
     replyText:
-      buildFirstEntryPresentation(firstEntry).messages.find(
+      buildFirstEntryPresentation(firstEntry.renderResult).messages.find(
         (message) => message.kind === "interactive_buttons",
       )?.text || firstEntry.text,
     firstEntry,
     interactiveEnabledOverride: input.interactiveEnabledOverride,
   });
-  const presentation = buildFirstEntryPresentation(firstEntry);
+  const presentation = buildFirstEntryPresentation(firstEntry.renderResult);
 
   return {
     ok: true,
@@ -688,12 +586,12 @@ export async function buildFirstEntryLiveSmokeResult(
 
   const interactive = buildFirstEntryInteractivePayload({
     replyText:
-      buildFirstEntryPresentation(firstEntry).messages.find(
+      buildFirstEntryPresentation(firstEntry.renderResult).messages.find(
         (message) => message.kind === "interactive_buttons",
       )?.text || firstEntry.text,
     firstEntry,
   });
-  const presentation = buildFirstEntryPresentation(firstEntry);
+  const presentation = buildFirstEntryPresentation(firstEntry.renderResult);
   const firstMessageText =
     presentation.messages.find((message) => message.kind === "text")?.text ||
     firstEntry.text;

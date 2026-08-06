@@ -8,6 +8,14 @@ export class WhatsAppConnectionPersistenceError extends Error {
   }
 }
 
+/** Deliberately does not carry a connection or tenant identifier. */
+export class WhatsAppConnectionNotFoundError extends Error {
+  constructor() {
+    super("WhatsApp connection was not found.");
+    this.name = "WhatsAppConnectionNotFoundError";
+  }
+}
+
 export class WhatsAppConnectionValidationError extends Error {
   constructor() {
     super("WhatsApp connection input is invalid.");

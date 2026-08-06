@@ -42,9 +42,11 @@ function isSnapshotUsable(snapshot: ConfirmedOrderSnapshot): boolean {
     snapshot.id &&
     snapshot.items.length > 0 &&
     snapshot.items.every(
-      (item) =>
-        item.quantity > 0 &&
-        item.lineTotalMinor === item.unitPriceMinor * item.quantity,
+      (item) => {
+        const subtotal = item.lineSubtotalMinor ?? item.unitPriceMinor * item.quantity;
+        const discount = item.lineDiscountMinor ?? 0;
+        return item.quantity > 0 && subtotal === item.unitPriceMinor * item.quantity && subtotal - discount === item.lineTotalMinor;
+      },
     ) &&
     snapshot.standardSubtotalMinor >= 0 &&
     snapshot.finalTotalMinor >= 0 &&

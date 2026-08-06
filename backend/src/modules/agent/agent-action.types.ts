@@ -8,6 +8,7 @@ import type {
 } from "./reply/reply-renderer.types";
 import type { WhatsAppInteractivePreview } from "./reply/whatsapp-interactive.types";
 import type { OrderRuntimeReceiptArtifact } from "./order/runtime/order-runtime.types";
+import type { FirstEntryPresentation } from "./config/first-entry-renderer.service";
 
 export const AGENT_INTERNAL_RECEIPT_ARTIFACT: unique symbol = Symbol(
   "agent.internal.receiptArtifact",
@@ -62,6 +63,8 @@ export type AgentResultSource =
   | "ai_fallback"
   | "seller_brain";
 
+export type ConnectedConversationPath = "approved_hybrid";
+
 export type AgentInboundSourceType =
   | "text"
   | "button_reply"
@@ -95,6 +98,8 @@ export interface AgentResult {
     sellerBrainRecentReplyKeys?: string[];
     durationMs?: number;
     source?: AgentResultSource;
+    /** Internal-only routing evidence for a trusted connected tenant turn. */
+    conversationPath?: ConnectedConversationPath;
     orderStateSummary?: AgentOrderStateSummary;
     intentRouterUsedAI?: boolean;
     intentRouterTimedOut?: boolean;
@@ -122,6 +127,10 @@ export interface AgentResult {
       confirmedSnapshotId?: string;
       receiptReady?: boolean;
       durableReceiptOutboxCommitted?: boolean;
+    };
+    firstEntryPresentation?: FirstEntryPresentation & {
+      handledBy: "hybrid_first_entry";
+      eligibilityReason: "eligible_new_conversation";
     };
     firstEntryLiveSmoke?: {
       handledBy: "first_entry_live_smoke" | "first_entry_click_preview_blocked";

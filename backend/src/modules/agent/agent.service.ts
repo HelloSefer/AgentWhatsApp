@@ -26,6 +26,7 @@ import {
   appendSellerBrainReplyKey,
   clearConversationProductInfoSelection,
   getConversationSession,
+  saveConversationSession,
   updateConversationProductInfoState,
 } from "./session/conversation-session.service";
 import type { AgentIdentity } from "./identity/agent-identity.types";
@@ -34,6 +35,7 @@ import { DEFAULT_DEMO_SELLER_ID } from "./identity/seller-resolver.service";
 import { AGENT_INTERNAL_RECEIPT_ARTIFACT } from "./agent-action.types";
 import type {
   AgentAction,
+  ConnectedConversationPath,
   AgentInboundTransportInput,
   AgentOrderStateSummary,
   AgentResult,
@@ -67,14 +69,28 @@ import {
 import { conversationConfigResolver } from "../conversation-engine/config/conversation-config-runtime.service";
 import { runWithConversationConfig } from "../conversation-engine/config/conversation-config-context.service";
 import { getActiveConversationConfig } from "../conversation-engine/config/conversation-config-context.service";
-import { applyResolvedConversationProductConfig, withConversationProductDefaults } from "../conversation-engine/config/conversation-product-config.service";
+import {
+  applyConnectedCatalogConversationPresentation,
+  withConversationProductDefaults,
+} from "../conversation-engine/config/conversation-product-config.service";
 import { runtimeReadComposition } from "../../composition/runtime-read/runtime-read-composition.runtime";
+import {
+  buildFirstEntryPresentation,
+  renderFirstEntryMessage,
+} from "./config/first-entry-renderer.service";
+import {
+  evaluateFirstEntryEligibility,
+  markFirstEntryShown,
+} from "./config/first-entry-eligibility.service";
+import { analyzeFirstEntryLeadIntent } from "./config/first-entry-intent-preview.service";
 
 export type GenerateAgentOptions = {
   customerId?: string;
   customerPhone?: string;
   conversationKey?: string;
   sellerId?: string;
+  /** Trusted persisted WhatsApp connection selected from the inbound phone number. */
+  connectionId?: string;
   productId?: string;
   phoneNumberId?: string;
   useMemory?: boolean;
@@ -86,6 +102,8 @@ export type GenerateAgentOptions = {
   transportInput?: AgentInboundTransportInput;
   /** Internal resolved commerce config for persisted tenants. */
   runtimeSellerConfig?: SellerConfig;
+  /** Internal Catalog product context reserved for First Entry rendering. */
+  runtimeFirstEntryProductContext?: ConfigProductContext;
   /** Internal resolved order fields for persisted tenants. */
   runtimeRequiredFields?: RequiredOrderField[];
 };
@@ -362,6 +380,119 @@ function getRuntimeInfoMenuDisplayMode(
   }
 }
 
+function connectedConversationPath(
+  options?: GenerateAgentOptions,
+): ConnectedConversationPath | undefined {
+  return options?.connectionId &&
+    options.phoneNumberId &&
+    options.orderRuntimeEnabled === true &&
+    options.runtimeSellerConfig &&
+    options.runtimeFirstEntryProductContext
+    ? "approved_hybrid"
+    : undefined;
+}
+
+function usesApprovedConnectedHybrid(options?: GenerateAgentOptions): boolean {
+  return connectedConversationPath(options) === "approved_hybrid";
+}
+
+async function buildHybridFirstEntryResult(input: {
+  userMessage: string;
+  options?: GenerateAgentOptions;
+  identity?: AgentIdentity;
+  startedAt: number;
+}): Promise<AgentResult | null> {
+  const { options } = input;
+  if (
+    !options?.useMemory ||
+    !options.customerId ||
+    !options.sellerId ||
+    !options.runtimeSellerConfig ||
+    !options.runtimeFirstEntryProductContext ||
+    options.transportInput?.sourceType !== "text" ||
+    analyzeFirstEntryLeadIntent(input.userMessage).intent !== "greeting"
+  ) {
+    return null;
+  }
+
+  const session = await getConversationSession(
+    options.customerId,
+    options.sellerId,
+    options.productId,
+    options.customerPhone,
+  );
+  // The guarded runtime owns an order once it has advanced beyond First Entry.
+  if (
+    session.orderRuntime &&
+    session.orderRuntime.runtimeStage !== "FIRST_ENTRY"
+  ) {
+    return null;
+  }
+
+  const eligibility = evaluateFirstEntryEligibility({
+    sellerConfig: options.runtimeSellerConfig,
+    productContext: options.runtimeFirstEntryProductContext,
+    session,
+    orderState: session.orderState,
+  });
+  if (!eligibility.eligible) {
+    return null;
+  }
+
+  const rendered = renderFirstEntryMessage({
+    sellerConfig: options.runtimeSellerConfig,
+    productContext: options.runtimeFirstEntryProductContext,
+  });
+  const presentation = buildFirstEntryPresentation(rendered);
+  const cta = presentation.messages.find(
+    (message) => message.kind === "interactive_buttons",
+  );
+  const reply = cta?.text || rendered.text;
+  const replyUi = cta
+    ? {
+        ...rendered.uiHints.replyUi,
+        body: reply,
+        previewOnly: false,
+      }
+    : undefined;
+  const whatsappInteractivePreview = whatsappInteractiveMapper.toCloudInteractivePreview({
+    replyText: reply,
+    replyUi,
+  });
+  const interactiveSendDecision = interactiveSendDecisionService.decide({
+    channel: options.interactiveSendChannel || "test",
+    interactiveEnabled: getRuntimeInteractiveEnabled(options),
+    whatsappInteractivePreview,
+  });
+
+  await saveConversationSession(markFirstEntryShown(session));
+
+  return {
+    reply,
+    actions: [],
+    source: "direct",
+    meta: {
+      durationMs: Date.now() - input.startedAt,
+      source: "direct",
+      naturalReplyEnabled: getNaturalReplyStatus().enabled,
+      naturalReplyUsed: false,
+      naturalReplyTimedOut: false,
+      naturalReplyCircuitOpen: false,
+      aiUsed: false,
+      stateChangedFieldKeys: [],
+      identity: input.identity,
+      replyUi,
+      whatsappInteractivePreview,
+      interactiveSendDecision,
+      firstEntryPresentation: {
+        handledBy: "hybrid_first_entry",
+        eligibilityReason: "eligible_new_conversation",
+        ...presentation,
+      },
+    },
+  };
+}
+
 function withColorArticle(color: string): string {
   return color.startsWith("ال") ? color : `ال${color}`;
 }
@@ -601,6 +732,7 @@ function toAgentProductContext(input: {
     conversationalProductName: input.configProductContext.conversationalName,
     description: input.configProductContext.description,
     price: String(input.configProductContext.price),
+    priceAmountMinor: input.configProductContext.priceAmountMinor,
     currency:
       input.configProductContext.currency === "MAD"
         ? "درهم"
@@ -656,7 +788,7 @@ async function resolveRuntimeProductContext(
   }
 
   try {
-    const projection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId: options.sellerId!, productId: options.productId?.trim() || productContext.productId || "" });
+    const projection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId: options.sellerId!, productId: options.productId?.trim() || productContext.productId || "", connectionId: options.connectionId, phoneNumberId: options.phoneNumberId });
     if (projection.status === "READY") return toAgentProductContext({ sellerConfig: projection.sellerConfig, configProductContext: projection.productContext });
     return productContext;
   } catch (error) {
@@ -668,10 +800,10 @@ async function resolveRuntimeProductContext(
 async function resolveRuntimeCommerceConfig(
   productContext: ProductContext,
   options?: GenerateAgentOptions,
-): Promise<{ sellerConfig?: SellerConfig; productContext: ProductContext; requiredFields?: RequiredOrderField[]; failureCode?: "SELLER_COMMERCE_CONFIG_REQUIRED" | "SELLER_COMMERCE_CONFIG_INVALID" }> {
+): Promise<{ sellerConfig?: SellerConfig; productContext: ProductContext; firstEntryProductContext?: ConfigProductContext; requiredFields?: RequiredOrderField[]; failureCode?: "SELLER_COMMERCE_CONFIG_REQUIRED" | "SELLER_COMMERCE_CONFIG_INVALID" }> {
   const sellerId = options?.sellerId?.trim();
   if (!sellerId) return { productContext: await resolveRuntimeProductContext(productContext, options) };
-  const projection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId: sellerId!, productId: options?.productId?.trim() || productContext.productId || "" });
+  const projection = await runtimeReadComposition.sellerCommerceProjectionReader.resolve({ sellerId: sellerId!, productId: options?.productId?.trim() || productContext.productId || "", connectionId: options?.connectionId, phoneNumberId: options?.phoneNumberId });
   if (projection.status === "READY") {
     const sellerConfig = projection.sellerConfig;
     const requiredFields = requiredFieldsService.getOrderFields({
@@ -681,6 +813,7 @@ async function resolveRuntimeCommerceConfig(
     return {
       sellerConfig,
       productContext: toAgentProductContext({ sellerConfig, configProductContext: projection.productContext }),
+      firstEntryProductContext: projection.productContext,
       requiredFields,
     };
   }
@@ -1214,6 +1347,14 @@ async function buildOrderResultFromRouter(input: {
   analysis: AIIntentRouterAnalysis;
   requiredFields?: RequiredOrderField[];
 }): Promise<AgentResult> {
+  if (usesApprovedConnectedHybrid(input.options)) {
+    return {
+      reply: getOrderReply(input.productContext),
+      actions: [],
+      source: "direct",
+    };
+  }
+
   if (input.options?.useMemory && input.options.customerId) {
     const orderResult = await processOrderTurn({
       customerId: input.options.customerId,
@@ -1498,8 +1639,10 @@ async function buildAgentResult(
   dependencies?: GenerateAgentDependencies,
 ): Promise<AgentResult> {
   const directReply = getDirectAgentReply(userMessage, productContext);
+  const allowLegacyOrderCompatibility = !usesApprovedConnectedHybrid(options);
 
   if (
+    allowLegacyOrderCompatibility &&
     shouldUseSmartRouterBeforeDirect(userMessage) &&
     directReply?.grounded !== true
   ) {
@@ -1528,12 +1671,14 @@ async function buildAgentResult(
       return informationalReply;
     }
 
-    const smartOrderResult = await buildSmartOrderResultIfLikely(
-      userMessage,
-      productContext,
-      options,
-      requiredFields,
-    );
+    const smartOrderResult = allowLegacyOrderCompatibility
+      ? await buildSmartOrderResultIfLikely(
+          userMessage,
+          productContext,
+          options,
+          requiredFields,
+        )
+      : null;
 
     if (smartOrderResult) {
       return smartOrderResult;
@@ -1566,13 +1711,15 @@ async function buildAgentResult(
     return informationalReply;
   }
 
-  const routerReply = await buildSmartRouterResult(
-    userMessage,
-    productContext,
-    options,
-    requiredFields,
-    "disabled",
-  );
+  const routerReply = allowLegacyOrderCompatibility
+    ? await buildSmartRouterResult(
+        userMessage,
+        productContext,
+        options,
+        requiredFields,
+        "disabled",
+      )
+    : null;
 
   if (routerReply) {
     return routerReply;
@@ -1591,7 +1738,7 @@ async function buildOrderResultIfHandled(
   options?: GenerateAgentOptions,
   requiredFields?: RequiredOrderField[],
 ): Promise<AgentResult | null> {
-  if (!options?.useMemory || !options.customerId) {
+  if (!options?.useMemory || !options.customerId || usesApprovedConnectedHybrid(options)) {
     return null;
   }
 
@@ -1642,6 +1789,7 @@ async function generateAgentResultInternal(
   const runtimeProductContext = productContext;
   const requiredFields = getRuntimeRequiredOrderFields(activeOptions);
   const infoMenuDisplayMode = getRuntimeInfoMenuDisplayMode(activeOptions);
+  const conversationPath = connectedConversationPath(activeOptions);
 
   if (!userMessage) {
     throw new Error("Message is required");
@@ -1656,6 +1804,7 @@ async function generateAgentResultInternal(
         customerPhone: normalized.identity.customerPhone,
         conversationKey: normalized.identity.conversationKey,
         productId: activeOptions.productId,
+        connectionId: activeOptions.connectionId,
         phoneNumberId: normalized.identity.phoneNumberId,
         message: userMessage,
         actionId: activeOptions.transportInput?.actionId,
@@ -1701,6 +1850,7 @@ async function generateAgentResultInternal(
           meta: {
             durationMs: Date.now() - startedAt,
             source: "direct",
+            conversationPath,
             naturalReplyEnabled: naturalReplyStatus.enabled,
             naturalReplyUsed: false,
             naturalReplyTimedOut: false,
@@ -1744,6 +1894,20 @@ async function generateAgentResultInternal(
         };
       }
     }
+  }
+
+  const firstEntryResult = await buildHybridFirstEntryResult({
+    userMessage,
+    options: activeOptions,
+    identity: normalized.identity,
+    startedAt,
+  });
+  if (firstEntryResult) {
+    firstEntryResult.meta = {
+      ...firstEntryResult.meta,
+      conversationPath,
+    };
+    return firstEntryResult;
   }
 
   await appendMessageToMemory(activeOptions, "customer", userMessage);
@@ -1934,6 +2098,7 @@ async function generateAgentResultInternal(
         (shouldResumeOrderAfterSideQuestion ? [] : undefined),
       durationMs: Date.now() - startedAt,
       source: result.source,
+      conversationPath,
       orderStateSummary,
       identity: normalized.identity,
       whatsappInteractivePreview,
@@ -1958,7 +2123,12 @@ export async function generateAgentResult(
     return { reply: "سمح ليا، الخدمة ديال الطلب ما متوفراش دابا.", actions: [], source: "direct" };
   }
   const runtimeProductContext = commerce.productContext;
-  const productId = options?.productId?.trim() || runtimeProductContext.productId;
+  // Persisted seller runtime projections own product selection. A caller or a
+  // stale session may retain a productId for compatibility, but cannot replace
+  // the connection-bound product on a connected tenant turn.
+  const productId = options?.sellerId
+    ? runtimeProductContext.productId
+    : options?.productId?.trim() || runtimeProductContext.productId;
   const configResolution = await runtimeReadComposition.conversationConfigReader.resolve({ sellerId, productId });
   const resolvedConfig = configResolution.config;
   const configuredProductContext: ProductContext = resolvedConfig.productWording
@@ -1970,6 +2140,15 @@ export async function generateAgentResult(
           runtimeProductContext.conversationalProductName,
       }
     : runtimeProductContext;
+  const configuredFirstEntryProductContext = commerce.firstEntryProductContext
+    ? applyConnectedCatalogConversationPresentation(
+        commerce.firstEntryProductContext,
+        withConversationProductDefaults(
+          resolvedConfig,
+          commerce.firstEntryProductContext,
+        ),
+      )
+    : undefined;
   return runWithConversationConfig(resolvedConfig, () =>
     generateAgentResultInternal(
       message,
@@ -1978,6 +2157,7 @@ export async function generateAgentResult(
         ...options,
         productId,
         runtimeSellerConfig: commerce.sellerConfig,
+        runtimeFirstEntryProductContext: configuredFirstEntryProductContext,
         runtimeRequiredFields: commerce.requiredFields,
       },
       dependencies,

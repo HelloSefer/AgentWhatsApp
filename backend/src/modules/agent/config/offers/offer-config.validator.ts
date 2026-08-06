@@ -75,12 +75,6 @@ function compareOffers(left: ProductOfferConfig, right: ProductOfferConfig): num
     return priorityDifference;
   }
 
-  const countDifference = left.requiredItemCount - right.requiredItemCount;
-
-  if (countDifference !== 0) {
-    return countDifference;
-  }
-
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 }
 
@@ -134,6 +128,7 @@ export function validateAndNormalizeProductOffers(
     const label = cleanText(candidate.label);
     const requiredItemCount = candidate.requiredItemCount;
     const totalPrice = candidate.totalPrice;
+    const totalPriceAmountMinor = candidate.totalPriceAmountMinor;
     const currency = normalizeCurrency(candidate.currency);
     const active = candidate.active;
     const allowMixedOptions = candidate.allowMixedOptions;
@@ -181,12 +176,10 @@ export function validateAndNormalizeProductOffers(
       addError(errors, `${path}.requiredItemCount`, "INVALID_REQUIRED_ITEM_COUNT", `${path}.requiredItemCount must be a safe positive integer within the configured maximum.`);
     }
 
-    if (
-      typeof totalPrice !== "number" ||
-      !Number.isFinite(totalPrice) ||
-      totalPrice <= 0 ||
-      !hasMoneyPrecision(totalPrice)
-    ) {
+    const minorIsValid = typeof totalPriceAmountMinor === "number" &&
+      Number.isSafeInteger(totalPriceAmountMinor) && totalPriceAmountMinor > 0;
+    const displayIsValid = typeof totalPrice === "number" && Number.isFinite(totalPrice) && totalPrice > 0 && hasMoneyPrecision(totalPrice);
+    if (!minorIsValid && !displayIsValid) {
       addError(errors, `${path}.totalPrice`, "INVALID_TOTAL_PRICE", `${path}.totalPrice must be a positive finite amount with at most two decimal places.`);
     }
 
@@ -224,7 +217,8 @@ export function validateAndNormalizeProductOffers(
       productId: offerProductId,
       label,
       requiredItemCount: requiredItemCount as number,
-      totalPrice: totalPrice as number,
+      totalPrice: minorIsValid ? (totalPriceAmountMinor as number) / 100 : totalPrice as number,
+      ...(minorIsValid ? { totalPriceAmountMinor: totalPriceAmountMinor as number } : {}),
       currency,
       active: active as boolean,
       allowMixedOptions: allowMixedOptions as boolean,

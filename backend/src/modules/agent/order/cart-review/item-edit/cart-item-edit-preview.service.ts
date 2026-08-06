@@ -2,6 +2,7 @@ import type { AgentReplyUiHint } from "../../../reply/reply-renderer.types";
 import type { CartDraft } from "../../cart-state.types";
 import {
   buildItemCollectionOptionActionId,
+  matchesItemCollectionOptionActionScope,
   truncateItemCollectionPresentationText,
 } from "../../item-collection/presentation/item-collection-presentation.service";
 import {
@@ -85,6 +86,7 @@ function safeTextActionId(fieldKey: string): string | undefined {
 function buildEditPresentation(input: {
   context: CartItemEditContext;
   state: CartItemEditPreviewState;
+  requireOptionActionScope?: boolean;
 }): CartReviewPresentationResult {
   const fields = getItemCollectionOptionFields(input.context.requiredFields)
     .filter((field) => !input.state.focusedFieldKey || field.key === input.state.focusedFieldKey);
@@ -131,7 +133,13 @@ function buildEditPresentation(input: {
           }));
       for (const configuredValue of configuredValues) {
         const canonicalValue = configuredValue.canonicalValue;
-        const id = buildItemCollectionOptionActionId(field.key, configuredValue.key);
+        const id = buildItemCollectionOptionActionId(
+          field.key,
+          configuredValue.key,
+          input.requireOptionActionScope
+            ? { productId: input.context.productContext.productId, targetId: input.state.sourceItemId }
+            : undefined,
+        );
         if (!id) continue;
         const current = input.state.workingItem.selectedOptions[field.key] === canonicalValue;
         const focusedLabel = cartMessage(
@@ -258,9 +266,14 @@ function withEditPresentation(input: {
   operation: ReturnType<typeof startCartItemEdit>;
   context: CartItemEditContext;
   nextStep?: CartItemEditPreviewResult["nextStep"];
+  requireOptionActionScope?: boolean;
 }): CartItemEditPreviewResult {
   const presentation = input.operation.editState
-    ? buildEditPresentation({ context: { ...input.context, cart: input.operation.cartAfter }, state: input.operation.editState })
+    ? buildEditPresentation({
+      context: { ...input.context, cart: input.operation.cartAfter },
+      state: input.operation.editState,
+      requireOptionActionScope: input.requireOptionActionScope,
+    })
     : undefined;
   return result({
     handled: true,
@@ -312,6 +325,7 @@ export function runCartItemEditPreview(input: CartItemEditPreviewInput): CartIte
       context,
       operation: { ...operation, ...(editState ? { editState } : {}) },
       nextStep: "SELECT_ITEM_OPTION",
+      requireOptionActionScope: input.requireOptionActionScope,
     });
   }
 
@@ -331,6 +345,7 @@ export function runCartItemEditPreview(input: CartItemEditPreviewInput): CartIte
       context,
       operation: captureCartItemEditText({ context, state: suppliedState, text: input.cartReviewText }),
       nextStep: "REVIEW_ITEM_CHANGES",
+      requireOptionActionScope: input.requireOptionActionScope,
     });
   }
 
@@ -338,7 +353,7 @@ export function runCartItemEditPreview(input: CartItemEditPreviewInput): CartIte
   if (!normalization.recognized) {
     if (!suppliedState) return result({ handled: false, success: false, changed: false, cartBefore });
     const verify = startCartItemEdit({ context, itemId: suppliedState.sourceItemId, activeState: suppliedState });
-    return withEditPresentation({ context, operation: verify, nextStep: "REVIEW_ITEM_CHANGES" });
+    return withEditPresentation({ context, operation: verify, nextStep: "REVIEW_ITEM_CHANGES", requireOptionActionScope: input.requireOptionActionScope });
   }
   if (!normalization.valid || !normalization.action) {
     return result({
@@ -371,6 +386,26 @@ export function runCartItemEditPreview(input: CartItemEditPreviewInput): CartIte
 
   if (normalization.action.type === "SELECT_OPTION") {
     const selectionAction = normalization.action;
+    if (
+      input.requireOptionActionScope &&
+      !matchesItemCollectionOptionActionScope(selectionAction, {
+        productId: context.productContext.productId,
+        targetId: suppliedState.sourceItemId,
+      })
+    ) {
+      const stale = startCartItemEdit({ context, itemId: suppliedState.sourceItemId, activeState: suppliedState });
+      return result({
+        ...withEditPresentation({
+          context,
+          operation: stale,
+          nextStep: "SELECT_ITEM_OPTION",
+          requireOptionActionScope: true,
+        }),
+        success: false,
+        changed: false,
+        failureCode: "STALE_ITEM_OPTION_ACTION",
+      });
+    }
     const selectedField = context.requiredFields.find(
       (field) => field.key === selectionAction.fieldKey,
     );
@@ -402,13 +437,14 @@ export function runCartItemEditPreview(input: CartItemEditPreviewInput): CartIte
         warnings: [...saved.warnings, ...(main?.warnings || [])],
       });
     }
-    return withEditPresentation({ context, operation: selected, nextStep: "REVIEW_ITEM_CHANGES" });
+    return withEditPresentation({ context, operation: selected, nextStep: "REVIEW_ITEM_CHANGES", requireOptionActionScope: input.requireOptionActionScope });
   }
   if (normalization.action.type === "ENTER_TEXT") {
     return withEditPresentation({
       context,
       operation: beginCartItemEditText({ context, state: suppliedState, fieldKey: normalization.action.fieldKey }),
       nextStep: "ENTER_ITEM_OPTION_TEXT",
+      requireOptionActionScope: input.requireOptionActionScope,
     });
   }
   if (normalization.action.type === "CANCEL") {

@@ -28,11 +28,27 @@ export type CartInitialCollectionMode = "IMPLICIT_PLANNED_PIECE_SLOTS";
 export type CartItem = {
   id: string;
   productId: string;
+  /** Temporary, presentation-safe facts captured from the bound Catalog product. */
+  productName?: string;
   quantity: number;
+  unitPriceAmountMinor?: number;
+  currencyCode?: string;
   /** A draft may carry the safe internal default of 1 before the customer has selected a quantity. */
   quantityExplicitlySet?: boolean;
   quantitySource?: CartItemQuantitySource;
   selectedOptions: Record<string, SupportedOrderFieldValue>;
+  /** Stable option/value identities are retained beside the legacy display map. */
+  selectedOptionFacts?: Array<{
+    optionId: string;
+    optionLabel: string;
+    valueId: string;
+    valueLabel: string;
+  }>;
+  selectedOfferFacts?: {
+    offerId: string;
+    label: string;
+    totalPriceAmountMinor: number;
+  };
   status: CartItemStatus;
 };
 
@@ -44,6 +60,8 @@ export type CartDraft = {
   /** Initial targetItemCount is total physical pieces, collected as one-piece slots. */
   initialCollectionMode?: CartInitialCollectionMode;
   selectedOfferId?: string;
+  /** Detects a stale confirmation without adding a persisted order schema. */
+  reviewFingerprint?: string;
   items: CartItem[];
   currentItemDraft?: CartItem;
   orderLevelFields: Record<string, SupportedOrderFieldValue>;

@@ -27,9 +27,11 @@ export const dashboardNavigationSections = [
     label: "Commerce operations",
     items: [
       {
-        label: "Store",
+        label: "Products",
+        href: "/dashboard/products",
         icon: ShoppingBag,
-        status: "soon",
+        match: "prefix",
+        status: "available",
       },
       {
         label: "Orders",
@@ -87,6 +89,21 @@ export const dashboardNavigationSections = [
 ] as const satisfies readonly DashboardNavigationSection[];
 
 export const dashboardPageMeta = [
+  {
+    href: "/dashboard/products/new",
+    match: "exact",
+    meta: { title: "Add product", breadcrumb: ["Commerce operations", "Products", "Add product"] },
+  },
+  {
+    href: "/dashboard/products",
+    match: "exact",
+    meta: { title: "Products", breadcrumb: ["Commerce operations", "Products"] },
+  },
+  {
+    href: "/dashboard/products",
+    match: "prefix",
+    meta: { title: "Product details", breadcrumb: ["Commerce operations", "Products", "Product details"] },
+  },
   {
     href: "/dashboard",
     match: "exact",

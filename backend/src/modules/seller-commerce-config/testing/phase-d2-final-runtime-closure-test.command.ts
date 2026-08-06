@@ -14,7 +14,7 @@ async function main(): Promise<void> {
   add("Agent production resolution uses persisted projection", agent.includes("sellerCommerceProjectionReader.resolve") && !agent.includes("product-context.service"));
   add("Guarded order runtime uses persisted projection", router.includes("sellerCommerceProjectionReader.resolve") && !router.includes("product-context.service"));
   add("Order runtime controller requires an explicit product", !controller.includes("productContextService") && controller.includes("PRODUCT_CONTEXT_REQUIRED"));
-  add("Projection owns tenant-scoped catalog resolution", projection.includes("catalogService.getProduct(tenant, input.productId)") && projection.includes("createTenantContext(input.sellerId)"));
+  add("Projection owns tenant-scoped catalog resolution through the exact connection binding", projection.includes("catalogService.getProduct(tenant, connection.boundProductId)") && projection.includes("createTenantContext(input.sellerId)"));
   add("Customer-owned inbound does not import smoke orchestration", !cloud.includes("first-entry-live-smoke.service"));
   add("Customer-owned inbound uses fail-closed credential policy", cloud.includes("const allowGlobalCredentialFallback = false"));
   add("No primary runtime development fixture import remains", !/modules\/development|sandals-development-template/.test(`${agent}\n${router}\n${cloud}`));

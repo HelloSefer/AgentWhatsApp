@@ -199,9 +199,13 @@ function describeProgression(input: ItemCollectionPreviewInput, cart: CartDraft)
     productContext: input.productContext,
     requiredFields: input.requiredFields,
   });
+  const optionActionScope = input.requireOptionActionScope && cart.currentItemDraft
+    ? { productId: input.productContext.productId, targetId: cart.currentItemDraft.id }
+    : undefined;
   const presentation = buildItemCollectionPresentation({
     progression,
     requiredFields: input.requiredFields,
+    ...(optionActionScope ? { optionActionScope } : {}),
   });
   const previewState = normalizeSameAsPreviousPreviewState(input.previewState, cart);
   // The shortcut is an explicit D3 preview contract. Existing preview callers
@@ -371,6 +375,12 @@ export function runItemCollectionPreview(
       sellerId: input.sellerId,
       productContext: input.productContext,
       requiredFields: input.requiredFields,
+      ...(input.requireOptionActionScope && cartBefore.currentItemDraft
+        ? { optionActionScope: {
+          productId: input.productContext.productId,
+          targetId: cartBefore.currentItemDraft.id,
+        } }
+        : {}),
     });
     const cartAfter = actionResult.collectionResult?.cart || cartBefore;
     const completed = automaticallyFinalizePlannedSlot({ ...input, previewState }, cartAfter);

@@ -100,6 +100,7 @@ export type OrderRuntimeTurnInput = {
   customerPhone: string;
   conversationKey: string;
   productId?: string;
+  connectionId?: string;
   phoneNumberId?: string;
   message: string;
   actionId?: string;

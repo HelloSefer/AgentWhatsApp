@@ -3,6 +3,7 @@ import type { AgentReplyUiHint } from "../../../reply/reply-renderer.types";
 import type { ItemCollectionProgress } from "../item-collection.types";
 import type {
   ItemCollectionOptionActionId,
+  ItemCollectionOptionActionScope,
   ItemCollectionPresentationField,
   ItemCollectionPresentationInput,
   ItemCollectionPresentationResult,
@@ -72,18 +73,39 @@ function isSafeActionSegment(value: string): boolean {
 export function buildItemCollectionOptionActionId(
   fieldKey: string,
   canonicalValue: string,
+  scope?: ItemCollectionOptionActionScope,
 ): ItemCollectionOptionActionId | undefined {
   const field = fieldKey.trim();
   const value = canonicalValue.trim();
-  const id = `cart_item_option:${field}:${value}`;
-  return isSafeActionSegment(field) && isSafeActionSegment(value) && Array.from(id).length <= MAX_ACTION_ID_LENGTH
+  const productId = scope?.productId.trim();
+  const targetId = scope?.targetId.trim();
+  const id = scope
+    ? `cart_item_option:${productId}:${field}:${value}:${targetId}`
+    : `cart_item_option:${field}:${value}`;
+  return isSafeActionSegment(field) && isSafeActionSegment(value) &&
+    (!scope || (isSafeActionSegment(productId || "") && isSafeActionSegment(targetId || ""))) &&
+    Array.from(id).length <= MAX_ACTION_ID_LENGTH
     ? (id as ItemCollectionOptionActionId)
     : undefined;
+}
+
+/** Connected option actions must still belong to this exact fresh product/item target. */
+export function matchesItemCollectionOptionActionScope(
+  action: Readonly<{
+    productId?: string;
+    fieldKey: string;
+    canonicalValue: string;
+    targetId?: string;
+  }>,
+  scope: ItemCollectionOptionActionScope,
+): boolean {
+  return action.productId === scope.productId && action.targetId === scope.targetId;
 }
 
 /** Reuses the canonical item-option action IDs before the first planned item exists. */
 export function buildOrderEntryOptionPresentation(
   field: RequiredOrderField,
+  optionActionScope?: ItemCollectionOptionActionScope,
 ): { text: string; uiHints?: AgentReplyUiHint } {
   const option = toConversationProductOption(field);
   const isSize = option.key === "size";
@@ -101,7 +123,7 @@ export function buildOrderEntryOptionPresentation(
   const usesButtons = options.length <= MAX_BUTTON_OPTIONS;
   const mappedOptions: NonNullable<AgentReplyUiHint["options"]> = [];
   for (const value of options) {
-    const id = buildItemCollectionOptionActionId(field.key, value.key);
+    const id = buildItemCollectionOptionActionId(field.key, value.key, optionActionScope);
     if (!id) return { text };
     mappedOptions.push({
       id,
@@ -241,7 +263,11 @@ export function buildItemCollectionPresentation(
     const usesButtons = optionCount <= MAX_BUTTON_OPTIONS;
     const options: NonNullable<AgentReplyUiHint["options"]> = [];
     for (const value of configuredValues) {
-      const actionId = buildItemCollectionOptionActionId(field.key, value.key);
+      const actionId = buildItemCollectionOptionActionId(
+        field.key,
+        value.key,
+        input.optionActionScope,
+      );
       if (!actionId) {
         return result({
           success: false,

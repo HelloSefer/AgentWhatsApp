@@ -53,10 +53,10 @@ type TestCase = Readonly<{
 
 const cases: TestCase[] = [];
 const phase8bConnectionResolver = Object.freeze({
-  resolveForTrustedSeller: async (sellerId: string) => ({
+  resolveForTrustedInbound: async ({ sellerId, phoneNumberId }: { sellerId: string; phoneNumberId: string }) => ({
     sellerId,
     connectionId: "conn_phase8b",
-    phoneNumberId: "1168457439687919",
+    phoneNumberId,
     accessToken: "phase8b_encrypted_connection_token",
     tokenSource: "encrypted_connection_token" as const,
   }),
@@ -762,7 +762,7 @@ async function runNormalizedProcessorAndFastAckChecks(): Promise<void> {
       () => __phase11kInboundConnectionScopedTesting.resolveConnectionScopedRuntime(
         scopedJob,
         {
-          resolveForTrustedSeller: async () => ({
+          resolveForTrustedInbound: async () => ({
             ...scopedRuntime,
             phoneNumberId: "999999999999999",
           }),
@@ -775,7 +775,7 @@ async function runNormalizedProcessorAndFastAckChecks(): Promise<void> {
       () => __phase11kInboundConnectionScopedTesting.resolveConnectionScopedRuntime(
         scopedJob,
         {
-          resolveForTrustedSeller: async () => ({
+          resolveForTrustedInbound: async () => ({
             sellerId: scopedJob.sellerId,
             connectionId: "conn_phase8b_missing_source",
             phoneNumberId: scopedJob.phoneNumberId,

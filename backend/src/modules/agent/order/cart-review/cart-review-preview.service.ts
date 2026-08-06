@@ -244,6 +244,7 @@ export function runCartReviewPreview(
       offerLookup: input.offerLookup,
       cart: cartBefore,
       now: input.now,
+      requireOptionActionScope: input.requireOptionActionScope,
     });
     const isItemOptionSelection = typeof input.rawActionId === "string" && input.rawActionId.startsWith("cart_item_option:");
     const returnsToCartReview = itemEdit.nextStep === "RETURN_TO_CART_REVIEW" || itemEdit.nextStep === "REVIEW_ITEM_CHANGES";
@@ -561,6 +562,7 @@ export function runCartReviewPreview(
     productContext: input.productContext,
     requiredFields: input.requiredFields,
     cart: mutation.cartAfter,
+    requireOptionActionScope: input.requireOptionActionScope,
   });
   return result({
     handled: true,

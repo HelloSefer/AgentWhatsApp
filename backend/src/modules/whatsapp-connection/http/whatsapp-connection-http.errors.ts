@@ -26,11 +26,24 @@ import {
   WhatsAppConnectionFinalizationValidationError,
   WhatsAppConnectionFinalizationVerificationError,
   WhatsAppConnectionMetaConfigurationError,
+  WhatsAppConnectionNotFoundError,
   WhatsAppConnectionPersistenceError,
   WhatsAppConnectionValidationError,
 } from "../domain/whatsapp-connection.errors";
+import { ProductNotFoundError } from "../../catalog/domain/catalog.errors";
+import { WhatsAppConnectionProductBindingHttpValidationError } from "./whatsapp-connection-product-binding.request";
+
+export function sendWhatsAppConnectionProductBindingValidationError(
+  res: Response,
+  issues: readonly Readonly<{ field: string; code: string }>[],
+): Response {
+  return res.status(400).json({ message: "Invalid product binding request.", errors: issues });
+}
 
 export function sendWhatsappConnectionError(res: Response, error: unknown): Response {
+  if (error instanceof WhatsAppConnectionProductBindingHttpValidationError) {
+    return sendWhatsAppConnectionProductBindingValidationError(res, error.issues);
+  }
   if (error instanceof AuthRateLimitExceededError) {
     res.setHeader("Retry-After", String(error.retryAfterSeconds));
     return res.status(429).json({ message: "Too many requests. Please try again later." });
@@ -38,6 +51,8 @@ export function sendWhatsappConnectionError(res: Response, error: unknown): Resp
   if (error instanceof AuthorizationUnauthenticatedError) return res.status(401).json({ message: "Authentication required." });
   if (error instanceof AuthorizationForbiddenError || error instanceof AuthorizationInsufficientPermissionError) return res.status(403).json({ message: "Forbidden." });
   if (error instanceof AuthorizationTenantSelectionRequiredError) return res.status(409).json({ message: "Seller selection required." });
+  if (error instanceof WhatsAppConnectionNotFoundError) return res.status(404).json({ message: "WhatsApp connection not found." });
+  if (error instanceof ProductNotFoundError) return res.status(404).json({ message: "Product not found." });
   if (error instanceof WhatsAppConnectionValidationError) return res.status(400).json({ message: "Invalid request." });
   if (error instanceof ManualConnectionCredentialReplacementForbiddenError) {
     return res.status(409).json({

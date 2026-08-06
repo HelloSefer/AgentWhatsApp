@@ -179,6 +179,7 @@ export type CartReviewPreviewInput = {
   requiredFields: RequiredOrderField[];
   offerLookup: ProductOfferLookupResult;
   now: Date;
+  requireOptionActionScope?: boolean;
 };
 
 export type CartReviewPreviewResult = {

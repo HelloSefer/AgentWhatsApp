@@ -10,6 +10,7 @@ import type {
   ItemOptionActionHandlerInput,
 } from "./item-option-action.types";
 import { resolveConfiguredOptionCanonicalValue } from "../../../../conversation-engine/config/conversation-product-config.service";
+import { matchesItemCollectionOptionActionScope } from "../presentation/item-collection-presentation.service";
 
 function cloneProgression(progression: ItemCollectionProgressionResult): ItemCollectionProgressionResult {
   return {
@@ -95,14 +96,18 @@ export function handleItemOptionAction(
   }
   if (
     normalization.action.fieldKey !== input.action.fieldKey ||
-    normalization.action.canonicalValue !== input.action.canonicalValue
+    normalization.action.canonicalValue !== input.action.canonicalValue ||
+    (input.optionActionScope && !matchesItemCollectionOptionActionScope(
+      normalization.action,
+      input.optionActionScope,
+    ))
   ) {
     return result({
       handled: true,
       success: false,
       changed: false,
       action: normalization.action,
-      failureCode: "ACTION_NOT_VALID",
+      failureCode: input.optionActionScope ? "ACTION_SCOPE_MISMATCH" : "ACTION_NOT_VALID",
       warnings: [],
     });
   }

@@ -39,6 +39,7 @@ export type CartItemEditFailureCode =
   | "INVALID_ITEM_OPTION"
   | "ORDER_SCOPED_FIELD"
   | "INVALID_ITEM_OPTION_VALUE"
+  | "STALE_ITEM_OPTION_ACTION"
   | "TEXT_FIELD_NOT_OPEN"
   | "TEXT_FIELD_NOT_AWAITED"
   | "INVALID_ITEM_OPTION_TEXT"
@@ -60,7 +61,7 @@ export type CartItemEditNextStep =
   | "BLOCKED";
 
 export type CartItemEditAction =
-  | { type: "SELECT_OPTION"; rawId: string; fieldKey: string; canonicalValue: string }
+  | { type: "SELECT_OPTION"; rawId: string; fieldKey: string; canonicalValue: string; productId?: string; targetId?: string }
   | { type: "ENTER_TEXT"; rawId: string; fieldKey: string }
   | { type: "SAVE"; rawId: "cart_review_item_edit:save" }
   | { type: "CANCEL"; rawId: "cart_review_item_edit:cancel" };
@@ -89,6 +90,7 @@ export type CartItemEditPreviewInput = CartItemEditContext & {
   startItemId?: string;
   startFieldKey?: string;
   hasCartReviewConflict?: boolean;
+  requireOptionActionScope?: boolean;
 };
 
 export type CartItemEditPreviewResult = {

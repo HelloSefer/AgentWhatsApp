@@ -49,6 +49,15 @@ function toMinorUnits(value: unknown): number | undefined {
   return rounded;
 }
 
+function authoritativeMinor(value: unknown, legacyDisplay: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  }
+  // The compatibility adapter is deliberately retained only for isolated
+  // legacy fixtures. Connected Catalog projections always supply minor units.
+  return toMinorUnits(legacyDisplay);
+}
+
 function fromMinorUnits(value: number): number {
   return value / MONEY_SCALE;
 }
@@ -68,11 +77,16 @@ function freezeQuote(quote: {
   totalUnits: number;
   lines: CartPricingLine[];
   standardSubtotal: number;
+  normalSubtotalAmountMinor: number;
   appliedOfferId?: string;
   appliedOfferLabel?: string;
   offerTotal?: number;
+  offerTotalAmountMinor?: number;
   discountAmount: number;
+  discountAmountMinor: number;
   merchandiseTotal: number;
+  finalTotalAmountMinor: number;
+  currencyCode: string;
   generatedAt: string;
 }): CartPricingQuote {
   const lines = quote.lines.map((line) => Object.freeze({ ...line }));
@@ -122,7 +136,7 @@ function standardFailures(input: CartPricingInput): CartPricingFailure[] {
     failures.push(failure("PRODUCT_MISMATCH", "Every priced cart item must belong to the trusted product."));
   }
 
-  const unitPriceMinor = toMinorUnits(input.productContext.price);
+  const unitPriceMinor = authoritativeMinor(input.productContext.priceAmountMinor, input.productContext.price);
   if (unitPriceMinor === undefined || unitPriceMinor <= 0) {
     failures.push(failure("MISSING_TRUSTED_PRICE", "Trusted product price must be a positive finite money value."));
   }
@@ -149,7 +163,7 @@ export function calculateStandardCartPricing(input: CartPricingInput): StandardC
     return { ok: false, failures };
   }
 
-  const unitPriceMinor = toMinorUnits(input.productContext.price);
+  const unitPriceMinor = authoritativeMinor(input.productContext.priceAmountMinor, input.productContext.price);
   if (unitPriceMinor === undefined) {
     return { ok: false, failures: [failure("MISSING_TRUSTED_PRICE", "Trusted product price is unavailable.")] };
   }
@@ -175,6 +189,8 @@ export function calculateStandardCartPricing(input: CartPricingInput): StandardC
       quantity: item.quantity,
       unitPrice: fromMinorUnits(unitPriceMinor),
       standardLineTotal: fromMinorUnits(lineMinor),
+      unitPriceAmountMinor: unitPriceMinor,
+      lineSubtotalAmountMinor: lineMinor,
     });
   }
 
@@ -187,8 +203,12 @@ export function calculateStandardCartPricing(input: CartPricingInput): StandardC
       totalUnits,
       lines,
       standardSubtotal,
+      normalSubtotalAmountMinor: subtotalMinor,
       discountAmount: 0,
+      discountAmountMinor: 0,
       merchandiseTotal: standardSubtotal,
+      finalTotalAmountMinor: subtotalMinor,
+      currencyCode: normalizeCurrency(input.productContext.currency),
       generatedAt: clock.now.toISOString(),
     }),
   };
@@ -208,8 +228,8 @@ function evaluateOfferPricing(input: {
 
   const failures = [...eligibility.failures];
   const standardQuote = input.standardPricing.quote;
-  const offerMinor = toMinorUnits(input.offer.totalPrice);
-  const subtotalMinor = standardQuote ? toMinorUnits(standardQuote.standardSubtotal) : undefined;
+  const offerMinor = authoritativeMinor(input.offer.totalPriceAmountMinor, input.offer.totalPrice);
+  const subtotalMinor = standardQuote?.normalSubtotalAmountMinor;
 
   if (input.standardPricing.ok && (offerMinor === undefined || subtotalMinor === undefined)) {
     failures.push(failure("UNSAFE_MONEY_VALUE", "Offer pricing contains an unsafe money value.", input.offer.id));
@@ -232,11 +252,16 @@ function evaluateOfferPricing(input: {
     totalUnits: standardQuote.totalUnits,
     lines: standardQuote.lines.map((line) => ({ ...line })),
     standardSubtotal: standardQuote.standardSubtotal,
+    normalSubtotalAmountMinor: standardQuote.normalSubtotalAmountMinor,
     appliedOfferId: input.offer.id,
     appliedOfferLabel: input.offer.label,
     offerTotal: fromMinorUnits(offerMinor),
+    offerTotalAmountMinor: offerMinor,
     discountAmount: fromMinorUnits(discountMinor),
+    discountAmountMinor: discountMinor,
     merchandiseTotal: fromMinorUnits(offerMinor),
+    finalTotalAmountMinor: offerMinor,
+    currencyCode: standardQuote.currencyCode,
     generatedAt: standardQuote.generatedAt,
   });
 

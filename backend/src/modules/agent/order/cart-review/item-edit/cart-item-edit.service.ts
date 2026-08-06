@@ -204,6 +204,8 @@ export function normalizeCartItemEditAction(rawId: unknown): CartItemEditActionN
             rawId: option.action.rawId,
             fieldKey: option.action.fieldKey,
             canonicalValue: option.action.canonicalValue,
+            ...(option.action.productId ? { productId: option.action.productId } : {}),
+            ...(option.action.targetId ? { targetId: option.action.targetId } : {}),
           },
         }
       : { recognized: true, valid: false, failureCode: "INVALID_ITEM_OPTION_ACTION" };

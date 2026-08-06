@@ -45,6 +45,7 @@ export type WhatsAppConnectionFinalizationProgressInput = Readonly<{
 export interface WhatsAppConnectionRepository {
   createCandidate(tenant: TenantContext, input?: CreateWhatsAppConnectionCandidateInput, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection>;
   findByConnectionId(tenant: TenantContext, connectionId: string, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
+  setBoundProductId?(tenant: TenantContext, connectionId: string, productId: string | null, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;
   findAllForSeller(tenant: TenantContext, options?: WhatsAppConnectionRepositoryOptions): Promise<readonly WhatsAppConnection[]>;
   findCurrentForSeller(tenant: TenantContext, options?: WhatsAppConnectionRepositoryOptions): Promise<readonly WhatsAppConnection[]>;
   findActiveBySeller(tenant: TenantContext, options?: WhatsAppConnectionRepositoryOptions): Promise<WhatsAppConnection | null>;

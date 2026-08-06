@@ -6,6 +6,7 @@ import { generateAgentResult } from "../../agent/agent.service";
 import type {
   AgentOrderStateSummary,
   AgentResult,
+  ConnectedConversationPath,
   ChoiceListAction,
 } from "../../agent/agent-action.types";
 import { AGENT_INTERNAL_RECEIPT_ARTIFACT } from "../../agent/agent-action.types";
@@ -159,6 +160,7 @@ type ProcessCloudWebhookResult = {
   handled: boolean;
   identity?: AgentIdentity;
   agentSource?: AgentResult["source"];
+  conversationPath?: ConnectedConversationPath;
   agentReplyPreview?: string;
   actionsCount: number;
   sendAttempted: boolean;
@@ -3127,6 +3129,8 @@ function queuedDispatchResult(mode: CloudReplyDispatchResult["mode"]): CloudRepl
 
 export type CloudAgentDispatchFlowResult = {
   dispatchResult: CloudReplyDispatchResult;
+  firstEntryIntroDispatchResult?: CloudReplyDispatchResult;
+  firstEntrySplit: boolean;
   reviewDispatchResult?: CloudReplyDispatchResult;
   reviewFailureFallbackResult?: CloudReplyDispatchResult;
   orderConfirmationSplit: boolean;
@@ -3149,12 +3153,24 @@ export async function dispatchAgentResultThroughCloud(input: {
   interactiveLiveSendAllowedOverride?: boolean;
   simulateNoProviderCall?: boolean;
 }): Promise<CloudAgentDispatchFlowResult> {
+  const firstEntryMessages = getFirstEntryPresentationMessages(input.result);
   const orderConfirmationMessages = getOrderConfirmationMessages(input.result);
   if (input.outboundGroupDispatcher) {
     const sellerId = input.sellerId || "";
     const conversationKey = input.conversationKey || input.customerId;
     const sourceMessageId = input.sourceMessageId || input.userMessage;
-    const commands = orderConfirmationMessages
+    const commands = firstEntryMessages
+      ? [
+          buildAgentReplyOutboundCommand({
+            ...input,
+            result: buildFirstEntryTextOnlyResult(
+              input.result,
+              firstEntryMessages[0]!.text,
+            ),
+          }),
+          buildAgentReplyOutboundCommand(input),
+        ]
+      : orderConfirmationMessages
       ? [
           buildAgentReplyOutboundCommand({
             ...input,
@@ -3176,30 +3192,65 @@ export async function dispatchAgentResultThroughCloud(input: {
         to: input.to,
         sourceType: "inbound_message",
         sourceId: sourceMessageId,
-        responseGroupRole: orderConfirmationMessages
-          ? "agent_reply.order_confirmation"
-          : "agent_reply.main",
+        responseGroupRole: firstEntryMessages
+          ? "agent_reply.first_entry"
+          : orderConfirmationMessages
+            ? "agent_reply.order_confirmation"
+            : "agent_reply.main",
         commands,
       }),
     );
+    const dispatchResult = queuedDispatchResult(
+      input.result.meta?.interactiveSendDecision?.mode === "interactive_preview"
+        ? "interactive"
+        : "text",
+    );
     return {
-      dispatchResult: queuedDispatchResult(
-        input.result.meta?.interactiveSendDecision?.mode === "interactive_preview"
-          ? "interactive"
-          : "text",
-      ),
-      ...(orderConfirmationMessages
+      dispatchResult,
+      ...(firstEntryMessages
+        ? {
+            firstEntryIntroDispatchResult: queuedDispatchResult("text"),
+            firstEntrySplit: true,
+            orderConfirmationSplit: false,
+          }
+        : orderConfirmationMessages
         ? {
             reviewDispatchResult: queuedDispatchResult("text"),
+            firstEntrySplit: false,
             orderConfirmationSplit: true,
           }
-        : { orderConfirmationSplit: false }),
+        : { firstEntrySplit: false, orderConfirmationSplit: false }),
+    };
+  }
+
+  if (firstEntryMessages) {
+    const introDispatchResult = await sendAgentCloudResult({
+      ...input,
+      result: buildFirstEntryTextOnlyResult(
+        input.result,
+        firstEntryMessages[0]!.text,
+      ),
+    });
+    if (!introDispatchResult.ok) {
+      return {
+        dispatchResult: introDispatchResult,
+        firstEntryIntroDispatchResult: introDispatchResult,
+        firstEntrySplit: true,
+        orderConfirmationSplit: false,
+      };
+    }
+    return {
+      dispatchResult: await sendAgentCloudResult(input),
+      firstEntryIntroDispatchResult: introDispatchResult,
+      firstEntrySplit: true,
+      orderConfirmationSplit: false,
     };
   }
 
   if (!orderConfirmationMessages) {
     return {
       dispatchResult: await sendAgentCloudResult(input),
+      firstEntrySplit: false,
       orderConfirmationSplit: false,
     };
   }
@@ -3222,6 +3273,7 @@ export async function dispatchAgentResultThroughCloud(input: {
       dispatchResult: reviewFailureFallbackResult,
       reviewDispatchResult,
       reviewFailureFallbackResult,
+      firstEntrySplit: false,
       orderConfirmationSplit: true,
     };
   }
@@ -3232,6 +3284,7 @@ export async function dispatchAgentResultThroughCloud(input: {
       result: buildOrderConfirmationCtaResult(input.result),
     }),
     reviewDispatchResult,
+    firstEntrySplit: false,
     orderConfirmationSplit: true,
   };
 }
@@ -3245,14 +3298,15 @@ function isInteractiveLiveGuardBlocked(result: AgentResult): boolean {
   );
 }
 
-function getFirstEntryLiveSmokeMessages(result: AgentResult):
+function getFirstEntryPresentationMessages(result: AgentResult):
   | Array<{
       kind: "text" | "interactive_buttons";
       text: string;
       buttons?: Array<{ id: string; label: string }>;
     }>
   | undefined {
-  const firstEntry = result.meta?.firstEntryLiveSmoke;
+  const firstEntry =
+    result.meta?.firstEntryPresentation || result.meta?.firstEntryLiveSmoke;
 
   if (
     firstEntry?.presentationMode !== "split_info_and_cta" ||
@@ -3454,220 +3508,10 @@ export async function processNormalizedCloudMessage(
       perMessageResult.normalizedActionId = transportActionId;
       const customerOwnedOrderRuntimeActivation =
         connectionRuntime?.tokenSource === "encrypted_connection_token";
-      // First-entry is handled by the normal Agent pipeline below.  The
-      // retained diagnostic branch is permanently disarmed for customer traffic.
-      const firstEntryLiveSmoke = { handled: false, blockedReason: "diagnostic_disabled", readiness: { liveEnabled: false } } as any;
-      const liveSmokeModeArmed = false;
-      const liveSmokeDispatchAllowed =
-        liveSmokeModeArmed &&
-        (env.whatsappInteractiveEnabled === true || options.forceDryRun === true) &&
-        firstEntryLiveSmoke.readiness.recipientAllowed === true &&
-        firstEntryLiveSmoke.readiness.sellerIdConfigured === true &&
-        firstEntryLiveSmoke.readiness.expectedSellerId === identity.sellerId;
-      const bypassFirstEntryLiveSmoke =
-        runtimeActionId !== undefined && runtimeActionId !== "first_entry:order_now";
+      // Customer traffic reaches first entry only through the Agent below.
+      // Smoke presentation is callable exclusively by explicit test/preview code.
 
-      if (
-        liveSmokeModeArmed &&
-        !liveSmokeDispatchAllowed &&
-        !customerOwnedOrderRuntimeActivation
-      ) {
-        logJson({
-          event: "whatsapp.cloud.live_smoke.scope_blocked",
-          customerPhone: maskPhone(identity.customerPhone),
-          conversationKey: maskConversationKey(identity.conversationKey),
-          recipientAllowed: firstEntryLiveSmoke.readiness.recipientAllowed,
-          sellerIdConfigured: firstEntryLiveSmoke.readiness.sellerIdConfigured,
-        });
-        perMessageResult.handled = false;
-        perMessageResult.agentReplyPreview = "";
-        perMessageResult.actionsCount = 0;
-        perMessageResult.sendAttempted = false;
-        perMessageResult.sendSuccess = false;
-        return perMessageResult;
-      }
-
-      if (!firstEntryLiveSmoke.handled || bypassFirstEntryLiveSmoke) {
-        const routingReason = firstEntryLiveSmoke.handled
-          ? "guarded_runtime_action_routes_to_agent"
-          : firstEntryLiveSmoke.blockedReason;
-        const routedToAgent = routingReason.includes("_routes_to_");
-
-        logJson({
-          event: routedToAgent
-            ? "first_entry.live_smoke.routed_to_agent"
-            : "first_entry.live_smoke.blocked",
-          reason: routingReason,
-          customerPhone: maskPhone(identity.customerPhone),
-          conversationKey: maskConversationKey(identity.conversationKey),
-          ready: firstEntryLiveSmoke.readiness.ready,
-          firstEntryLiveSmokeEnabled:
-            firstEntryLiveSmoke.readiness.firstEntryLiveSmokeEnabled,
-          recipientAllowed: firstEntryLiveSmoke.readiness.recipientAllowed,
-          cloudProvider: firstEntryLiveSmoke.readiness.cloudProvider,
-          cloudGuardEnabled: firstEntryLiveSmoke.readiness.cloudGuardEnabled,
-          cloudDryRunDisabled:
-            firstEntryLiveSmoke.readiness.cloudDryRunDisabled,
-          runtimeActionId,
-        });
-      }
-
-      if (firstEntryLiveSmoke.handled && !bypassFirstEntryLiveSmoke) {
-        const startedAt = Date.now();
-        const splitMessages = getFirstEntryLiveSmokeMessages(
-          firstEntryLiveSmoke.result,
-        );
-        const infoMessage = splitMessages?.find(
-          (item) => item.kind === "text",
-        );
-        const ctaMessage = splitMessages?.find(
-          (item) => item.kind === "interactive_buttons",
-        );
-        await prepareReply(
-          firstEntryLiveSmoke.result.reply,
-          Date.now() - startedAt,
-          isInteractiveLiveGuardBlocked(firstEntryLiveSmoke.result),
-        );
-        const firstSendResult = infoMessage
-          ? await sendAgentCloudResult({
-              to: message.waId,
-              phoneNumberId: connectionPhoneNumberId,
-              accessToken: connectionAccessToken,
-              allowGlobalCredentialFallback,
-              customerId,
-              userMessage: message.text,
-              result: buildFirstEntryTextOnlyResult(
-                firstEntryLiveSmoke.result,
-                infoMessage.text,
-              ),
-              forceDryRun: options.forceDryRun,
-            })
-          : undefined;
-
-        if (
-          firstSendResult?.ok &&
-          firstEntryLiveSmoke.reason === "first_entry_live_smoke"
-        ) {
-          await Promise.resolve();
-        }
-
-        let sendResult: CloudReplyDispatchResult;
-        const shouldSendCta = Boolean(
-          ctaMessage && (!infoMessage || firstSendResult?.ok),
-        );
-
-        if (ctaMessage && shouldSendCta) {
-          sendResult = await sendAgentCloudResult({
-            to: message.waId,
-            phoneNumberId: connectionPhoneNumberId,
-            accessToken: connectionAccessToken,
-            allowGlobalCredentialFallback,
-            customerId,
-            userMessage: message.text,
-            result: {
-              ...firstEntryLiveSmoke.result,
-              reply: ctaMessage.text,
-            },
-            forceDryRun: options.forceDryRun,
-          });
-        } else if (firstSendResult) {
-          sendResult = firstSendResult;
-        } else {
-          sendResult = await sendAgentCloudResult({
-            to: message.waId,
-            phoneNumberId: connectionPhoneNumberId,
-            accessToken: connectionAccessToken,
-            allowGlobalCredentialFallback,
-            customerId,
-            userMessage: message.text,
-            result: firstEntryLiveSmoke.result,
-            forceDryRun: options.forceDryRun,
-          });
-        }
-
-        const durationMs = Date.now() - startedAt;
-
-        if (
-          !infoMessage &&
-          sendResult.ok &&
-          firstEntryLiveSmoke.reason === "first_entry_live_smoke"
-        ) {
-          await Promise.resolve();
-        }
-
-        logJson({
-          event: "first_entry.live_smoke.result",
-          reason: firstEntryLiveSmoke.reason,
-          presentationMode:
-            firstEntryLiveSmoke.result.meta?.firstEntryLiveSmoke
-              ?.presentationMode,
-          customerPhone: maskPhone(identity.customerPhone),
-          conversationKey: maskConversationKey(identity.conversationKey),
-          messagePreview: previewText(message.text),
-          replyPreview: previewText(firstEntryLiveSmoke.result.reply),
-          firstMessageOk: firstSendResult?.ok,
-          ctaMessageOk: sendResult.ok,
-          dispatchOk: Boolean((firstSendResult?.ok ?? true) && sendResult.ok),
-          dryRun: firstSendResult?.dryRun ?? sendResult.dryRun,
-          durationMs,
-          firstEntryShownMarked: Boolean(
-            (firstSendResult?.ok || (!infoMessage && sendResult.ok)) &&
-              firstEntryLiveSmoke.reason === "first_entry_live_smoke",
-          ),
-        });
-
-        if (infoMessage && firstSendResult?.ok && !sendResult.ok) {
-          logJson({
-            event: "first_entry.live_smoke.cta_send_failed_after_text",
-            customerPhone: maskPhone(identity.customerPhone),
-            conversationKey: maskConversationKey(identity.conversationKey),
-            reason: sendResult.reason,
-            error: sendResult.error,
-            firstEntryShownMarked: true,
-          });
-        }
-
-
-        if (infoMessage && firstSendResult) {
-          perMessageResult.outboundMessages.push({
-            kind: firstSendResult.mode === "interactive" ? "interactive" : "text",
-            text: infoMessage.text,
-            actionIds: [],
-            dryRun: firstSendResult.dryRun,
-            success: firstSendResult.ok,
-          });
-        }
-        if (ctaMessage && shouldSendCta) {
-          perMessageResult.outboundMessages.push({
-            kind: sendResult.mode === "interactive" ? "interactive" : "text",
-            text: ctaMessage.text,
-            actionIds: ctaMessage.buttons?.map((button) => button.id) || [],
-            dryRun: sendResult.dryRun,
-            success: sendResult.ok,
-          });
-        } else if (!infoMessage) {
-          perMessageResult.outboundMessages.push({
-            kind: sendResult.mode === "interactive" ? "interactive" : "text",
-            text: firstEntryLiveSmoke.result.reply,
-            actionIds: getReplyActionIds(firstEntryLiveSmoke.result),
-            dryRun: sendResult.dryRun,
-            success: sendResult.ok,
-          });
-        }
-
-        perMessageResult.handled = true;
-        perMessageResult.agentReplyPreview = previewText(
-          firstEntryLiveSmoke.result.reply,
-        );
-        perMessageResult.actionsCount = firstEntryLiveSmoke.result.actions.length;
-        perMessageResult.sendAttempted = true;
-        perMessageResult.sendSuccess = Boolean(
-          (firstSendResult?.ok ?? true) && sendResult.ok,
-        );
-        return perMessageResult;
-      }
-
-      if (message.isFlowSubmission) {
+      if (!customerOwnedOrderRuntimeActivation && message.isFlowSubmission) {
         const fieldsPresent = message.flowOrder
           ? Object.entries(message.flowOrder)
               .filter(([, value]) => hasValue(value))
@@ -3755,7 +3599,7 @@ export async function processNormalizedCloudMessage(
         return perMessageResult;
       }
 
-      if (isFlowTriggerText(message.text)) {
+      if (!customerOwnedOrderRuntimeActivation && isFlowTriggerText(message.text)) {
         logJson({
           event: "whatsapp.cloud.flow.triggered",
           waId: maskPhone(message.waId),
@@ -3791,6 +3635,7 @@ export async function processNormalizedCloudMessage(
       }
 
       if (
+        !customerOwnedOrderRuntimeActivation &&
         env.whatsappCloudOrderFlowOnOrderStart &&
         !isFirstEntryOrderClickText(message.text) &&
         fastAnalyzeCustomerMessage(message.text)?.intent === "order_intent"
@@ -3829,20 +3674,15 @@ export async function processNormalizedCloudMessage(
         return perMessageResult;
       }
 
-      // The multi-item runtime remains globally default-off. It is activated
-      // here only after the existing First Entry smoke guard has verified the
-      // configured seller and the exact allowlisted test recipient.
-      const guardedRuntimeLiveSmokeActivation =
-        customerOwnedOrderRuntimeActivation ||
-        (
-          liveSmokeDispatchAllowed &&
-          firstEntryLiveSmoke.readiness.ready === true
-        );
+      // The current runtime is enabled only for an exact encrypted
+      // customer-owned connection. Test helpers exercise their own entry point.
+      const guardedRuntimeLiveSmokeActivation = customerOwnedOrderRuntimeActivation;
       const startedAt = Date.now();
       const result = await generateAgentResult(message.text, undefined, {
         customerPhone: identity.customerPhone,
         conversationKey: identity.conversationKey,
         sellerId: identity.sellerId,
+        connectionId: connectionRuntime?.connectionId,
         phoneNumberId: identity.phoneNumberId,
         useMemory: true,
         orderRuntimeEnabled: guardedRuntimeLiveSmokeActivation,
@@ -3868,6 +3708,7 @@ export async function processNormalizedCloudMessage(
         messagePreview: previewText(message.text),
         replyPreview: previewText(result.reply),
         source: result.source,
+        conversationPath: result.meta?.conversationPath,
         runtimeActionId,
         durationMs,
         actionsCount: result.actions.length,
@@ -3890,9 +3731,33 @@ export async function processNormalizedCloudMessage(
         forceDryRun: options.forceDryRun,
       });
       const sendResult = dispatchFlow.dispatchResult;
+      const firstEntryMessages = getFirstEntryPresentationMessages(result);
       const splitMessages = getOrderConfirmationMessages(result);
 
-      if (dispatchFlow.orderConfirmationSplit && splitMessages) {
+      if (dispatchFlow.firstEntrySplit && firstEntryMessages) {
+        const intro = firstEntryMessages[0];
+        const cta = firstEntryMessages[1];
+        if (intro && dispatchFlow.firstEntryIntroDispatchResult) {
+          perMessageResult.outboundMessages.push({
+            kind: "text",
+            text: intro.text,
+            actionIds: [],
+            dryRun: dispatchFlow.firstEntryIntroDispatchResult.dryRun,
+            success: dispatchFlow.firstEntryIntroDispatchResult.ok,
+          });
+        }
+        if (cta && dispatchFlow.firstEntryIntroDispatchResult?.ok) {
+          perMessageResult.outboundMessages.push({
+            kind: sendResult.mode === "interactive" ? "interactive" : "text",
+            text: cta.text,
+            actionIds: cta.kind === "interactive_buttons"
+              ? (cta.buttons || []).map((button) => button.id)
+              : [],
+            dryRun: sendResult.dryRun,
+            success: sendResult.ok,
+          });
+        }
+      } else if (dispatchFlow.orderConfirmationSplit && splitMessages) {
         if (dispatchFlow.reviewDispatchResult) {
           perMessageResult.outboundMessages.push({
             kind: "text",
@@ -3941,9 +3806,20 @@ export async function processNormalizedCloudMessage(
             dispatchFlow.reviewFailureFallbackResult?.ok === true,
         });
       }
+      if (dispatchFlow.firstEntrySplit) {
+        logJson({
+          event: "first_entry.presentation.sent",
+          waId: maskPhone(message.waId),
+          presentationMode: "split_info_and_cta",
+          introSent: dispatchFlow.firstEntryIntroDispatchResult?.ok === true,
+          ctaSent: sendResult.ok,
+          ctaMode: sendResult.mode,
+        });
+      }
 
       perMessageResult.handled = true;
       perMessageResult.agentSource = result.source;
+      perMessageResult.conversationPath = result.meta?.conversationPath;
       perMessageResult.agentReplyPreview = previewText(result.reply);
       perMessageResult.actionsCount = result.actions.length;
       perMessageResult.sendAttempted = true;
@@ -4029,7 +3905,9 @@ export async function processNormalizedCloudMessage(
         }
       }
       perMessageResult.sendSuccess = Boolean(
-        (dispatchFlow.reviewDispatchResult?.ok ?? true) && sendResult.ok,
+        (dispatchFlow.firstEntryIntroDispatchResult?.ok ?? true) &&
+          (dispatchFlow.reviewDispatchResult?.ok ?? true) &&
+          sendResult.ok,
       ) && runtimeReceiptSuccess;
 
       if (
@@ -4204,6 +4082,7 @@ export async function processCloudWebhookBody(
     if (messageResult.sendSuccess) processResult.sendSuccess = true;
     if (messageResult.agentReplyPreview !== undefined) processResult.agentReplyPreview = messageResult.agentReplyPreview;
     if (messageResult.agentSource !== undefined) processResult.agentSource = messageResult.agentSource;
+    if (messageResult.conversationPath !== undefined) processResult.conversationPath = messageResult.conversationPath;
     if (messageResult.inputSourceType !== undefined) processResult.inputSourceType = messageResult.inputSourceType;
     if (messageResult.normalizedActionId !== undefined) processResult.normalizedActionId = messageResult.normalizedActionId;
   }

@@ -12,6 +12,13 @@ export class ProductAlreadyExistsError extends Error {
   }
 }
 
+export class ProductAliasAlreadyExistsError extends Error {
+  constructor() {
+    super("A product alias already exists for the seller.");
+    this.name = "ProductAliasAlreadyExistsError";
+  }
+}
+
 export class CatalogSellerNotFoundError extends Error {
   constructor() {
     super("The catalog seller was not found.");

@@ -218,11 +218,16 @@ async function normalizeSessionCartState(session: ConversationSession): Promise<
           confirmed: false,
         }),
   };
+  // The session key intentionally remains product-agnostic for conversation
+  // continuity. Its stored product is compatibility data only, so refresh it
+  // from the current persisted connection binding on every loaded/saved turn.
+  const productBindingChanged = session.productId !== productContext.productId;
+  session.productId = productContext.productId;
 
   return {
     migrated: compatibility.migrated,
     integrityInvalidPaths: compatibility.integrity.invalidPaths,
-    changed: compatibility.changed,
+    changed: compatibility.changed || productBindingChanged,
   };
 }
 

@@ -62,6 +62,25 @@ export type FirstEntryRenderResult = {
   warnings?: string[];
 };
 
+export type FirstEntryPresentationMessage =
+  | {
+      kind: "text";
+      text: string;
+    }
+  | {
+      kind: "interactive_buttons";
+      text: string;
+      buttons: Array<{
+        id: FirstEntryCtaId;
+        label: string;
+      }>;
+    };
+
+export type FirstEntryPresentation = {
+  presentationMode: "single_message" | "split_info_and_cta";
+  messages: FirstEntryPresentationMessage[];
+};
+
 type RenderInput = {
   sellerConfig: SellerConfig;
   productContext: ProductContext;
@@ -339,6 +358,63 @@ function safePushLine(lines: string[], line: string | undefined): void {
   if (cleanLine && !containsUnsafeClaim(cleanLine)) {
     lines.push(cleanLine);
   }
+}
+
+function buildFirstEntryInfoText(result: FirstEntryRenderResult): string {
+  const ctaLine = renderFirstEntryCtaLine(
+    result.ctaMode,
+    result.policy.greetingStyle,
+  );
+  const lines = [...result.lines];
+
+  while (lines.length && !lines[lines.length - 1]?.trim()) {
+    lines.pop();
+  }
+
+  if (ctaLine && lines[lines.length - 1]?.trim() === ctaLine) {
+    lines.pop();
+  }
+
+  while (lines.length && !lines[lines.length - 1]?.trim()) {
+    lines.pop();
+  }
+
+  return lines
+    .map((line) => (line.trim() ? line.trim().replace(/\.$/, "") : line))
+    .join("\n")
+    .trim();
+}
+
+/**
+ * Keeps the accepted commercial introduction separate from its interactive CTA
+ * while retaining the renderer as the sole source of wording and buttons.
+ */
+export function buildFirstEntryPresentation(
+  result: FirstEntryRenderResult,
+): FirstEntryPresentation {
+  const buttons = result.ctas.items
+    .filter((item) => item.enabled)
+    .map((item) => ({ id: item.id, label: item.label }));
+  const infoText = buildFirstEntryInfoText(result);
+  const ctaText = renderFirstEntryCtaLine(
+    result.ctaMode,
+    result.policy.greetingStyle,
+  );
+
+  if (!buttons.length || !ctaText) {
+    return {
+      presentationMode: "single_message",
+      messages: [{ kind: "text", text: result.text }],
+    };
+  }
+
+  return {
+    presentationMode: "split_info_and_cta",
+    messages: [
+      { kind: "text", text: infoText || result.text },
+      { kind: "interactive_buttons", text: ctaText, buttons },
+    ],
+  };
 }
 
 export function renderFirstEntryMessage(

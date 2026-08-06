@@ -7,7 +7,7 @@ export class CatalogService {
   constructor(private readonly repository: CatalogRepository) {}
 
   async createProduct(tenant: TenantContext, input: CatalogProductInput): Promise<CatalogProduct> {
-    return this.repository.createProduct(tenant, validateCatalogProductInput(input));
+    return this.repository.createProduct(tenant, validateCatalogProductInput(input, tenant.sellerId));
   }
 
   async getProduct(tenant: TenantContext, productId: unknown): Promise<CatalogProduct | null> {
@@ -22,7 +22,7 @@ export class CatalogService {
   }
 
   async replaceProduct(tenant: TenantContext, input: CatalogProductInput): Promise<CatalogProduct> {
-    return this.repository.replaceProduct(tenant, validateCatalogProductInput(input));
+    return this.repository.replaceProduct(tenant, validateCatalogProductInput(input, tenant.sellerId));
   }
 
   async setProductAvailability(tenant: TenantContext, productId: unknown, availability: unknown): Promise<CatalogProduct> {
